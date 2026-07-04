@@ -1,0 +1,30 @@
+[package]
+name = "dev-taskbar-tools"
+version = "1.0.0"
+description = "A Windows efficiency tool with taskbar system monitor and key mapping"
+authors = ["you"]
+edition = "2021"
+
+[lib]
+name = "dev_taskbar_tools_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+is_elevated = "0.1"
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Gdi"
+] }
+sysinfo = "0.30"
+rdev = { version = "0.5", features = ["unstable_grab"] }
+tokio = { version = "1", features = ["full"] }
+lazy_static = "1.4"

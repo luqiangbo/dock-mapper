@@ -1,0 +1,195 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* ─── Content-driven width — no fixed limits ─────────────────────────── */
+html,
+body,
+#root {
+    width: max-content;
+    height: 100%;
+    overflow: hidden;
+    background: transparent;
+    white-space: nowrap; /* critical: never wrap */
+}
+
+/* ─── Widget container: flex + vertical center ────────────────────────── */
+.widget-container {
+    display: flex;
+    align-items: center;
+    width: max-content;
+    height: 100%;
+    padding: 0 6px;
+    gap: 8px;
+    user-select: none;
+    -webkit-app-region: no-drag;
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #e0e0e0;
+    font-size: 11px;
+}
+
+/* ─── Network speed group ─────────────────────────────────────────────── */
+.net-speed {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    line-height: 1.2;
+}
+
+.net-speed .speed-row {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 10px;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+/* Number portion — stable width to prevent digit-jitter */
+.net-speed .speed-value {
+    font-family:
+        "Cascadia Code", "Fira Code", "JetBrains Mono", "Consolas",
+        "Courier New", monospace;
+    min-width: 45px;
+    text-align: right;
+    white-space: nowrap;
+}
+
+/* Unit portion (B/s, K/s, M/s) — stable width for the suffix */
+.speed-unit {
+    font-family:
+        "Cascadia Code", "Fira Code", "JetBrains Mono", "Consolas",
+        "Courier New", monospace;
+    min-width: 32px;
+    white-space: nowrap;
+}
+
+.net-speed .up-arrow {
+    color: #4caf50;
+}
+
+.net-speed .down-arrow {
+    color: #ff9800;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Scheme 1 — Capsule Indicator
+   ═══════════════════════════════════════════════════════════════════════════ */
+.capsule-indicator {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px 2px 6px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 20px;
+    height: 22px;
+}
+
+.led-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background-color: var(--led-color, #00cc66);
+    flex-shrink: 0;
+    box-shadow: 0 0 4px var(--led-color, #00cc66);
+    transition:
+        background-color 0.3s ease,
+        box-shadow 0.3s ease;
+}
+
+.led-breathe {
+    animation: breathe 2s ease-in-out infinite;
+}
+
+.led-flash {
+    animation: flash 0.8s ease-in-out infinite;
+}
+
+@keyframes breathe {
+    0%,
+    100% {
+        opacity: 1;
+        box-shadow: 0 0 3px var(--led-color);
+    }
+    50% {
+        opacity: 0.45;
+        box-shadow: 0 0 10px var(--led-color);
+    }
+}
+
+@keyframes flash {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.15;
+    }
+}
+
+.capsule-label {
+    font-family:
+        "Cascadia Code", "Fira Code", "JetBrains Mono", "Consolas",
+        "Courier New", monospace;
+    font-size: 11px;
+    line-height: 1;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Scheme 2 — Ring & Core
+   ═══════════════════════════════════════════════════════════════════════════ */
+.ring-indicator {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+}
+
+.ring-core {
+    position: absolute;
+    font-family:
+        "Cascadia Code", "Fira Code", "JetBrains Mono", "Consolas",
+        "Courier New", monospace;
+    font-size: 10px;
+    line-height: 1;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Scheme 3 — Dashboard Gauge
+   ═══════════════════════════════════════════════════════════════════════════ */
+.gauge-indicator {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.gauge-blocks {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 12px;
+}
+
+.gauge-block {
+    display: block;
+    width: 3px;
+    height: 12px;
+    border-radius: 1px;
+    background-color: rgba(255, 255, 255, 0.12);
+    transition: background-color 0.3s ease;
+}
+
+.gauge-label {
+    font-family:
+        "Cascadia Code", "Fira Code", "JetBrains Mono", "Consolas",
+        "Courier New", monospace;
+    font-size: 10px;
+    line-height: 1;
+}
