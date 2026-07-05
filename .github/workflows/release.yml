@@ -44,7 +44,7 @@ jobs:
           key: ${{ matrix.platform }}
 
       - name: Build & release
-        uses: tauri-apps/tauri-action@v2
+        uses: tauri-apps/tauri-action@v1
         id: tauri_action
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
