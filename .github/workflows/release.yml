@@ -29,7 +29,6 @@ jobs:
         with:
           version: latest
 
-      # 💡 优化 1：移除了 --frozen-lockfile，防止你在本地重构 package.json 导致 lockfile 不匹配而锁死编译
       - name: Install frontend dependencies
         run: pnpm install
 
@@ -45,7 +44,7 @@ jobs:
           key: ${{ matrix.platform }}
 
       - name: Build & release
-        uses: tauri-apps/tauri-action@v2.0.5
+        uses: tauri-apps/tauri-action@v2
         id: tauri_action
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -54,13 +53,11 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "DockMapper ${{ github.ref_name }}"
-          # 💡 优化 2：把 releaseDraft 从 true 改为 false（这样 Actions 跑完会自动发布，方便 Updater 检测）
           releaseDraft: false
           prerelease: false
-          # 💡 优化 3：由于要在微软商店上架且实现免费自动更新，必须同时输出安装包与自动更新 JSON 文件
-          args: --bundles msi,nsis,msix
+          args: --bundles msi,nsis
           releaseBody: |
-            Please visit the Microsoft Store to install DockMapper.
+            Please visit the [Microsoft Store](https://apps.microsoft.com/detail/DockMapper.DockMapper) to install DockMapper.
 
             Alternatively, download the installer below for manual installation.
 
