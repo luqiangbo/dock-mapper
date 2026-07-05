@@ -43,7 +43,7 @@ jobs:
           workspaces: src-tauri
           key: ${{ matrix.platform }}
 
-      - name: Build & release
+      - name: Build installer (MSI + NSIS)
         uses: tauri-apps/tauri-action@v1
         id: tauri_action
         env:
@@ -57,9 +57,37 @@ jobs:
           prerelease: false
           args: --bundles msi,nsis
           releaseBody: |
-            Please visit the [Microsoft Store](https://apps.microsoft.com/detail/DockMapper.DockMapper) to install DockMapper.
+            ## Downloads
 
-            Alternatively, download the installer below for manual installation.
+            - **MSIX** — 用于 Microsoft Store 提交
+            - **MSI / NSIS** — 手动安装
 
             ## What's Changed
-            See the full changelog at the [commits](https://github.com/luqiangbo/dev-taskbar-tools/commits/${{ github.ref_name }}).
+            完整的变更日志请查看 [commits](https://github.com/luqiangbo/dev-taskbar-tools/commits/${{ github.ref_name }}).
+
+      - name: Install make-msix
+        run: cargo install make-msix
+
+      - name: Generate MSIX package
+        run: |
+          cd src-tauri
+          make-msix --input target/release/DockMapper.exe
+          echo "Generated MSIX files:"
+          ls -la *.msix *.msixupload 2>/dev/null || echo "(no msixupload generated)"
+
+      - name: Upload MSIX to release
+        run: |
+          gh release upload "${{ github.ref_name }}" src-tauri/*.msix src-tauri/*.msixupload --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload build artifacts (for Store submission)
+        uses: actions/upload-artifact@v4
+        with:
+          name: DockMapper-${{ github.ref_name }}
+          path: |
+            src-tauri/*.msix
+            src-tauri/*.msixupload
+            src-tauri/target/release/*.msi
+            src-tauri/target/release/*.exe
+          compression-level: 0

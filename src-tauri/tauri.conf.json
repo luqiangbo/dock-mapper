@@ -24,11 +24,6 @@
       },
       "nsis": {
         "languages": ["English"]
-      },
-      "msix": {
-        "active": true,
-        "packageName": "DockMapper.DockMapper",
-        "publisher": "CN=A772915D-54AC-49E4-89E3-C9FBC8F06B3E"
       }
     }
   },
