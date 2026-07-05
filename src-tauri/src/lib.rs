@@ -65,18 +65,15 @@ fn get_widget_config() -> WidgetConfig {
 }
 
 /// Tauri command: update widget config in real-time.
-/// The frontend calls this immediately on every change — no "save" button.
 #[tauri::command]
 fn update_widget_config(app: tauri::AppHandle, config: WidgetConfig) {
     *WIDGET_CONFIG.lock().unwrap() = config.clone();
-    // Emit the scheme number to the widget so it re-renders instantly
     let _ = app.emit("scheme-changed", config.memory_scheme);
     println!("[config] Updated — scheme={}", config.memory_scheme);
 }
 
 /// Tauri command: called by the widget's ResizeObserver whenever its
-/// content width changes.  The backend resizes the window to match
-/// exactly and re-anchors the X position.
+/// content width changes.
 #[tauri::command]
 fn sync_widget_dynamic_width(app: tauri::AppHandle, width: f64) {
     taskbar::sync_dynamic_width(&app, width);
@@ -86,6 +83,8 @@ fn sync_widget_dynamic_width(app: tauri::AppHandle, width: f64) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let widget_window = app
                 .get_webview_window("taskbar_widget")

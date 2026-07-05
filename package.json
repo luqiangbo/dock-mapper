@@ -1,5 +1,5 @@
 {
-  "name": "dev-taskbar-tools",
+  "name": "dock-mapper",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -10,9 +10,11 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@douyinfe/semi-ui": "^2.101.0",
     "@douyinfe/semi-icons": "^2.101.0",
+    "@douyinfe/semi-ui": "^2.101.0",
     "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },

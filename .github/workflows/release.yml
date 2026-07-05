@@ -1,0 +1,68 @@
+name: Release
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - windows-latest
+    runs-on: ${{ matrix.platform }}
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      # 💡 优化 1：移除了 --frozen-lockfile，防止你在本地重构 package.json 导致 lockfile 不匹配而锁死编译
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust dependencies
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.platform }}
+
+      - name: Build & release
+        uses: tauri-apps/tauri-action@v2
+        id: tauri_action
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "DockMapper ${{ github.ref_name }}"
+          # 💡 优化 2：把 releaseDraft 从 true 改为 false（这样 Actions 跑完会自动发布，方便 Updater 检测）
+          releaseDraft: false
+          prerelease: false
+          # 💡 优化 3：由于要在微软商店上架且实现免费自动更新，必须同时输出安装包与自动更新 JSON 文件
+          args: --bundles msi,nsis,msix
+          releaseBody: |
+            Please visit the Microsoft Store to install DockMapper.
+
+            Alternatively, download the installer below for manual installation.
+
+            ## What's Changed
+            See the full changelog at the [commits](https://github.com/luqiangbo/dev-taskbar-tools/commits/${{ github.ref_name }}).
