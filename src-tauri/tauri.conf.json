@@ -1,6 +1,6 @@
 {
   "productName": "DockMapper",
-  "version": "1.0.0",
+  "version": "1.0.4.0",
   "identifier": "com.luqiangbo.dockmapper",
   "build": {
     "frontendDist": "../dist",
@@ -20,10 +20,15 @@
     ],
     "windows": {
       "wix": {
-        "language": "zh-CN"
+        "language": "en-US"
       },
       "nsis": {
-        "languages": ["SimpChinese"]
+        "languages": ["English"]
+      },
+      "msix": {
+        "active": true,
+        "packageName": "DockMapper.DockMapper",
+        "publisher": "CN=A772915D-54AC-49E4-89E3-C9FBC8F06B3E"
       }
     }
   },
@@ -58,9 +63,8 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "YOUR_TAURI_SIGNING_PUBLIC_KEY_HERE",
       "endpoints": [
-        "https://raw.githubusercontent.com/luqiangbo/dev-taskbar-tools/main/updater.json"
+        "https://raw.githubusercontent.com/luqiangbo/dock-mapper/main/updater.json"
       ],
       "windows": {
         "installMode": "passive"
