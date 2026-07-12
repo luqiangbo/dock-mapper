@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Layout,
   Nav,
@@ -96,16 +97,28 @@ export default function App() {
   // Init
   useEffect(() => {
     applyTheme(theme);
+    // Sync native title bar theme on startup
+    getCurrentWindow().setTheme(theme);
 
     invoke<boolean>("check_is_admin")
-      .then(setIsAdmin)
-      .catch(() => setIsAdmin(false));
+      .then((admin) => {
+        setIsAdmin(admin);
+        getCurrentWindow().setTitle(
+          admin ? "DockMapper - 配置中心 [管理员]" : "DockMapper - 配置中心",
+        );
+      })
+      .catch(() => {
+        setIsAdmin(false);
+        getCurrentWindow().setTitle("DockMapper - 配置中心");
+      });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleTheme = () => {
     const next: ThemeMode = theme === "dark" ? "light" : "dark";
     setTheme(next);
     applyTheme(next);
+    // Sync native title bar theme
+    getCurrentWindow().setTheme(next);
     localStorage.setItem(THEME_KEY, next);
   };
 
@@ -224,33 +237,43 @@ export default function App() {
             </Title>
           </div>
 
-          {/* Right: privilege badge + theme toggle */}
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            {/* Admin badge */}
+          {/* Right: admin status + theme toggle */}
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            {/* Admin status text */}
             <Tooltip
               content={
-                isAdmin === null
-                  ? "检测权限中…"
-                  : isAdmin
-                    ? "以管理员权限运行"
-                    : "普通用户权限"
+                isAdmin
+                  ? "以管理员权限运行 — 按键映射在所有窗口生效"
+                  : "普通用户权限 — 管理员窗口按键映射可能失效"
               }
             >
-              <Badge
-                dot
-                theme="solid"
-                type={
-                  isAdmin === null ? "warning" : isAdmin ? "success" : "danger"
-                }
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 12,
+                  padding: "2px 10px",
+                  borderRadius: 12,
+                  fontWeight: 500,
+                  color: isAdmin
+                    ? "var(--semi-color-success)"
+                    : "var(--semi-color-text-2)",
+                  background: isAdmin
+                    ? "var(--semi-color-success-default, rgba(0,0,0,0.04))"
+                    : "var(--semi-color-fill-0)",
+                  border: isAdmin
+                    ? "1px solid var(--semi-color-success)"
+                    : "1px solid var(--semi-color-border)",
+                }}
               >
-                <IconUser
-                  size="large"
-                  style={{
-                    cursor: "pointer",
-                    color: "var(--semi-color-text-2)",
-                  }}
-                />
-              </Badge>
+                <IconUser size="small" />
+                {isAdmin === null
+                  ? "检测中…"
+                  : isAdmin
+                    ? "管理员"
+                    : "普通用户"}
+              </span>
             </Tooltip>
 
             {/* Theme toggle */}
@@ -300,7 +323,7 @@ export default function App() {
           }}
         >
           <Text type="secondary" style={{ fontSize: 12 }}>
-            DevTaskbarTools v1.0.0
+            DockMapper v1.0.4
           </Text>
           <div
             style={{
