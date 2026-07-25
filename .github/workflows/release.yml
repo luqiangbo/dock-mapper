@@ -4,16 +4,16 @@ on:
     tags:
       - "v*"
 
+# 必需权限：写入 release + 提交 PR 到 winget-pkgs
+permissions:
+  contents: write
+
 jobs:
+  # ============================================================
+  # Job 1: 构建并发布到 GitHub Releases
+  # ============================================================
   release:
-    strategy:
-      fail-fast: false
-      matrix:
-        platform:
-          - windows-latest
-    runs-on: ${{ matrix.platform }}
-    permissions:
-      contents: write
+    runs-on: windows-latest
 
     steps:
       - name: Checkout
@@ -41,9 +41,34 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-          key: ${{ matrix.platform }}
+          key: windows-x86_64
 
-      - name: Build installer (MSI + NSIS)
+      # ============================================================
+      # 代码签名（可选但强烈推荐）
+      # 将 Base64 编码的 .pfx 证书存入 GitHub Secrets:
+      #   WINDOWS_CERTIFICATE       — Base64 编码的 .pfx 文件
+      #   WINDOWS_CERTIFICATE_PASSWORD — 证书导出密码
+      # ============================================================
+      - name: Import Windows code signing certificate
+        if: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType directory -Path certificate -Force
+          Set-Content -Path certificate/tempCert.txt -Value $env:WINDOWS_CERTIFICATE
+          certutil -decode certificate/tempCert.txt certificate/certificate.pfx
+          Remove-Item -Path certificate/tempCert.txt
+          Import-PfxCertificate -FilePath certificate/certificate.pfx -CertStoreLocation Cert:\CurrentUser\My -Password (ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText)
+
+      # ============================================================
+      # 使用 tauri-action 构建并发布
+      # - @v1 同时支持 Tauri v1 和 v2，自动检测
+      # - uploadUpdaterJson: 自动生成 latest.json 并上传到 release assets
+      # - updaterJsonPreferNsis: 使用 NSIS .exe 作为更新包（体积更小，体验更好）
+      # ============================================================
+      - name: Build and publish
         uses: tauri-apps/tauri-action@v1
         id: tauri_action
         env:
@@ -57,37 +82,135 @@ jobs:
           prerelease: false
           args: --bundles msi,nsis
           releaseBody: |
-            ## Downloads
+            ## 一键安装
 
-            - **MSIX** — 用于 Microsoft Store 提交
-            - **MSI / NSIS** — 手动安装
+            如果你安装了 Winget，可以直接在终端中运行：
 
-            ## What's Changed
-            完整的变更日志请查看 [commits](https://github.com/luqiangbo/dev-taskbar-tools/commits/${{ github.ref_name }}).
+            ```powershell
+            winget install luqiangbo.DockMapper
+            ```
 
-      - name: Install make-msix
-        run: cargo install make-msix
+            或下载安装包手动安装：
 
-      - name: Generate MSIX package
-        run: |
-          cd src-tauri
-          make-msix --input target/release/DockMapper.exe
-          echo "Generated MSIX files:"
-          ls -la *.msix *.msixupload 2>/dev/null || echo "(no msixupload generated)"
+            - **NSIS 安装器** — `DockMapper_${{ github.ref_name }}_x64-setup.exe`（推荐，双击即装）
+            - **MSI 安装器** — `DockMapper_${{ github.ref_name }}_x64.msi`
 
-      - name: Upload MSIX to release
-        run: |
-          gh release upload "${{ github.ref_name }}" src-tauri/*.msix src-tauri/*.msixupload --clobber
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            ## 自动更新
 
-      - name: Upload build artifacts (for Store submission)
-        uses: actions/upload-artifact@v4
+            应用内置自动更新机制，启动后将自动检查并安装新版本。
+
+            ## 更新内容
+
+            完整变更日志请查看 [commits](https://github.com/luqiangbo/dock-mapper/commits/${{ github.ref_name }}).
+          # ========== 自动更新相关 ==========
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
+
+      # ============================================================
+      # Job 2: 更新 updater.json 到 main 分支（备用的更新源）
+      #         tauri-action 已自动上传 latest.json 到 release，
+      #         但保留 updater.json 到 main 作为备用 endpoint
+      # ============================================================
+      - name: Update updater.json on main branch
+        uses: actions/checkout@v4
         with:
-          name: DockMapper-${{ github.ref_name }}
-          path: |
-            src-tauri/*.msix
-            src-tauri/*.msixupload
-            src-tauri/target/release/*.msi
-            src-tauri/target/release/*.exe
-          compression-level: 0
+          ref: main
+          path: main-branch
+
+      - name: Generate updater.json
+        shell: pwsh
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          $tag = $env:TAG_NAME
+          $version = $tag.TrimStart('v')
+          $url = "https://github.com/luqiangbo/dock-mapper/releases/download/$tag/DockMapper_${version}_x64-setup.exe"
+
+          # 下载 NSIS 安装器计算 SHA256（用于签名值，这里留空由 updater 用公钥验证）
+          # 实际签名由 tauri-action 处理，这里只是占位
+          $json = @{
+            version = $version
+            notes  = "Release $tag"
+            pub_date = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+            platforms = @{
+              "windows-x86_64" = @{
+                signature = ""
+                url = $url
+              }
+            }
+          } | ConvertTo-Json
+
+          Set-Content -Path "main-branch/updater.json" -Value $json
+
+      - name: Commit updater.json
+        continue-on-error: true
+        shell: pwsh
+        working-directory: main-branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add updater.json
+          git diff --cached --quiet || git commit -m "chore: update updater.json for ${{ github.ref_name }}"
+          git push
+
+  # ============================================================
+  # Job 3: 提交到 Winget 社区仓库
+  #         需要 GitHub PAT 存储在 WINGET_TOKEN secret 中
+  #         （Personal Access Token，有 public_repo 权限即可）
+  # ============================================================
+  winget:
+    needs: release
+    runs-on: windows-latest
+    if: ${{ secrets.WINGET_TOKEN != '' }}
+
+    steps:
+      - name: Get installer URL and SHA256
+        id: installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          $tag = $env:TAG_NAME
+          # 从当前 release 中获取 NSIS 安装器的下载 URL
+          $release = gh release view $tag --json assets --jq '.assets[] | select(.name | endswith("_x64-setup.exe")) | {name: .name, url: .url}'
+          $assetName = ($release | ConvertFrom-Json).name
+          $downloadUrl = ($release | ConvertFrom-Json).url
+
+          # 下载并计算 SHA256
+          Invoke-WebRequest -Uri $downloadUrl -OutFile "$env:TEMP\$assetName"
+          $hash = (Get-FileHash "$env:TEMP\$assetName" -Algorithm SHA256).Hash.ToLower()
+
+          Write-Output "url=$downloadUrl" >> $env:GITHUB_OUTPUT
+          Write-Output "sha256=$hash" >> $env:GITHUB_OUTPUT
+          Write-Output "asset=$assetName" >> $env:GITHUB_OUTPUT
+
+      - name: Install wingetcreate
+        run: |
+          # wingetcreate 已预装在 Windows 2022 镜像中，这里确保是最新版
+          winget install wingetcreate --accept-source-agreements --silent 2>$null
+          wingetcreate --version
+
+      - name: Generate or update Winget manifest
+        shell: pwsh
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+          INSTALLER_URL: ${{ steps.installer.outputs.url }}
+          INSTALLER_SHA256: ${{ steps.installer.outputs.sha256 }}
+        run: |
+          $version = $env:VERSION.TrimStart('v')
+
+          # 提交到 winget-pkgs（如果已存在则更新）
+          # 需要 GitHub PAT（public_repo 权限）作为 --token
+          wingetcreate submit `
+            --token $env:WINGET_TOKEN `
+            --urls $env:INSTALLER_URL `
+            --sha256 $env:INSTALLER_SHA256 `
+            --version $version `
+            --publisher "luqiangbo" `
+            --package "DockMapper" `
+            --short-description "Windows 任务栏信息条与按键映射工具" `
+            --installer-type "exe" `
+            --installer-architecture "x64" `
+            --silent-args "/S"
