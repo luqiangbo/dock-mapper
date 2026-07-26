@@ -173,26 +173,24 @@ jobs:
           # 生成 manifest YAML
           $manifestDir = "$env:TEMP\winget-manifest"
           New-Item -ItemType Directory -Path $manifestDir -Force | Out-Null
-          $yaml = @"
-PackageIdentifier: luqiangbo.DockMapper
-PackageVersion: $version
-PackageLocale: zh-CN
-Publisher: luqiangbo
-PackageName: DockMapper
-License: MIT License
-ShortDescription: Windows taskbar widget and key mapping tool
-ManifestType: singleton
-ManifestVersion: 1.6.0
-Installers:
-  - Architecture: x64
-    InstallerType: nullsoft
-    InstallerUrl: $downloadUrl
-    InstallerSha256: $hash.ToUpper()
-    InstallerSwitches:
-      Silent: /S
-      SilentWithProgress: /S
-"@
-          Set-Content -Path "$manifestDir\$version.yaml" -Value $yaml
+          $f = "$manifestDir\$version.yaml"
+          Set-Content -Path $f -Value "PackageIdentifier: luqiangbo.DockMapper"
+          Add-Content -Path $f -Value "PackageVersion: $version"
+          Add-Content -Path $f -Value "PackageLocale: zh-CN"
+          Add-Content -Path $f -Value "Publisher: luqiangbo"
+          Add-Content -Path $f -Value "PackageName: DockMapper"
+          Add-Content -Path $f -Value "License: MIT License"
+          Add-Content -Path $f -Value "ShortDescription: Windows taskbar widget and key mapping tool"
+          Add-Content -Path $f -Value "ManifestType: singleton"
+          Add-Content -Path $f -Value "ManifestVersion: 1.6.0"
+          Add-Content -Path $f -Value "Installers:"
+          Add-Content -Path $f -Value "  - Architecture: x64"
+          Add-Content -Path $f -Value "    InstallerType: nullsoft"
+          Add-Content -Path $f -Value "    InstallerUrl: $downloadUrl"
+          Add-Content -Path $f -Value ("    InstallerSha256: " + $hash.ToUpper())
+          Add-Content -Path $f -Value "    InstallerSwitches:"
+          Add-Content -Path $f -Value "      Silent: /S"
+          Add-Content -Path $f -Value "      SilentWithProgress: /S"
 
           # 提交到 winget-pkgs
           wingetcreate submit --token $env:WINGET_TOKEN "$manifestDir\$version.yaml"
