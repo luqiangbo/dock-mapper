@@ -149,11 +149,6 @@ jobs:
       # ============================================================
       # 提交到 Winget
       # ============================================================
-      - name: Install wingetcreate
-        shell: pwsh
-        run: |
-          winget install Microsoft.WingetCreate --accept-source-agreements --silent 2>$null
-
       - name: Submit Winget manifest
         env:
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN || '' }}
@@ -168,21 +163,36 @@ jobs:
           $tag = $env:TAG_NAME
           $version = $tag.TrimStart('v')
 
+          # 下载安装器并计算 SHA256
           $release = gh release view $tag --json assets --jq '.assets[] | select(.name | endswith("_x64-setup.exe")) | {name: .name, url: .url}'
           $assetName = ($release | ConvertFrom-Json).name
           $downloadUrl = ($release | ConvertFrom-Json).url
-
           Invoke-WebRequest -Uri $downloadUrl -OutFile "$env:TEMP\$assetName"
           $hash = (Get-FileHash "$env:TEMP\$assetName" -Algorithm SHA256).Hash.ToLower()
 
-          wingetcreate submit `
-            --token $env:WINGET_TOKEN `
-            --urls $downloadUrl `
-            --sha256 $hash `
-            --version $version `
-            --publisher "luqiangbo" `
-            --package "DockMapper" `
-            --short-description "Windows taskbar widget and key mapping tool" `
-            --installer-type "exe" `
-            --installer-architecture "x64" `
-            --silent-args "/S"
+          # 生成 manifest YAML
+          $manifestDir = "$env:TEMP\winget-manifest"
+          New-Item -ItemType Directory -Path $manifestDir -Force | Out-Null
+          $yaml = @"
+PackageIdentifier: luqiangbo.DockMapper
+PackageVersion: $version
+PackageLocale: zh-CN
+Publisher: luqiangbo
+PackageName: DockMapper
+License: MIT License
+ShortDescription: Windows taskbar widget and key mapping tool
+ManifestType: singleton
+ManifestVersion: 1.6.0
+Installers:
+  - Architecture: x64
+    InstallerType: nullsoft
+    InstallerUrl: $downloadUrl
+    InstallerSha256: $hash.ToUpper()
+    InstallerSwitches:
+      Silent: /S
+      SilentWithProgress: /S
+"@
+          Set-Content -Path "$manifestDir\$version.yaml" -Value $yaml
+
+          # 提交到 winget-pkgs
+          wingetcreate submit --token $env:WINGET_TOKEN "$manifestDir\$version.yaml"
