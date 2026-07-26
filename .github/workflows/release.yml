@@ -4,14 +4,10 @@ on:
     tags:
       - "v*"
 
-# 必需权限：写入 release + 提交 PR 到 winget-pkgs
 permissions:
   contents: write
 
 jobs:
-  # ============================================================
-  # Job 1: 构建并发布到 GitHub Releases
-  # ============================================================
   release:
     runs-on: windows-latest
 
@@ -44,10 +40,21 @@ jobs:
           key: windows-x86_64
 
       # ============================================================
-      # 代码签名（可选但强烈推荐）
-      # 将 Base64 编码的 .pfx 证书存入 GitHub Secrets:
-      #   WINDOWS_CERTIFICATE       — Base64 编码的 .pfx 文件
-      #   WINDOWS_CERTIFICATE_PASSWORD — 证书导出密码
+      # 自动同步版本号：从 tag v1.0.5 提取 1.0.5 写入 tauri.conf.json
+      # 之后你只管打 tag，不用手动改版本号
+      # ============================================================
+      - name: Sync version from tag
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag.TrimStart('v')
+          Write-Host "Setting version to $version from tag $tag"
+          $config = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $config.version = $version
+          $config | ConvertTo-Json -Depth 10 | Set-Content src-tauri/tauri.conf.json
+
+      # ============================================================
+      # 代码签名（可选）
       # ============================================================
       - name: Import Windows code signing certificate
         env:
@@ -56,7 +63,7 @@ jobs:
         shell: pwsh
         run: |
           if (-not $env:WINDOWS_CERTIFICATE) {
-            Write-Host "WINDOWS_CERTIFICATE not configured, skipping code signing"
+            Write-Host "WINDOWS_CERTIFICATE not configured, skipping"
             exit 0
           }
           New-Item -ItemType directory -Path certificate -Force
@@ -68,10 +75,7 @@ jobs:
             -Password (ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText)
 
       # ============================================================
-      # 使用 tauri-action 构建并发布
-      # - @v1 同时支持 Tauri v1 和 v2，自动检测
-      # - uploadUpdaterJson: 自动生成 latest.json 并上传到 release assets
-      # - updaterJsonPreferNsis: 使用 NSIS .exe 作为更新包（体积更小，体验更好）
+      # 构建 + 发布 + Winget 提交，一步到位
       # ============================================================
       - name: Build and publish
         uses: tauri-apps/tauri-action@v1
@@ -85,36 +89,24 @@ jobs:
           releaseName: "DockMapper ${{ github.ref_name }}"
           releaseDraft: false
           prerelease: false
-          args: --bundles msi,nsis
+          args: --bundles nsis
           releaseBody: |
             ## 一键安装
-
-            如果你安装了 Winget，可以直接在终端中运行：
 
             ```powershell
             winget install luqiangbo.DockMapper
             ```
 
-            或下载安装包手动安装：
-
-            - **NSIS 安装器** — `DockMapper_${{ github.ref_name }}_x64-setup.exe`（推荐，双击即装）
-            - **MSI 安装器** — `DockMapper_${{ github.ref_name }}_x64.msi`
-
-            ## 自动更新
-
-            应用内置自动更新机制，启动后将自动检查并安装新版本。
+            或下载 `DockMapper_${{ github.ref_name }}_x64-setup.exe` 双击安装。
 
             ## 更新内容
 
-            完整变更日志请查看 [commits](https://github.com/luqiangbo/dock-mapper/commits/${{ github.ref_name }}).
-          # ========== 自动更新相关 ==========
+            [commits](https://github.com/luqiangbo/dock-mapper/commits/${{ github.ref_name }})
           uploadUpdaterJson: true
           updaterJsonPreferNsis: true
 
       # ============================================================
-      # Job 2: 更新 updater.json 到 main 分支（备用的更新源）
-      #         tauri-action 已自动上传 latest.json 到 release，
-      #         但保留 updater.json 到 main 作为备用 endpoint
+      # 更新 updater.json（备用）
       # ============================================================
       - name: Update updater.json on main branch
         uses: actions/checkout@v4
@@ -130,9 +122,6 @@ jobs:
           $tag = $env:TAG_NAME
           $version = $tag.TrimStart('v')
           $url = "https://github.com/luqiangbo/dock-mapper/releases/download/$tag/DockMapper_${version}_x64-setup.exe"
-
-          # 下载 NSIS 安装器计算 SHA256（用于签名值，这里留空由 updater 用公钥验证）
-          # 实际签名由 tauri-action 处理，这里只是占位
           $json = @{
             version = $version
             notes  = "Release $tag"
@@ -144,7 +133,6 @@ jobs:
               }
             }
           } | ConvertTo-Json
-
           Set-Content -Path "main-branch/updater.json" -Value $json
 
       - name: Commit updater.json
@@ -158,38 +146,23 @@ jobs:
           git diff --cached --quiet || git commit -m "chore: update updater.json for ${{ github.ref_name }} [skip ci]"
           git push
 
-  # ============================================================
-  # Job 3: 提交到 Winget 社区仓库
-  #         需要 GitHub PAT 存储在 WINGET_TOKEN secret 中
-  #         （Personal Access Token，有 public_repo 权限即可）
-  # ============================================================
-  winget:
-    needs: release
-    runs-on: windows-latest
-
-    steps:
-      - name: Check WINGET_TOKEN
-        id: check_token
+      # ============================================================
+      # 提交到 Winget
+      # ============================================================
+      - name: Submit Winget manifest
         env:
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN || '' }}
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
         shell: pwsh
         run: |
           if (-not $env:WINGET_TOKEN) {
             Write-Host "WINGET_TOKEN not configured, skipping Winget submission"
-            echo "skip=true" >> $env:GITHUB_OUTPUT
-          } else {
-            echo "skip=false" >> $env:GITHUB_OUTPUT
+            exit 0
           }
-
-      - name: Get installer URL and SHA256
-        if: steps.check_token.outputs.skip != 'true'
-        id: installer
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ github.ref_name }}
-        run: |
           $tag = $env:TAG_NAME
+          $version = $tag.TrimStart('v')
+
           $release = gh release view $tag --json assets --jq '.assets[] | select(.name | endswith("_x64-setup.exe")) | {name: .name, url: .url}'
           $assetName = ($release | ConvertFrom-Json).name
           $downloadUrl = ($release | ConvertFrom-Json).url
@@ -197,36 +170,14 @@ jobs:
           Invoke-WebRequest -Uri $downloadUrl -OutFile "$env:TEMP\$assetName"
           $hash = (Get-FileHash "$env:TEMP\$assetName" -Algorithm SHA256).Hash.ToLower()
 
-          Write-Output "url=$downloadUrl" >> $env:GITHUB_OUTPUT
-          Write-Output "sha256=$hash" >> $env:GITHUB_OUTPUT
-          Write-Output "asset=$assetName" >> $env:GITHUB_OUTPUT
-
-      - name: Install wingetcreate
-        if: steps.check_token.outputs.skip != 'true'
-        shell: pwsh
-        run: |
-          winget install wingetcreate --accept-source-agreements --silent 2>$null
-          wingetcreate --version
-
-      - name: Submit Winget manifest
-        if: steps.check_token.outputs.skip != 'true'
-        shell: pwsh
-        env:
-          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
-          VERSION: ${{ github.ref_name }}
-          INSTALLER_URL: ${{ steps.installer.outputs.url }}
-          INSTALLER_SHA256: ${{ steps.installer.outputs.sha256 }}
-        run: |
-          $version = $env:VERSION.TrimStart('v')
-
           wingetcreate submit `
             --token $env:WINGET_TOKEN `
-            --urls $env:INSTALLER_URL `
-            --sha256 $env:INSTALLER_SHA256 `
+            --urls $downloadUrl `
+            --sha256 $hash `
             --version $version `
             --publisher "luqiangbo" `
             --package "DockMapper" `
-            --short-description "Windows 任务栏信息条与按键映射工具" `
+            --short-description "Windows taskbar widget and key mapping tool" `
             --installer-type "exe" `
             --installer-architecture "x64" `
             --silent-args "/S"
