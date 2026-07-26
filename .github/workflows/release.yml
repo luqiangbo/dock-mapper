@@ -149,6 +149,11 @@ jobs:
       # ============================================================
       # 提交到 Winget
       # ============================================================
+      - name: Install wingetcreate
+        shell: pwsh
+        run: |
+          winget install Microsoft.WingetCreate --accept-source-agreements --silent 2>$null
+
       - name: Submit Winget manifest
         env:
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN || '' }}
