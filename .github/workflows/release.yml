@@ -192,5 +192,12 @@ jobs:
           Add-Content -Path $f -Value "      Silent: /S"
           Add-Content -Path $f -Value "      SilentWithProgress: /S"
 
+          # 下载最新的 wingetcreate（最稳健的方式，不依赖 winget 命令）
+          $wcZip = "$env:TEMP\wingetcreate.zip"
+          $wcDir = "$env:TEMP\wingetcreate"
+          Invoke-WebRequest -Uri "https://github.com/microsoft/winget-create/releases/latest/download/wingetcreate.zip" -OutFile $wcZip
+          Expand-Archive -Path $wcZip -DestinationPath $wcDir -Force
+          $wcexe = "$wcDir\wingetcreate.exe"
+
           # 提交到 winget-pkgs
-          wingetcreate submit --token $env:WINGET_TOKEN "$manifestDir\$version.yaml"
+          & $wcexe submit --token $env:WINGET_TOKEN "$manifestDir\$version.yaml"
