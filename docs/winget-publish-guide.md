@@ -309,44 +309,48 @@ Rust 编译缓存可以节省后续 CI 运行时间（约 5-10 分钟）。
     $versionDir = "$manifestDir\$version"
     New-Item -ItemType Directory -Path $versionDir -Force | Out-Null
     $id = "luqiangbo.DockMapper"
+    $nl = [System.Environment]::NewLine
 
     # version 清单
-    Set-Content -Path "$versionDir\$id.yaml" -Value @"
-PackageIdentifier: $id
-PackageVersion: $version
-DefaultLocale: zh-CN
-ManifestType: version
-ManifestVersion: 1.12.0
-"@
+    $versionContent = (
+      "PackageIdentifier: $id",
+      "PackageVersion: $version",
+      "DefaultLocale: zh-CN",
+      "ManifestType: version",
+      "ManifestVersion: 1.12.0"
+    ) -join $nl
+    Set-Content -Path "$versionDir\$id.yaml" -Value $versionContent
 
     # installer 清单
-    Set-Content -Path "$versionDir\$id.installer.yaml" -Value @"
-PackageIdentifier: $id
-PackageVersion: $version
-Installers:
-  - Architecture: x64
-    InstallerType: nullsoft
-    InstallerUrl: $downloadUrl
-    InstallerSha256: $hash
-    InstallerSwitches:
-      Silent: /S
-      SilentWithProgress: /S
-ManifestType: installer
-ManifestVersion: 1.12.0
-"@
+    $installerContent = (
+      "PackageIdentifier: $id",
+      "PackageVersion: $version",
+      "Installers:",
+      "  - Architecture: x64",
+      "    InstallerType: nullsoft",
+      "    InstallerUrl: $downloadUrl",
+      "    InstallerSha256: $hash",
+      "    InstallerSwitches:",
+      "      Silent: /S",
+      "      SilentWithProgress: /S",
+      "ManifestType: installer",
+      "ManifestVersion: 1.12.0"
+    ) -join $nl
+    Set-Content -Path "$versionDir\$id.installer.yaml" -Value $installerContent
 
     # locale 清单
-    Set-Content -Path "$versionDir\$id.locale.zh-CN.yaml" -Value @"
-PackageIdentifier: $id
-PackageVersion: $version
-PackageLocale: zh-CN
-Publisher: luqiangbo
-PackageName: DockMapper
-License: MIT License
-ShortDescription: Windows taskbar widget and key mapping tool
-ManifestType: defaultLocale
-ManifestVersion: 1.12.0
-"@
+    $localeContent = (
+      "PackageIdentifier: $id",
+      "PackageVersion: $version",
+      "PackageLocale: zh-CN",
+      "Publisher: luqiangbo",
+      "PackageName: DockMapper",
+      "License: MIT License",
+      "ShortDescription: Windows taskbar widget and key mapping tool",
+      "ManifestType: defaultLocale",
+      "ManifestVersion: 1.12.0"
+    ) -join $nl
+    Set-Content -Path "$versionDir\$id.locale.zh-CN.yaml" -Value $localeContent
 
     # 4. 下载 wingetcreate.exe 并提交（传版本目录）
     $wcexe = "$env:TEMP\wingetcreate.exe"
