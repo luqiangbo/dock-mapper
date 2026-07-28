@@ -163,68 +163,19 @@ jobs:
           $tag = $env:TAG_NAME
           $version = $tag.TrimStart('v')
 
-          # 下载安装器并计算 SHA256
-          $release = gh release view $tag --json assets --jq '.assets[] | select(.name | endswith("_x64-setup.exe")) | {name: .name, url: .url}'
-          $assetName = ($release | ConvertFrom-Json).name
-          $downloadUrl = ($release | ConvertFrom-Json).url
-          Invoke-WebRequest -Uri $downloadUrl -OutFile "$env:TEMP\$assetName"
-          $hash = (Get-FileHash "$env:TEMP\$assetName" -Algorithm SHA256).Hash.ToUpper()
-
-          # ─── 生成多文件 manifest（ManifestVersion 1.12.0）───
-          $manifestDir = "$env:TEMP\winget-manifest"
-          New-Item -ItemType Directory -Path $manifestDir -Force | Out-Null
-          $versionDir = "$manifestDir\$version"
-          New-Item -ItemType Directory -Path $versionDir -Force | Out-Null
-          $id = "luqiangbo.DockMapper"
-          $nl = [System.Environment]::NewLine
-
-          # version manifest
-          $versionContent = (
-            "# yaml-language-server: `$schema=https://aka.ms/winget-manifest.1.12.0.schema.json",
-            "PackageIdentifier: $id",
-            "PackageVersion: $version",
-            "DefaultLocale: zh-CN",
-            "ManifestType: version",
-            "ManifestVersion: 1.12.0"
-          ) -join $nl
-          Set-Content -Path "$versionDir\$id.yaml" -Value $versionContent
-
-          # installer manifest
-          $installerContent = (
-            "# yaml-language-server: `$schema=https://aka.ms/winget-manifest.1.12.0.schema.json",
-            "PackageIdentifier: $id",
-            "PackageVersion: $version",
-            "Installers:",
-            "  - Architecture: x64",
-            "    InstallerType: nullsoft",
-            "    InstallerUrl: $downloadUrl",
-            "    InstallerSha256: $hash",
-            "    InstallerSwitches:",
-            "      Silent: /S",
-            "      SilentWithProgress: /S",
-            "ManifestType: installer",
-            "ManifestVersion: 1.12.0"
-          ) -join $nl
-          Set-Content -Path "$versionDir\$id.installer.yaml" -Value $installerContent
-
-          # locale manifest
-          $localeContent = (
-            "# yaml-language-server: `$schema=https://aka.ms/winget-manifest.1.12.0.schema.json",
-            "PackageIdentifier: $id",
-            "PackageVersion: $version",
-            "PackageLocale: zh-CN",
-            "Publisher: luqiangbo",
-            "PackageName: DockMapper",
-            "License: MIT License",
-            "ShortDescription: Windows taskbar widget and key mapping tool",
-            "ManifestType: defaultLocale",
-            "ManifestVersion: 1.12.0"
-          ) -join $nl
-          Set-Content -Path "$versionDir\$id.locale.zh-CN.yaml" -Value $localeContent
-
-          # 下载最新的 wingetcreate.exe
+          # ─── 用 wingetcreate update 自动生成多文件清单并提交 PR ───
+          # wingetcreate update 会：
+          #   1. 从 winget-pkgs 拉取现有 manifest
+          #   2. 下载安装器并计算 SHA256
+          #   3. 自动生成正确的多文件格式（ManifestVersion 1.12.0）
+          #   4. 提交 PR 到 microsoft/winget-pkgs
           $wcexe = "$env:TEMP\wingetcreate.exe"
           Invoke-WebRequest -Uri "https://github.com/microsoft/winget-create/releases/download/v1.12.13.0/wingetcreate.exe" -OutFile $wcexe
 
-          # 提交到 winget-pkgs（传整个版本目录）
-          & $wcexe submit --token $env:WINGET_TOKEN $versionDir
+          # 从 Release 获取安装器下载 URL
+          $release = gh release view $tag --json assets --jq '.assets[] | select(.name | endswith("_x64-setup.exe")) | .url'
+          & $wcexe update luqiangbo.DockMapper `
+            --submit `
+            --token $env:WINGET_TOKEN `
+            --urls $release `
+            --version $version

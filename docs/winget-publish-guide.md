@@ -294,71 +294,24 @@ Rust 编译缓存可以节省后续 CI 运行时间（约 5-10 分钟）。
       exit 0
     }
 
-    # 2. 从 GitHub Release 中获取 NSIS 安装器的下载 URL 和 SHA256
+    # 2. 获取版本号和安装器下载 URL
     $tag = $env:TAG_NAME
     $version = $tag.TrimStart('v')
-    $release = gh release view $tag --json assets --jq '.assets[] | select(.name | endswith("_x64-setup.exe")) | {name: .name, url: .url}'
-    $downloadUrl = ($release | ConvertFrom-Json).url
-    $assetName = ($release | ConvertFrom-Json).name
-    Invoke-WebRequest -Uri $downloadUrl -OutFile "$env:TEMP\$assetName"
-    $hash = (Get-FileHash "$env:TEMP\$assetName" -Algorithm SHA256).Hash.ToUpper()
+    $release = gh release view $tag --json assets --jq '.assets[] | select(.name | endswith("_x64-setup.exe")) | .url'
 
-    # 3. 生成多文件 manifest（ManifestVersion 1.12.0）
-    $manifestDir = "$env:TEMP\winget-manifest"
-    New-Item -ItemType Directory -Path $manifestDir -Force | Out-Null
-    $versionDir = "$manifestDir\$version"
-    New-Item -ItemType Directory -Path $versionDir -Force | Out-Null
-    $id = "luqiangbo.DockMapper"
-    $nl = [System.Environment]::NewLine
-
-    # version 清单
-    $versionContent = (
-      '# yaml-language-server: $schema=https://aka.ms/winget-manifest.1.12.0.schema.json',
-      "PackageIdentifier: $id",
-      "PackageVersion: $version",
-      "DefaultLocale: zh-CN",
-      "ManifestType: version",
-      "ManifestVersion: 1.12.0"
-    ) -join $nl
-    Set-Content -Path "$versionDir\$id.yaml" -Value $versionContent
-
-    # installer 清单
-    $installerContent = (
-      '# yaml-language-server: $schema=https://aka.ms/winget-manifest.1.12.0.schema.json',
-      "PackageIdentifier: $id",
-      "PackageVersion: $version",
-      "Installers:",
-      "  - Architecture: x64",
-      "    InstallerType: nullsoft",
-      "    InstallerUrl: $downloadUrl",
-      "    InstallerSha256: $hash",
-      "    InstallerSwitches:",
-      "      Silent: /S",
-      "      SilentWithProgress: /S",
-      "ManifestType: installer",
-      "ManifestVersion: 1.12.0"
-    ) -join $nl
-    Set-Content -Path "$versionDir\$id.installer.yaml" -Value $installerContent
-
-    # locale 清单
-    $localeContent = (
-      '# yaml-language-server: $schema=https://aka.ms/winget-manifest.1.12.0.schema.json',
-      "PackageIdentifier: $id",
-      "PackageVersion: $version",
-      "PackageLocale: zh-CN",
-      "Publisher: luqiangbo",
-      "PackageName: DockMapper",
-      "License: MIT License",
-      "ShortDescription: Windows taskbar widget and key mapping tool",
-      "ManifestType: defaultLocale",
-      "ManifestVersion: 1.12.0"
-    ) -join $nl
-    Set-Content -Path "$versionDir\$id.locale.zh-CN.yaml" -Value $localeContent
-
-    # 4. 下载 wingetcreate.exe 并提交（传版本目录）
+    # 3. 下载 wingetcreate 并用 update 命令自动生成+提交
+    # wingetcreate update 会自动：
+    #   - 从 winget-pkgs 拉取现有 manifest
+    #   - 下载安装器并计算 SHA256
+    #   - 生成多文件格式（ManifestVersion 1.12.0）
+    #   - 提交 PR 到 microsoft/winget-pkgs
     $wcexe = "$env:TEMP\wingetcreate.exe"
     Invoke-WebRequest -Uri "https://github.com/microsoft/winget-create/releases/download/v1.12.13.0/wingetcreate.exe" -OutFile $wcexe
-    & $wcexe submit --token $env:WINGET_TOKEN $versionDir
+    & $wcexe update luqiangbo.DockMapper `
+      --submit `
+      --token $env:WINGET_TOKEN `
+      --urls $release `
+      --version $version
 ```
 
 **这个步骤容易踩的坑最多，见后面的专题章节。**
@@ -740,11 +693,12 @@ git tag -d v1.0.5
 # fix bug...
 git tag v1.0.5 && git push origin v1.0.5
 
-# ─── 本地生成 Winget manifest ───
-wingetcreate new --out ./winget-manifest "https://github.com/xxx/releases/download/v1.0.5/app.exe"
-
-# ─── 本地提交 Winget ───
-wingetcreate submit --token ghp_xxxx ./winget-manifest
+# ─── 用 wingetcreate update 自动生成+提交 ───
+wingetcreate update luqiangbo.DockMapper `
+  --submit `
+  --token ghp_xxxx `
+  --urls "https://github.com/luqiangbo/dock-mapper/releases/download/v1.0.5/DockMapper_1.0.5_x64-setup.exe" `
+  --version 1.0.5
 
 # ─── Pull wingetcreate 最新版 ───
 Invoke-WebRequest -Uri "https://github.com/microsoft/winget-create/releases/download/v1.12.13.0/wingetcreate.exe" -OutFile wingetcreate.exe
