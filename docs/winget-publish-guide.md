@@ -313,6 +313,7 @@ Rust 编译缓存可以节省后续 CI 运行时间（约 5-10 分钟）。
 
     # version 清单
     $versionContent = (
+      '# yaml-language-server: $schema=https://aka.ms/winget-manifest.1.12.0.schema.json',
       "PackageIdentifier: $id",
       "PackageVersion: $version",
       "DefaultLocale: zh-CN",
@@ -323,6 +324,7 @@ Rust 编译缓存可以节省后续 CI 运行时间（约 5-10 分钟）。
 
     # installer 清单
     $installerContent = (
+      '# yaml-language-server: $schema=https://aka.ms/winget-manifest.1.12.0.schema.json',
       "PackageIdentifier: $id",
       "PackageVersion: $version",
       "Installers:",
@@ -340,6 +342,7 @@ Rust 编译缓存可以节省后续 CI 运行时间（约 5-10 分钟）。
 
     # locale 清单
     $localeContent = (
+      '# yaml-language-server: $schema=https://aka.ms/winget-manifest.1.12.0.schema.json',
       "PackageIdentifier: $id",
       "PackageVersion: $version",
       "PackageLocale: zh-CN",

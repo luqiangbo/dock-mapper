@@ -180,6 +180,7 @@ jobs:
 
           # version manifest
           $versionContent = (
+            "# yaml-language-server: `$schema=https://aka.ms/winget-manifest.1.12.0.schema.json",
             "PackageIdentifier: $id",
             "PackageVersion: $version",
             "DefaultLocale: zh-CN",
@@ -190,6 +191,7 @@ jobs:
 
           # installer manifest
           $installerContent = (
+            "# yaml-language-server: `$schema=https://aka.ms/winget-manifest.1.12.0.schema.json",
             "PackageIdentifier: $id",
             "PackageVersion: $version",
             "Installers:",
@@ -207,6 +209,7 @@ jobs:
 
           # locale manifest
           $localeContent = (
+            "# yaml-language-server: `$schema=https://aka.ms/winget-manifest.1.12.0.schema.json",
             "PackageIdentifier: $id",
             "PackageVersion: $version",
             "PackageLocale: zh-CN",
