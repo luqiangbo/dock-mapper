@@ -1,11 +1,11 @@
 {
   "version": "1.0.5",
-  "pub_date": "2026-07-28T17:29:12Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "",
       "url": "https://github.com/luqiangbo/dock-mapper/releases/download/v1.0.5/DockMapper_1.0.5_x64-setup.exe"
     }
   },
-  "notes": "Release v1.0.5"
+  "notes": "Release v1.0.5",
+  "pub_date": "2026-07-28T17:48:20Z"
 }
