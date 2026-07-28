@@ -301,20 +301,57 @@ Rust 编译缓存可以节省后续 CI 运行时间（约 5-10 分钟）。
     $downloadUrl = ($release | ConvertFrom-Json).url
     $assetName = ($release | ConvertFrom-Json).name
     Invoke-WebRequest -Uri $downloadUrl -OutFile "$env:TEMP\$assetName"
-    $hash = (Get-FileHash "$env:TEMP\$assetName" -Algorithm SHA256).Hash
+    $hash = (Get-FileHash "$env:TEMP\$assetName" -Algorithm SHA256).Hash.ToUpper()
 
-    # 3. 生成 manifest 文件
+    # 3. 生成多文件 manifest（ManifestVersion 1.12.0）
     $manifestDir = "$env:TEMP\winget-manifest"
     New-Item -ItemType Directory -Path $manifestDir -Force | Out-Null
-    $f = "$manifestDir\$version.yaml"
-    Set-Content -Path $f -Value "PackageIdentifier: luqiangbo.DockMapper"
-    Add-Content -Path $f -Value "PackageVersion: $version"
-    # ... 逐行写入
+    $versionDir = "$manifestDir\$version"
+    New-Item -ItemType Directory -Path $versionDir -Force | Out-Null
+    $id = "luqiangbo.DockMapper"
 
-    # 4. 下载 wingetcreate.exe 并提交
+    # version 清单
+    Set-Content -Path "$versionDir\$id.yaml" -Value @"
+PackageIdentifier: $id
+PackageVersion: $version
+DefaultLocale: zh-CN
+ManifestType: version
+ManifestVersion: 1.12.0
+"@
+
+    # installer 清单
+    Set-Content -Path "$versionDir\$id.installer.yaml" -Value @"
+PackageIdentifier: $id
+PackageVersion: $version
+Installers:
+  - Architecture: x64
+    InstallerType: nullsoft
+    InstallerUrl: $downloadUrl
+    InstallerSha256: $hash
+    InstallerSwitches:
+      Silent: /S
+      SilentWithProgress: /S
+ManifestType: installer
+ManifestVersion: 1.12.0
+"@
+
+    # locale 清单
+    Set-Content -Path "$versionDir\$id.locale.zh-CN.yaml" -Value @"
+PackageIdentifier: $id
+PackageVersion: $version
+PackageLocale: zh-CN
+Publisher: luqiangbo
+PackageName: DockMapper
+License: MIT License
+ShortDescription: Windows taskbar widget and key mapping tool
+ManifestType: defaultLocale
+ManifestVersion: 1.12.0
+"@
+
+    # 4. 下载 wingetcreate.exe 并提交（传版本目录）
     $wcexe = "$env:TEMP\wingetcreate.exe"
     Invoke-WebRequest -Uri "https://github.com/microsoft/winget-create/releases/download/v1.12.13.0/wingetcreate.exe" -OutFile $wcexe
-    & $wcexe submit --token $env:WINGET_TOKEN $f
+    & $wcexe submit --token $env:WINGET_TOKEN $versionDir
 ```
 
 **这个步骤容易踩的坑最多，见后面的专题章节。**
@@ -328,26 +365,57 @@ Rust 编译缓存可以节省后续 CI 运行时间（约 5-10 分钟）。
 一个 YAML 文件，描述了软件包的元数据和安装方式。
 Winget 客户端通过读取这个文件来知道去哪里下载、如何静默安装。
 
-### 文件结构
+### 文件结构（多文件清单）
+
+> **注意**：winget 已弃用单文件 singleton 格式，必须使用多文件清单。
+> 每个版本一个目录，包含三个 YAML 文件。
+
+```
+1.0.5/
+├── luqiangbo.DockMapper.yaml               # version 清单
+├── luqiangbo.DockMapper.installer.yaml      # installer 清单
+└── luqiangbo.DockMapper.locale.zh-CN.yaml  # locale 清单
+```
+
+**version 清单** `luqiangbo.DockMapper.yaml`：
 
 ```yaml
-PackageIdentifier: luqiangbo.DockMapper    # 唯一标识：发布者.包名
-PackageVersion: 1.0.5                      # 当前版本号
-PackageLocale: zh-CN                       # 默认语言
-Publisher: luqiangbo                       # 发布者名称
-PackageName: DockMapper                    # 用户看到的包名
-License: MIT License                       # 开源协议
-ShortDescription: Windows taskbar widget and key mapping tool  # 简短说明
-ManifestType: singleton                    # ★ 清单类型，固定 singleton
-ManifestVersion: 1.6.0                     # ★ 清单 schema 版本
-Installers:                                # 安装器列表
-  - Architecture: x64                      # 架构：x64 / x86 / arm64
-    InstallerType: nullsoft                # ★ 安装器类型：nullsoft = NSIS
-    InstallerUrl: https://.../app.exe      # 下载 URL
-    InstallerSha256: 7DBDD7752...          # ★ 大写 SHA256
-    InstallerSwitches:                     # ★ 静默安装参数
-      Silent: /S                           #   winget install 用的静默参数
-      SilentWithProgress: /S               #   带进度条的静默参数
+PackageIdentifier: luqiangbo.DockMapper
+PackageVersion: 1.0.5
+DefaultLocale: zh-CN
+ManifestType: version
+ManifestVersion: 1.12.0
+```
+
+**installer 清单** `luqiangbo.DockMapper.installer.yaml`：
+
+```yaml
+PackageIdentifier: luqiangbo.DockMapper
+PackageVersion: 1.0.5
+Installers:
+  - Architecture: x64
+    InstallerType: nullsoft
+    InstallerUrl: https://github.com/luqiangbo/dock-mapper/releases/download/v1.0.5/DockMapper_1.0.5_x64-setup.exe
+    InstallerSha256: 4FFABE6922098AEDE166BA0972E810D5C0AB1C80B8FBFE220EC709FE2CC19EB5
+    InstallerSwitches:
+      Silent: /S
+      SilentWithProgress: /S
+ManifestType: installer
+ManifestVersion: 1.12.0
+```
+
+**locale 清单** `luqiangbo.DockMapper.locale.zh-CN.yaml`：
+
+```yaml
+PackageIdentifier: luqiangbo.DockMapper
+PackageVersion: 1.0.5
+PackageLocale: zh-CN
+Publisher: luqiangbo
+PackageName: DockMapper
+License: MIT License
+ShortDescription: Windows taskbar widget and key mapping tool
+ManifestType: defaultLocale
+ManifestVersion: 1.12.0
 ```
 
 ### 字段详解
@@ -366,16 +434,18 @@ Installers:                                # 安装器列表
 #### ManifestVersion
 
 ```
-推荐值：1.6.0
+推荐值：1.12.0
 ```
+
+> **注意**：1.6.0 和 1.9.0 均已弃用，必须使用 1.12.0。
 
 版本兼容性说明：
 
 | 版本 | 说明 |
 |------|------|
-| 1.6.0 | 兼容性最好，推荐 |
-| 1.9.0 | 功能更多但某些旧版 wingetcreate 报错 |
-| 1.12.0 | 需要最新 wingetcreate |
+| 1.6.0 | ❌ 已弃用 |
+| 1.9.0 | ❌ 已弃用 |
+| 1.12.0 | ✅ 当前推荐，需要最新 wingetcreate |
 
 #### InstallerType
 
