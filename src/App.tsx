@@ -80,10 +80,37 @@ export default function App() {
   return (
     <Layout className={styles.shell}>
       <Sider className={`${styles.sider} ${siderCollapsed ? styles.collapsed : ""}`}>
-        <div className={styles.windowControls} aria-hidden="true">
-          <span />
-          <span />
-          <span />
+        <div className={styles.windowControls}>
+          <button
+            type="button"
+            aria-label="关闭窗口"
+            title="关闭"
+            onClick={() => void getCurrentWindow().close()}
+          >
+            <svg viewBox="0 0 12 12" aria-hidden="true">
+              <path d="M3 3l6 6M9 3L3 9" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            aria-label="最小化窗口"
+            title="最小化"
+            onClick={() => void getCurrentWindow().minimize()}
+          >
+            <svg viewBox="0 0 12 12" aria-hidden="true">
+              <path d="M2.5 6h7" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            aria-label="最大化或还原窗口"
+            title="最大化或还原"
+            onClick={() => void getCurrentWindow().toggleMaximize()}
+          >
+            <svg viewBox="0 0 12 12" aria-hidden="true">
+              <rect x="2.5" y="2.5" width="7" height="7" rx="1" />
+            </svg>
+          </button>
         </div>
         <div className={styles.brand}>
           <span className={styles.brandMark} aria-hidden="true">D</span>
@@ -124,6 +151,7 @@ export default function App() {
             {currentPage.icon}
             <Title heading={5}>{currentPage.label}</Title>
           </div>
+          <div className={styles.dragRegion} data-tauri-drag-region />
           <div className={styles.headerActions}>
             <Tooltip content={isAdmin ? "管理员权限，映射可作用于高权限窗口" : "普通权限"}>
               <span className={`${styles.statusChip} ${isAdmin ? styles.success : ""}`}>
