@@ -2,14 +2,15 @@
 
 Windows 任务栏信息条与按键映射工具。
 
-基于 Tauri 2.0 + Rsbuild + React + Semi Design 构建。
+基于 Tauri 2 + Rsbuild + React 19 + Semi Design 构建，支持 Windows 10/11 x64。
 
 ## 概览
 
 双窗口架构：
 
-- **主配置窗口** (`main`) — 管理按键映射规则、系统设置等，使用 Semi Design 提供现代化图形界面。
-- **任务栏信息条** (`taskbar_widget`) — 嵌入 Windows 任务栏，实时显示网速、内存占用等信息。
+- **主配置窗口** (`main`) — 管理按键映射规则、挂件和系统设置；Windows 11 使用 Mica，Windows 10 自动使用稳定材质降级。
+- **任务栏信息条** (`taskbar_widget`) — 嵌入主任务栏，实时显示网速和内存占用。
+- **按键映射引擎** — 使用原生 `WH_KEYBOARD_LL + SendInput`，忽略注入事件并在退出时卸载钩子。
 
 ## 开发
 
@@ -24,39 +25,32 @@ pnpm tauri dev
 ## 构建
 
 ```bash
+pnpm typecheck
+pnpm lint
+pnpm test
 pnpm tauri build
 ```
 
-## 自动更新
+## 发布
 
-项目使用 `tauri-plugin-updater` 实现自动更新。如需发布新版本：
+三处版本由统一命令同步：
 
-1. 确保已配置 `TAURI_PRIVATE_KEY` 环境变量（私钥）
-2. 构建并签名：
-   ```bash
-   pnpm tauri build
-   ```
-3. 更新 `updater.json` 发布到 GitHub Releases
-
-### 密钥管理
-
-`plugins.updater.pubkey` 已在 `tauri.conf.json` 中配置。若需重新生成密钥对：
-
-```bash
-pnpm tauri signer generate
+```powershell
+pnpm version:sync 1.0.6
 ```
 
-将生成的公钥填入 `tauri.conf.json` 的 `plugins.updater.pubkey`，私钥设置为环境变量 `TAURI_PRIVATE_KEY`。
+GitHub Actions 会依次校验、构建 Draft Release、验证签名、正式发布，再独立提交
+Winget 更新。完整流程见 [发布与 Winget 指南](docs/winget-publish-guide.md)。
 
 ## 技术栈
 
 | 层级 | 技术 |
 |------|------|
-| 容器框架 | Tauri 2.0 (Rust) |
+| 容器框架 | Tauri 2 (Rust) |
 | 前端构建 | Rsbuild |
 | 视图框架 | React 19 |
 | UI 组件库 | Semi Design |
 | 包管理 | pnpm |
 | 系统 API | windows crate (Win32) |
-| 按键捕获 | rdev |
+| 按键捕获 | Windows `WH_KEYBOARD_LL` / `SendInput` |
 | 系统监控 | sysinfo |

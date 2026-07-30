@@ -1,7 +1,7 @@
 use std::os::windows::ffi::OsStrExt;
-use windows::Win32::Foundation::HANDLE;
+use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
-use windows::Win32::System::Threading::OpenProcessToken;
+use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
@@ -9,8 +9,7 @@ use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 /// (administrator) privileges.
 pub fn is_elevated() -> bool {
     unsafe {
-        // GetCurrentProcess() returns the pseudo-handle -1
-        let process = HANDLE((-1isize) as *mut _);
+        let process = GetCurrentProcess();
         let mut token_handle = HANDLE::default();
 
         if OpenProcessToken(process, TOKEN_QUERY, &mut token_handle).is_err() {
@@ -21,15 +20,16 @@ pub fn is_elevated() -> bool {
         let mut elevation = TOKEN_ELEVATION::default();
         let mut return_len: u32 = 0;
 
-        if GetTokenInformation(
+        let result = GetTokenInformation(
             token_handle,
             TokenElevation,
             Some(&mut elevation as *mut _ as *mut _),
             std::mem::size_of::<TOKEN_ELEVATION>() as u32,
             &mut return_len,
-        )
-        .is_err()
-        {
+        );
+        let _ = CloseHandle(token_handle);
+
+        if result.is_err() {
             eprintln!("[admin] GetTokenInformation failed");
             return false;
         }
@@ -40,12 +40,12 @@ pub fn is_elevated() -> bool {
 
 /// Relaunch the current executable with the `runas` verb (UAC elevation
 /// dialog). The caller should exit the current process immediately after.
-pub fn relaunch_as_admin() {
+pub fn relaunch_as_admin() -> Result<(), String> {
     let exe_path = match std::env::current_exe() {
         Ok(p) => p,
         Err(e) => {
             eprintln!("[admin] Cannot get exe path: {e}");
-            return;
+            return Err(format!("无法获取程序路径：{e}"));
         }
     };
 
@@ -71,7 +71,9 @@ pub fn relaunch_as_admin() {
 
         // ShellExecuteW returns HINSTANCE; value <= 32 indicates an error.
         if (result.0 as isize) <= 32 {
-            eprintln!("[admin] relaunch ShellExecuteW failed: {:?}", result.0);
+            return Err(format!("提权启动失败，错误码：{:?}", result.0));
         }
     }
+
+    Ok(())
 }

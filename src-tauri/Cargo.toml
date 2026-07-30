@@ -1,6 +1,6 @@
 [package]
 name = "dock-mapper"
-version = "1.0.0"
+version = "1.0.5"
 description = "DockMapper — Windows taskbar widget & key mapping tool"
 authors = ["qqpp"]
 edition = "2021"
@@ -14,7 +14,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-shell = "2"
+tauri-plugin-opener = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 tauri-plugin-autostart = "2"
@@ -24,11 +24,11 @@ windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_System_Threading",
+    "Win32_Storage_FileSystem",
     "Win32_UI_Shell",
+    "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
     "Win32_Graphics_Gdi"
 ] }
 sysinfo = "0.30"
-rdev = { version = "0.5", features = ["unstable_grab"] }
 tokio = { version = "1", features = ["full"] }
-lazy_static = "1.5"

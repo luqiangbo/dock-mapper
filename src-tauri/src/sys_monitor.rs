@@ -1,9 +1,11 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use sysinfo::{Networks, System};
 use tauri::{self, AppHandle, Emitter, Manager};
 
+use crate::AppState;
+
 #[derive(Clone, serde::Serialize)]
-struct SysStatusPayload {
+pub struct SysStatusPayload {
     upload_speed: f64,   // bytes/sec
     download_speed: f64, // bytes/sec
     memory_usage: f32,   // percentage 0.0–100.0
@@ -20,6 +22,7 @@ pub fn start_sys_monitor(app_handle: AppHandle) {
         let mut prev_rx: u64 = 0;
         let mut prev_tx: u64 = 0;
         let mut initialized = false;
+        let mut previous_tick = Instant::now();
 
         loop {
             // Refresh network I/O counters and memory
@@ -35,10 +38,12 @@ pub fn start_sys_monitor(app_handle: AppHandle) {
             }
 
             // Calculate delta (bytes per second) since the last tick
+            let now = Instant::now();
+            let elapsed = now.duration_since(previous_tick).as_secs_f64().max(0.001);
             let (upload_speed, download_speed) = if initialized {
                 (
-                    total_tx.saturating_sub(prev_tx) as f64,
-                    total_rx.saturating_sub(prev_rx) as f64,
+                    total_tx.saturating_sub(prev_tx) as f64 / elapsed,
+                    total_rx.saturating_sub(prev_rx) as f64 / elapsed,
                 )
             } else {
                 initialized = true;
@@ -47,6 +52,7 @@ pub fn start_sys_monitor(app_handle: AppHandle) {
 
             prev_rx = total_rx;
             prev_tx = total_tx;
+            previous_tick = now;
 
             let total_mem = sys.total_memory() as f32;
             let used_mem = sys.used_memory() as f32;
@@ -62,12 +68,19 @@ pub fn start_sys_monitor(app_handle: AppHandle) {
                 memory_usage: mem_percent,
             };
 
-            // Emit the payload exclusively to the taskbar widget window
-            if let Some(widget_win) = app_handle.get_webview_window("taskbar_widget") {
-                let _ = widget_win.emit("sys-status-update", payload);
-            }
+            let _ = app_handle.emit("sys-status-update", payload);
 
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            let interval = app_handle
+                .try_state::<AppState>()
+                .and_then(|state| {
+                    state
+                        .config
+                        .lock()
+                        .ok()
+                        .map(|config| config.widget_config.refresh_interval_secs)
+                })
+                .unwrap_or(1);
+            tokio::time::sleep(Duration::from_secs(interval.into())).await;
         }
     });
 }

@@ -1,31 +1,23 @@
-import React, { useEffect, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import {
-  Card,
-  Typography,
-  Button,
-  Banner,
-  Space,
-  Tag,
-  Spin,
-} from '@douyinfe/semi-ui';
+import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { Banner, Button, Card, Spin, Typography } from "@douyinfe/semi-ui";
 import {
   IconAlertCircle,
-  IconKey,
-  IconArrowUp,
   IconArrowDown,
-} from '@douyinfe/semi-icons';
+  IconArrowUp,
+  IconKey,
+  IconLive,
+} from "@douyinfe/semi-icons";
+import type { EngineStatus, SysStatus } from "../types";
+import { formatSpeed } from "../utils/format";
+import styles from "./components.module.css";
 
-const { Title, Text } = Typography;
-
-interface SysStatus {
-  upload_speed: number;
-  download_speed: number;
-  memory_usage: number;
-}
+const { Text, Title } = Typography;
 
 export default function Dashboard() {
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
+  const [engine, setEngine] = useState<EngineStatus | null>(null);
   const [sysStatus, setSysStatus] = useState<SysStatus>({
     upload_speed: 0,
     download_speed: 0,
@@ -33,145 +25,116 @@ export default function Dashboard() {
   });
 
   useEffect(() => {
-    invoke<boolean>('check_is_admin')
-      .then(setIsAdmin)
-      .catch(() => setIsAdmin(false));
-
-    // Listen for live sys status (if the widget listener is already running)
-    import('@tauri-apps/api/event').then(({ listen }) => {
-      const unlistenPromise = listen<SysStatus>('sys-status-update', (e) => {
-        setSysStatus(e.payload);
-      });
-      return () => {
-        unlistenPromise.then((f) => f());
-      };
+    void invoke<boolean>("check_is_admin").then(setIsAdmin).catch(() => setIsAdmin(false));
+    void invoke<EngineStatus>("get_engine_status").then(setEngine).catch(() => {
+      setEngine({ running: false, enabled: false, last_error: "读取引擎状态失败" });
     });
+
+    const statusListener = listen<SysStatus>("sys-status-update", (event) => {
+      setSysStatus(event.payload);
+    });
+    const engineListener = listen<EngineStatus>("engine-status-changed", (event) => {
+      setEngine(event.payload);
+    });
+
+    return () => {
+      void statusListener.then((unlisten) => unlisten());
+      void engineListener.then((unlisten) => unlisten());
+    };
   }, []);
 
-  const handleRelaunchAdmin = () => {
-    invoke('relaunch_as_admin');
-  };
-
-  const formatTotal = (bytesPerSec: number): string => {
-    // Approximate cumulative for "today" (just show per-second as a live value)
-    if (bytesPerSec < 1024) return `${bytesPerSec.toFixed(0)} B/s`;
-    const kb = bytesPerSec / 1024;
-    if (kb < 1024) return `${kb.toFixed(1)} KB/s`;
-    return `${(kb / 1024).toFixed(1)} MB/s`;
-  };
+  const engineClass = engine?.last_error
+    ? `${styles.status} ${styles.error}`
+    : engine?.running && engine.enabled
+      ? `${styles.status} ${styles.running}`
+      : styles.status;
+  const engineLabel = engine?.last_error
+    ? "启动异常"
+    : !engine?.running
+      ? "未运行"
+      : engine.enabled
+        ? "运行中"
+        : "已暂停";
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* ── Card 1: Admin status ─────────────────────────────── */}
-      <Card
-        title={
-          <Space>
-            <IconAlertCircle size="large" />
-            <span>权限状态</span>
-          </Space>
-        }
-        style={{ borderRadius: 8 }}
-      >
-        {isAdmin === null ? (
-          <Spin />
-        ) : isAdmin ? (
-          <Space vertical align="start" style={{ width: '100%' }}>
-            <Tag color="green" size="large" style={{ padding: '4px 12px' }}>
-              ✅ 以管理员权限运行
-            </Tag>
-            <Text type="secondary" style={{ marginTop: 4 }}>
-              全局键盘映射在所有窗口中正常工作。
-            </Text>
-          </Space>
-        ) : (
-          <Space vertical align="start" style={{ width: '100%' }}>
+    <div className={styles.page}>
+      {!isAdmin && isAdmin !== null && (
+        <Card className={styles.glassCard}>
+          <div className={styles.adminAction}>
             <Banner
               type="warning"
               closeIcon={null}
-              title="权限不足"
-              description="未以管理员身份运行，部分高权限窗口的键盘映射将失效。"
-              extra={
-                <Button theme="solid" type="warning" onClick={handleRelaunchAdmin}>
-                  以管理员身份重启
-                </Button>
-              }
-              style={{ width: '100%', marginBottom: 0 }}
+              title="当前为普通用户权限"
+              description="高权限窗口中的按键映射可能不生效。"
             />
-          </Space>
-        )}
-      </Card>
+            <Button
+              theme="solid"
+              type="warning"
+              onClick={() => void invoke("relaunch_as_admin")}
+            >
+              以管理员身份重启
+            </Button>
+          </div>
+        </Card>
+      )}
 
-      {/* ── Card 2: Keyboard hook engine ─────────────────────── */}
-      <Card
-        title={
-          <Space>
-            <IconKey size="large" />
-            <span>键盘钩子引擎</span>
-          </Space>
-        }
-        style={{ borderRadius: 8 }}
-      >
-        <Space align="center">
-          <Tag color="green" size="large" style={{ padding: '4px 12px' }}>
-            ● 运行中
-          </Tag>
-          <Text type="secondary">全局键盘映射引擎已就绪</Text>
-        </Space>
-      </Card>
+      <div className={styles.overviewGrid}>
+        <Card className={styles.glassCard}>
+          <div className={styles.metric}>
+            <span className={styles.metricIcon}><IconArrowUp /></span>
+            <div>
+              <Text type="secondary">实时上传</Text>
+              <span className={styles.metricValue}>{formatSpeed(sysStatus.upload_speed)}</span>
+            </div>
+          </div>
+        </Card>
+        <Card className={styles.glassCard}>
+          <div className={styles.metric}>
+            <span className={styles.metricIcon}><IconArrowDown /></span>
+            <div>
+              <Text type="secondary">实时下载</Text>
+              <span className={styles.metricValue}>{formatSpeed(sysStatus.download_speed)}</span>
+            </div>
+          </div>
+        </Card>
+        <Card className={styles.glassCard}>
+          <div className={styles.metric}>
+            <span className={styles.metricIcon}><IconLive /></span>
+            <div>
+              <Text type="secondary">内存占用</Text>
+              <span className={styles.metricValue}>{sysStatus.memory_usage.toFixed(0)}%</span>
+            </div>
+          </div>
+        </Card>
+      </div>
 
-      {/* ── Card 3: Live traffic ─────────────────────────────── */}
-      <Card
-        title={
-          <Space>
-            <span>实时流量</span>
-          </Space>
-        }
-        style={{ borderRadius: 8 }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            gap: 40,
-            flexWrap: 'wrap',
-            alignItems: 'center',
-          }}
-        >
-          <Space>
-            <IconArrowUp size="large" style={{ color: 'var(--semi-color-success)' }} />
-            <div>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                上传
-              </Text>
-              <br />
-              <Text strong style={{ fontSize: 18 }}>
-                {formatTotal(sysStatus.upload_speed)}
-              </Text>
-            </div>
-          </Space>
-          <Space>
-            <IconArrowDown size="large" style={{ color: 'var(--semi-color-warning)' }} />
-            <div>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                下载
-              </Text>
-              <br />
-              <Text strong style={{ fontSize: 18 }}>
-                {formatTotal(sysStatus.download_speed)}
-              </Text>
-            </div>
-          </Space>
-          <Space>
-            <div>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                内存
-              </Text>
-              <br />
-              <Text strong style={{ fontSize: 18 }}>
-                {sysStatus.memory_usage.toFixed(0)}%
-              </Text>
-            </div>
-          </Space>
+      <Card className={styles.surfaceCard}>
+        <div className={styles.sectionHeader}>
+          <Title heading={6}><IconKey /> 键盘映射引擎</Title>
+          {engine === null ? <Spin size="small" /> : <span className={engineClass}>{engineLabel}</span>}
         </div>
+        <Text type="secondary">
+          {engine?.last_error ??
+            (engine?.enabled
+              ? "原生 Windows 低级键盘钩子已就绪，注入事件会被自动忽略。"
+              : "映射规则已保留，重新启用后立即生效。")}
+        </Text>
+      </Card>
+
+      <Card className={styles.surfaceCard}>
+        <div className={styles.sectionHeader}>
+          <Title heading={6}><IconAlertCircle /> 权限状态</Title>
+          {isAdmin === null ? (
+            <Spin size="small" />
+          ) : (
+            <span className={`${styles.status} ${isAdmin ? styles.running : ""}`}>
+              {isAdmin ? "管理员权限" : "普通用户权限"}
+            </span>
+          )}
+        </div>
+        <Text type="secondary">
+          管理员权限仅用于让映射覆盖高权限窗口；其他功能可在普通权限下使用。
+        </Text>
       </Card>
     </div>
   );

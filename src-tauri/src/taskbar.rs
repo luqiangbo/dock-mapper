@@ -3,8 +3,8 @@ use tauri::{LogicalPosition, LogicalSize, Manager, Position, Size, WebviewWindow
 use windows::core::PCSTR;
 use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowA, FindWindowExA, GetSystemMetrics, GetWindowLongPtrW, GetWindowRect, SetParent,
-    SetWindowLongPtrW, GWL_EXSTYLE, GWL_STYLE, SM_CXSCREEN, WS_CHILD, WS_EX_TOOLWINDOW,
+    FindWindowA, FindWindowExA, GetParent, GetSystemMetrics, GetWindowLongPtrW, GetWindowRect,
+    SetParent, SetWindowLongPtrW, GWL_EXSTYLE, GWL_STYLE, SM_CXSCREEN, WS_CHILD, WS_EX_TOOLWINDOW,
     WS_EX_TRANSPARENT,
 };
 
@@ -14,14 +14,6 @@ const PADDING_LOGICAL: f64 = 10.0;
 
 /// Initial default width used before the frontend reports its real size.
 const DEFAULT_WIDTH_LOGICAL: f64 = 180.0;
-
-// ─── Global: latest content-driven width ────────────────────────────────
-use lazy_static::lazy_static;
-use std::sync::Mutex;
-
-lazy_static! {
-    static ref DYNAMIC_WIDTH: Mutex<f64> = Mutex::new(DEFAULT_WIDTH_LOGICAL);
-}
 
 /// Embeds the widget webview window into the Windows taskbar.
 pub fn embed_widget_to_taskbar(window: &WebviewWindow) {
@@ -79,7 +71,7 @@ pub fn embed_widget_to_taskbar(window: &WebviewWindow) {
             DEFAULT_WIDTH_LOGICAL,
             WIDGET_HEIGHT_LOGICAL,
         )));
-        position_widget_dpi_aware(window, taskbar_hwnd);
+        position_widget_dpi_aware(window, taskbar_hwnd, DEFAULT_WIDTH_LOGICAL);
 
         println!("[taskbar] Widget embedded successfully");
     }
@@ -109,9 +101,11 @@ unsafe fn get_window_rect(hwnd: HWND) -> Option<RECT> {
 }
 
 // ─── DPI-aware position (uses dynamic width from global store) ──────────
-unsafe fn position_widget_dpi_aware(window: &WebviewWindow, taskbar_hwnd: HWND) {
-    let width_logical = *DYNAMIC_WIDTH.lock().unwrap();
-
+unsafe fn position_widget_dpi_aware(
+    window: &WebviewWindow,
+    taskbar_hwnd: HWND,
+    width_logical: f64,
+) {
     let scale_factor = window.scale_factor().unwrap_or(1.0);
 
     let taskbar_rect = match get_window_rect(taskbar_hwnd) {
@@ -153,9 +147,12 @@ unsafe fn position_widget_dpi_aware(window: &WebviewWindow, taskbar_hwnd: HWND) 
 /// Called by the frontend whenever its content DOM width changes.
 /// Resizes the window to exactly match the content width and
 /// re-anchors the X position.
-pub fn sync_dynamic_width(app: &tauri::AppHandle, width: f64) {
-    let clamped = width.max(80.0).min(600.0);
-    *DYNAMIC_WIDTH.lock().unwrap() = clamped;
+pub fn sync_dynamic_width(app: &tauri::AppHandle, width: f64) -> f64 {
+    let clamped = if width.is_finite() {
+        width.clamp(80.0, 600.0)
+    } else {
+        DEFAULT_WIDTH_LOGICAL
+    };
 
     if let Some(widget) = app.get_webview_window("taskbar_widget") {
         // 1. Resize to exact content width
@@ -168,21 +165,22 @@ pub fn sync_dynamic_width(app: &tauri::AppHandle, width: f64) {
         unsafe {
             let class_name = match CString::new("Shell_TrayWnd") {
                 Ok(c) => c,
-                Err(_) => return,
+                Err(_) => return clamped,
             };
             if let Ok(taskbar_hwnd) =
                 FindWindowA(PCSTR(class_name.as_ptr() as *const u8), PCSTR::null())
             {
                 if !taskbar_hwnd.0.is_null() {
-                    position_widget_dpi_aware(&widget, taskbar_hwnd);
+                    position_widget_dpi_aware(&widget, taskbar_hwnd, clamped);
                 }
             }
         }
     }
+    clamped
 }
 
 /// Periodic refresh (used by the 3-second timer).
-pub fn refresh_widget_position(app: &tauri::AppHandle) {
+pub fn refresh_widget_position(app: &tauri::AppHandle, width: f64) {
     if let Some(widget) = app.get_webview_window("taskbar_widget") {
         unsafe {
             let class_name = match CString::new("Shell_TrayWnd") {
@@ -193,7 +191,27 @@ pub fn refresh_widget_position(app: &tauri::AppHandle) {
                 FindWindowA(PCSTR(class_name.as_ptr() as *const u8), PCSTR::null())
             {
                 if !taskbar_hwnd.0.is_null() {
-                    position_widget_dpi_aware(&widget, taskbar_hwnd);
+                    if let Ok(widget_hwnd) = widget.hwnd() {
+                        let current_parent = GetParent(widget_hwnd).ok();
+                        if current_parent != Some(taskbar_hwnd) {
+                            let style = GetWindowLongPtrW(widget_hwnd, GWL_STYLE);
+                            let _ = SetWindowLongPtrW(
+                                widget_hwnd,
+                                GWL_STYLE,
+                                style | WS_CHILD.0 as isize,
+                            );
+                            let ex_style = GetWindowLongPtrW(widget_hwnd, GWL_EXSTYLE);
+                            let _ = SetWindowLongPtrW(
+                                widget_hwnd,
+                                GWL_EXSTYLE,
+                                ex_style
+                                    | WS_EX_TOOLWINDOW.0 as isize
+                                    | WS_EX_TRANSPARENT.0 as isize,
+                            );
+                            let _ = SetParent(widget_hwnd, Some(taskbar_hwnd));
+                        }
+                    }
+                    position_widget_dpi_aware(&widget, taskbar_hwnd, width);
                 }
             }
         }

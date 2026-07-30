@@ -1,0 +1,190 @@
+.page {
+  display: flex;
+  max-width: 1080px;
+  margin: 0 auto;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.overviewGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.glassCard,
+.surfaceCard {
+  overflow: hidden;
+  border: 1px solid var(--glass-border) !important;
+  border-radius: var(--radius-card) !important;
+  background: var(--content-surface) !important;
+  box-shadow: var(--shadow-card), inset 0 1px var(--glass-highlight);
+}
+
+.metric {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.metricIcon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.metricValue {
+  display: block;
+  margin-top: 2px;
+  font: 650 20px/1.2 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.sectionHeader,
+.toolbar,
+.settingRow,
+.adminAction {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sectionHeader {
+  margin-bottom: 14px;
+}
+
+.sectionHeader h5,
+.sectionHeader h6 {
+  margin: 0;
+}
+
+.toolbar {
+  padding: 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  background: var(--glass-control);
+  backdrop-filter: blur(16px);
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--semi-color-text-2);
+}
+
+.status::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--status-muted);
+  content: "";
+}
+
+.status.running::before {
+  background: var(--status-success);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--status-success) 14%, transparent);
+}
+
+.status.error::before {
+  background: var(--semi-color-danger);
+}
+
+.settingsGroup {
+  display: flex;
+  flex-direction: column;
+}
+
+.settingRow {
+  min-height: 58px;
+  padding: 10px 0;
+}
+
+.settingRow + .settingRow {
+  border-top: 1px solid var(--glass-border);
+}
+
+.settingCopy {
+  min-width: 0;
+}
+
+.description {
+  display: block;
+  margin-top: 4px;
+  color: var(--semi-color-text-2);
+  font-size: 12px;
+}
+
+.preview {
+  display: grid;
+  min-height: 92px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 28% 15%, rgb(97 130 255 / 25%), transparent 44%),
+    linear-gradient(135deg, #17213a, #0b1020);
+}
+
+.previewCapsule {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 13px;
+  border: 1px solid rgb(255 255 255 / 22%);
+  border-radius: 999px;
+  color: white;
+  background: rgb(255 255 255 / 11%);
+  box-shadow: inset 0 1px rgb(255 255 255 / 18%);
+  font: 12px var(--font-mono);
+  backdrop-filter: blur(14px);
+}
+
+.table :global(.semi-table-container) {
+  border-radius: 12px;
+}
+
+.dangerText {
+  color: var(--semi-color-danger);
+  font-size: 12px;
+}
+
+.modalFields,
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modalFields {
+  gap: 16px;
+}
+
+.fullWidth {
+  width: 100%;
+}
+
+@media (max-width: 860px) {
+  .overviewGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (forced-colors: active) {
+  .glassCard,
+  .surfaceCard,
+  .toolbar,
+  .previewCapsule {
+    border: 1px solid CanvasText !important;
+    background: Canvas !important;
+    color: CanvasText !important;
+    backdrop-filter: none;
+  }
+}

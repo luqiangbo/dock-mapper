@@ -1,181 +1,214 @@
 name: Release
+
 on:
   push:
     tags:
       - "v*"
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  validate:
+    name: Validate
     runs-on: windows-latest
-
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: pnpm
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          version: latest
-
-      - name: Install frontend dependencies
-        run: pnpm install
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
+          components: rustfmt, clippy
           targets: x86_64-pc-windows-msvc
 
-      - name: Cache Rust dependencies
-        uses: swatinem/rust-cache@v2
+      - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
           key: windows-x86_64
 
-      # ============================================================
-      # 自动同步版本号：从 tag v1.0.5 提取 1.0.5 写入 tauri.conf.json
-      # 之后你只管打 tag，不用手动改版本号
-      # ============================================================
-      - name: Sync version from tag
+      - name: Validate tag and source versions
+        id: version
         shell: pwsh
         run: |
-          $tag = "${{ github.ref_name }}"
-          $version = $tag.TrimStart('v')
-          Write-Host "Setting version to $version from tag $tag"
-          $config = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
-          $config.version = $version
-          $config | ConvertTo-Json -Depth 10 | Set-Content src-tauri/tauri.conf.json
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
+            throw "Invalid release tag: ${{ github.ref_name }}"
+          }
+          node .github/scripts/sync-version.mjs --check $version
+          "version=$version" >> $env:GITHUB_OUTPUT
 
-      # ============================================================
-      # 代码签名（可选）
-      # ============================================================
-      - name: Import Windows code signing certificate
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend quality checks
+        shell: pwsh
+        run: |
+          pnpm typecheck
+          pnpm lint
+          pnpm test
+          pnpm build
+
+      - name: Rust quality checks
+        working-directory: src-tauri
+        shell: pwsh
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test
+
+  publish-release:
+    name: Build, verify and publish immutable release
+    needs: validate
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: windows-x86_64
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Import Windows signing certificate
         env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE || '' }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD || '' }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         shell: pwsh
         run: |
           if (-not $env:WINDOWS_CERTIFICATE) {
-            Write-Host "WINDOWS_CERTIFICATE not configured, skipping"
+            Write-Host "Windows certificate is not configured; Authenticode verification will be informational."
             exit 0
           }
-          New-Item -ItemType directory -Path certificate -Force
-          Set-Content -Path certificate/tempCert.txt -Value $env:WINDOWS_CERTIFICATE
-          certutil -decode certificate/tempCert.txt certificate/certificate.pfx
-          Remove-Item -Path certificate/tempCert.txt
-          Import-PfxCertificate -FilePath certificate/certificate.pfx `
+          New-Item -ItemType Directory -Path certificate -Force | Out-Null
+          Set-Content -Path certificate/certificate.txt -Value $env:WINDOWS_CERTIFICATE
+          certutil -decode certificate/certificate.txt certificate/certificate.pfx
+          Remove-Item -Path certificate/certificate.txt
+          Import-PfxCertificate `
+            -FilePath certificate/certificate.pfx `
             -CertStoreLocation Cert:\CurrentUser\My `
-            -Password (ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText)
+            -Password (ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force)
 
-      # ============================================================
-      # 构建 + 发布 + Winget 提交，一步到位
-      # ============================================================
-      - name: Build and publish
+      - name: Build and upload draft release
+        id: tauri
         uses: tauri-apps/tauri-action@v1
-        id: tauri_action
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "DockMapper ${{ github.ref_name }}"
-          releaseDraft: false
+          releaseName: DockMapper ${{ github.ref_name }}
+          releaseDraft: true
           prerelease: false
           args: --bundles nsis
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
           releaseBody: |
-            ## 一键安装
+            ## 安装
 
             ```powershell
             winget install luqiangbo.DockMapper
             ```
 
-            或下载 `DockMapper_${{ github.ref_name }}_x64-setup.exe` 双击安装。
+            也可下载 `DockMapper_${{ needs.validate.outputs.version }}_x64-setup.exe`。
 
-            ## 更新内容
+            [查看本版本提交](https://github.com/luqiangbo/dock-mapper/commits/${{ github.ref_name }})
 
-            [commits](https://github.com/luqiangbo/dock-mapper/commits/${{ github.ref_name }})
-          uploadUpdaterJson: true
-          updaterJsonPreferNsis: true
-
-      # ============================================================
-      # 更新 updater.json（备用）
-      # ============================================================
-      - name: Update updater.json on main branch
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          path: main-branch
-
-      - name: Generate updater.json
-        shell: pwsh
+      - name: Verify release assets
         env:
+          GH_TOKEN: ${{ github.token }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           TAG_NAME: ${{ github.ref_name }}
-        run: |
-          $tag = $env:TAG_NAME
-          $version = $tag.TrimStart('v')
-          $url = "https://github.com/luqiangbo/dock-mapper/releases/download/$tag/DockMapper_${version}_x64-setup.exe"
-          $json = @{
-            version = $version
-            notes  = "Release $tag"
-            pub_date = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
-            platforms = @{
-              "windows-x86_64" = @{
-                signature = ""
-                url = $url
-              }
-            }
-          } | ConvertTo-Json
-          Set-Content -Path "main-branch/updater.json" -Value $json
-
-      - name: Commit updater.json
-        continue-on-error: true
         shell: pwsh
-        working-directory: main-branch
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add updater.json
-          git diff --cached --quiet || git commit -m "chore: update updater.json for ${{ github.ref_name }} [skip ci]"
-          git push
+          New-Item -ItemType Directory -Path release-assets -Force | Out-Null
+          gh release download $env:TAG_NAME --dir release-assets
 
-      # ============================================================
-      # 提交到 Winget
-      # ============================================================
-      - name: Submit Winget manifest
+          $installer = Get-ChildItem release-assets -Filter "*_x64-setup.exe" | Select-Object -First 1
+          if (-not $installer) { throw "NSIS installer is missing" }
+
+          $updater = Get-Content release-assets/latest.json -Raw | ConvertFrom-Json
+          $platforms = $updater.platforms.PSObject.Properties
+          if (-not $platforms -or $platforms.Count -eq 0) { throw "latest.json has no platforms" }
+          foreach ($platform in $platforms) {
+            if (-not $platform.Value.signature) {
+              throw "Updater signature is missing for $($platform.Name)"
+            }
+          }
+
+          $signature = Get-AuthenticodeSignature $installer.FullName
+          if ($env:WINDOWS_CERTIFICATE -and $signature.Status -ne "Valid") {
+            throw "Authenticode signature is invalid: $($signature.Status)"
+          }
+          Write-Host "Installer SHA-256: $((Get-FileHash $installer.FullName -Algorithm SHA256).Hash)"
+
+      - name: Publish verified release
         env:
-          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN || '' }}
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${{ github.ref_name }}" --draft=false
+
+  submit-winget:
+    name: Submit Winget update
+    needs: [validate, publish-release]
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Submit manifest
+        env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_TOKEN }}
         shell: pwsh
         run: |
-          if (-not $env:WINGET_TOKEN) {
-            Write-Host "WINGET_TOKEN not configured, skipping Winget submission"
+          if (-not $env:WINGET_CREATE_GITHUB_TOKEN) {
+            Write-Host "WINGET_TOKEN is not configured; skipping Winget submission."
             exit 0
           }
-          $tag = $env:TAG_NAME
-          $version = $tag.TrimStart('v')
 
-          # ─── 用 wingetcreate update 自动生成多文件清单并提交 PR ───
-          # wingetcreate update 会：
-          #   1. 从 winget-pkgs 拉取现有 manifest
-          #   2. 下载安装器并计算 SHA256
-          #   3. 自动生成正确的多文件格式（ManifestVersion 1.12.0）
-          #   4. 提交 PR 到 microsoft/winget-pkgs
-          $wcexe = "$env:TEMP\wingetcreate.exe"
-          Invoke-WebRequest -Uri "https://github.com/microsoft/winget-create/releases/download/v1.12.13.0/wingetcreate.exe" -OutFile $wcexe
+          $installerUrl = gh release view $env:TAG_NAME `
+            --repo "${{ github.repository }}" `
+            --json assets `
+            --jq '.assets[] | select(.name | endswith("_x64-setup.exe")) | .url'
+          if (-not $installerUrl) { throw "Release installer URL is missing" }
 
-          # 从 Release 获取安装器下载 URL
-          $release = gh release view $tag --json assets --jq '.assets[] | select(.name | endswith("_x64-setup.exe")) | .url'
-          & $wcexe update luqiangbo.DockMapper `
+          $wingetCreate = "$env:TEMP\wingetcreate.exe"
+          Invoke-WebRequest `
+            -Uri "https://github.com/microsoft/winget-create/releases/download/v1.12.13.0/wingetcreate.exe" `
+            -OutFile $wingetCreate
+
+          & $wingetCreate update luqiangbo.DockMapper `
             --submit `
-            --token $env:WINGET_TOKEN `
-            --urls $release `
-            --version $version
+            --urls $installerUrl `
+            --version $env:VERSION

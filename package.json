@@ -1,18 +1,24 @@
 {
   "name": "dock-mapper",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.5",
+  "packageManager": "pnpm@10.15.0",
   "type": "module",
   "scripts": {
     "dev": "rsbuild dev",
     "build": "rsbuild build",
     "preview": "rsbuild preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint src",
+    "test": "vitest run --passWithNoTests",
+    "version:sync": "node .github/scripts/sync-version.mjs"
   },
   "dependencies": {
     "@douyinfe/semi-icons": "^2.101.0",
     "@douyinfe/semi-ui": "^2.101.0",
     "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-autostart": "^2",
     "@tauri-apps/plugin-updater": "^2",
@@ -25,6 +31,8 @@
     "@tauri-apps/cli": "^2.11.4",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "typescript": "^7.0.2"
+    "oxlint": "^1.36.0",
+    "typescript": "^7.0.2",
+    "vitest": "^3.2.4"
   }
 }
