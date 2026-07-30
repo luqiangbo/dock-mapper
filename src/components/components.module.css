@@ -1,15 +1,25 @@
 .page {
   display: flex;
-  max-width: 1080px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto 18px;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
+}
+
+.overviewPanel {
+  padding: 26px;
+  border: 1px solid var(--glass-border);
+  border-radius: 26px;
+  background: var(--glass);
+  box-shadow: var(--shadow-card), inset 0 1px var(--glass-highlight);
+  backdrop-filter: blur(28px) saturate(145%);
 }
 
 .overviewGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
+  gap: 18px;
 }
 
 .glassCard,
@@ -21,27 +31,37 @@
   box-shadow: var(--shadow-card), inset 0 1px var(--glass-highlight);
 }
 
+.glassCard :global(.semi-card-body) {
+  padding: 26px 24px;
+}
+
+.surfaceCard :global(.semi-card-body) {
+  padding: 26px 30px;
+}
+
 .metric {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
 }
 
 .metricIcon {
   display: grid;
-  width: 38px;
-  height: 38px;
-  flex: 0 0 38px;
+  width: 56px;
+  height: 56px;
+  flex: 0 0 56px;
   place-items: center;
-  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
   color: var(--accent);
   background: var(--accent-soft);
+  font-size: 26px;
 }
 
 .metricValue {
   display: block;
-  margin-top: 2px;
-  font: 650 20px/1.2 var(--font-mono);
+  margin-top: 6px;
+  font: 650 24px/1.2 var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -56,7 +76,7 @@
 }
 
 .sectionHeader {
-  margin-bottom: 14px;
+  min-height: 74px;
 }
 
 .sectionHeader h5,
@@ -76,7 +96,12 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
   color: var(--semi-color-text-2);
+  background: var(--glass-control);
 }
 
 .status::before {
@@ -94,6 +119,76 @@
 
 .status.error::before {
   background: var(--semi-color-danger);
+}
+
+.adminNotice {
+  display: flex;
+  min-height: 82px;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 26px;
+  padding: 16px 20px;
+  border: 1px solid color-mix(in srgb, var(--warning) 20%, transparent);
+  border-radius: 16px;
+  background: var(--warning-soft);
+}
+
+.adminNotice button {
+  min-height: 44px;
+  margin-left: auto;
+  padding-inline: 20px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ff9518, #f47700);
+  box-shadow: 0 8px 20px rgb(238 116 0 / 22%);
+  font-weight: 650;
+}
+
+.warningIcon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--warning);
+  font-size: 28px;
+}
+
+.adminCopy {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.adminCopy strong {
+  font-size: 18px;
+}
+
+.sectionIdentity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 18px;
+}
+
+.sectionIdentity > div {
+  min-width: 0;
+}
+
+.sectionIdentity h6 {
+  margin-bottom: 10px;
+  font-size: 18px;
+}
+
+.surfaceIcon {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  flex: 0 0 58px;
+  place-items: center;
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-size: 26px;
 }
 
 .settingsGroup {
@@ -174,6 +269,30 @@
 @media (max-width: 860px) {
   .overviewGrid {
     grid-template-columns: 1fr;
+  }
+
+  .adminCopy {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 680px) {
+  .overviewPanel {
+    padding: 16px;
+  }
+
+  .adminNotice {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .adminNotice button {
+    width: 100%;
+  }
+
+  .sectionHeader {
+    align-items: flex-start;
   }
 }
 

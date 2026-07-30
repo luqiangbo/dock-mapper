@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Banner, Button, Card, Spin, Typography } from "@douyinfe/semi-ui";
+import { Button, Card, Spin, Typography } from "@douyinfe/semi-ui";
 import {
   IconAlertCircle,
   IconArrowDown,
@@ -58,15 +58,14 @@ export default function Dashboard() {
 
   return (
     <div className={styles.page}>
-      {!isAdmin && isAdmin !== null && (
-        <Card className={styles.glassCard}>
-          <div className={styles.adminAction}>
-            <Banner
-              type="warning"
-              closeIcon={null}
-              title="当前为普通用户权限"
-              description="高权限窗口中的按键映射可能不生效。"
-            />
+      <section className={styles.overviewPanel}>
+        {!isAdmin && isAdmin !== null && (
+          <div className={styles.adminNotice} role="status">
+            <span className={styles.warningIcon}><IconAlertCircle /></span>
+            <div className={styles.adminCopy}>
+              <strong>当前为普通用户权限</strong>
+              <Text type="secondary">高权限窗口中的按键映射可能不生效。</Text>
+            </div>
             <Button
               theme="solid"
               type="warning"
@@ -75,55 +74,68 @@ export default function Dashboard() {
               以管理员身份重启
             </Button>
           </div>
-        </Card>
-      )}
+        )}
 
-      <div className={styles.overviewGrid}>
-        <Card className={styles.glassCard}>
-          <div className={styles.metric}>
-            <span className={styles.metricIcon}><IconArrowUp /></span>
-            <div>
-              <Text type="secondary">实时上传</Text>
-              <span className={styles.metricValue}>{formatSpeed(sysStatus.upload_speed)}</span>
+        <div className={styles.overviewGrid}>
+          <Card className={styles.glassCard}>
+            <div className={styles.metric}>
+              <span className={styles.metricIcon}><IconArrowUp /></span>
+              <div>
+                <Text type="secondary">实时上传</Text>
+                <span className={styles.metricValue}>{formatSpeed(sysStatus.upload_speed)}</span>
+              </div>
             </div>
-          </div>
-        </Card>
-        <Card className={styles.glassCard}>
-          <div className={styles.metric}>
-            <span className={styles.metricIcon}><IconArrowDown /></span>
-            <div>
-              <Text type="secondary">实时下载</Text>
-              <span className={styles.metricValue}>{formatSpeed(sysStatus.download_speed)}</span>
+          </Card>
+          <Card className={styles.glassCard}>
+            <div className={styles.metric}>
+              <span className={styles.metricIcon}><IconArrowDown /></span>
+              <div>
+                <Text type="secondary">实时下载</Text>
+                <span className={styles.metricValue}>{formatSpeed(sysStatus.download_speed)}</span>
+              </div>
             </div>
-          </div>
-        </Card>
-        <Card className={styles.glassCard}>
-          <div className={styles.metric}>
-            <span className={styles.metricIcon}><IconLive /></span>
-            <div>
-              <Text type="secondary">内存占用</Text>
-              <span className={styles.metricValue}>{sysStatus.memory_usage.toFixed(0)}%</span>
+          </Card>
+          <Card className={styles.glassCard}>
+            <div className={styles.metric}>
+              <span className={styles.metricIcon}><IconLive /></span>
+              <div>
+                <Text type="secondary">内存占用</Text>
+                <span className={styles.metricValue}>{sysStatus.memory_usage.toFixed(0)}%</span>
+              </div>
             </div>
-          </div>
-        </Card>
-      </div>
+          </Card>
+        </div>
+      </section>
 
       <Card className={styles.surfaceCard}>
         <div className={styles.sectionHeader}>
-          <Title heading={6}><IconKey /> 键盘映射引擎</Title>
+          <div className={styles.sectionIdentity}>
+            <span className={styles.surfaceIcon}><IconKey /></span>
+            <div>
+              <Title heading={6}>键盘映射引擎</Title>
+              <Text type="secondary">
+                {engine?.last_error ??
+                  (engine?.enabled
+                    ? "原生 Windows 低级键盘钩子已就绪，注入事件会被自动忽略。"
+                    : "映射规则已保留，重新启用后立即生效。")}
+              </Text>
+            </div>
+          </div>
           {engine === null ? <Spin size="small" /> : <span className={engineClass}>{engineLabel}</span>}
         </div>
-        <Text type="secondary">
-          {engine?.last_error ??
-            (engine?.enabled
-              ? "原生 Windows 低级键盘钩子已就绪，注入事件会被自动忽略。"
-              : "映射规则已保留，重新启用后立即生效。")}
-        </Text>
       </Card>
 
       <Card className={styles.surfaceCard}>
         <div className={styles.sectionHeader}>
-          <Title heading={6}><IconAlertCircle /> 权限状态</Title>
+          <div className={styles.sectionIdentity}>
+            <span className={styles.surfaceIcon}><IconAlertCircle /></span>
+            <div>
+              <Title heading={6}>权限状态</Title>
+              <Text type="secondary">
+                管理员权限仅用于让映射覆盖高权限窗口；其他功能可在普通权限下使用。
+              </Text>
+            </div>
+          </div>
           {isAdmin === null ? (
             <Spin size="small" />
           ) : (
@@ -132,9 +144,6 @@ export default function Dashboard() {
             </span>
           )}
         </div>
-        <Text type="secondary">
-          管理员权限仅用于让映射覆盖高权限窗口；其他功能可在普通权限下使用。
-        </Text>
       </Card>
     </div>
   );

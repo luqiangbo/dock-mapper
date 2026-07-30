@@ -80,6 +80,11 @@ export default function App() {
   return (
     <Layout className={styles.shell}>
       <Sider className={`${styles.sider} ${siderCollapsed ? styles.collapsed : ""}`}>
+        <div className={styles.windowControls} aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </div>
         <div className={styles.brand}>
           <span className={styles.brandMark} aria-hidden="true">D</span>
           {!siderCollapsed && <Text strong>DockMapper</Text>}

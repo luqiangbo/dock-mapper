@@ -40,7 +40,11 @@ export function ThemeProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     document.documentElement.dataset.theme = resolved;
-    document.body.toggleAttribute("theme-mode", resolved === "dark");
+    if (resolved === "dark") {
+      document.body.setAttribute("theme-mode", "dark");
+    } else {
+      document.body.removeAttribute("theme-mode");
+    }
     void getCurrentWindow().setTheme(resolved);
   }, [resolved]);
 

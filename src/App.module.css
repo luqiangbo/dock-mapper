@@ -1,79 +1,151 @@
 .shell {
   min-width: 640px;
   height: 100vh;
-  background: transparent;
+  gap: 18px;
+  padding: 18px;
+  background: var(--app-surface);
 }
 
 .sider {
   position: relative;
   z-index: 2;
   display: flex;
-  width: 208px !important;
-  min-width: 208px !important;
+  width: 252px !important;
+  min-width: 252px !important;
   flex-direction: column;
   overflow: hidden;
-  border-right: 1px solid var(--glass-border);
+  border: 1px solid var(--glass-border);
+  border-radius: 28px;
   background: var(--glass-strong);
-  box-shadow: inset -1px 0 var(--glass-highlight);
-  backdrop-filter: blur(28px) saturate(145%);
+  box-shadow: var(--shadow-panel), inset 0 1px var(--glass-highlight);
+  backdrop-filter: blur(32px) saturate(150%);
   transition: width 180ms ease, min-width 180ms ease;
 }
 
 .sider.collapsed {
-  width: 72px !important;
-  min-width: 72px !important;
+  width: 76px !important;
+  min-width: 76px !important;
+}
+
+.windowControls {
+  display: flex;
+  gap: 10px;
+  padding: 26px 28px 18px;
+}
+
+.windowControls span {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ff5f57;
+  box-shadow: inset 0 -1px 1px rgb(0 0 0 / 14%);
+}
+
+.windowControls span:nth-child(2) {
+  background: #ffbd2e;
+}
+
+.windowControls span:nth-child(3) {
+  background: #28c840;
+}
+
+.collapsed .windowControls {
+  justify-content: center;
+  gap: 4px;
+  padding-inline: 10px;
+}
+
+.collapsed .windowControls span {
+  width: 9px;
+  height: 9px;
 }
 
 .brand {
   display: flex;
-  min-height: 64px;
+  min-height: 84px;
   align-items: center;
-  gap: 10px;
-  padding: 0 18px;
+  gap: 16px;
+  margin: 0 26px;
+  padding: 0 0 20px;
   border-bottom: 1px solid var(--glass-border);
   white-space: nowrap;
 }
 
 .brandMark {
   display: grid;
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
   place-items: center;
-  border: 1px solid rgb(255 255 255 / 38%);
-  border-radius: 10px;
+  border: 1px solid rgb(255 255 255 / 42%);
+  border-radius: 13px;
   color: white;
-  background: linear-gradient(145deg, #7c9cff, #5967e8);
+  background: linear-gradient(145deg, #6f91ff, #4d5cf2);
   box-shadow: 0 6px 18px rgb(70 89 210 / 34%), inset 0 1px rgb(255 255 255 / 42%);
-  font-weight: 700;
+  font-size: 22px;
+  font-weight: 750;
+}
+
+.brand :global(.semi-typography) {
+  font-size: 18px;
 }
 
 .nav {
   flex: 1;
+  padding: 16px 14px 18px !important;
   border: 0 !important;
   background: transparent !important;
 }
 
+.nav :global(.semi-navigation-item) {
+  min-height: 48px;
+  margin-bottom: 8px;
+  border: 1px solid transparent;
+  border-radius: 13px;
+}
+
+.nav :global(.semi-navigation-item-selected) {
+  border-color: rgb(61 115 245 / 55%);
+  background: var(--accent-soft) !important;
+  box-shadow: inset 0 1px rgb(255 255 255 / 12%);
+}
+
+.nav :global(.semi-navigation-item-icon) {
+  color: var(--semi-color-text-2);
+}
+
+.nav :global(.semi-navigation-item-selected .semi-navigation-item-icon) {
+  color: var(--accent);
+}
+
+.nav :global(.semi-navigation-footer) {
+  padding-top: 18px;
+  border-top: 1px solid var(--glass-border);
+}
+
 .collapseButton {
   width: 100%;
-  border-radius: 10px;
+  min-height: 44px;
+  border-radius: 12px;
 }
 
 .workspace {
   min-width: 0;
-  background: var(--app-surface);
+  gap: 18px;
+  background: transparent;
 }
 
 .header {
   display: flex;
-  min-height: 58px;
+  min-height: 88px;
   align-items: center;
   justify-content: space-between;
-  padding: 0 22px;
-  border-bottom: 1px solid var(--glass-border);
+  padding: 0 30px;
+  border: 1px solid var(--glass-border);
+  border-radius: 26px;
   background: var(--glass);
-  box-shadow: inset 0 -1px var(--glass-highlight);
-  backdrop-filter: blur(20px) saturate(135%);
+  box-shadow: var(--shadow-card), inset 0 1px var(--glass-highlight);
+  backdrop-filter: blur(28px) saturate(145%);
 }
 
 .pageTitle,
@@ -83,24 +155,36 @@
   gap: 10px;
 }
 
+.pageTitle {
+  color: var(--accent);
+  font-size: 22px;
+}
+
 .pageTitle h5 {
   margin: 0;
+  color: var(--semi-color-text-0);
+  font-size: 21px;
 }
 
 .headerActions button {
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--glass-border);
   border-radius: 12px;
+  background: var(--glass-control);
 }
 
 .statusChip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px;
+  min-height: 42px;
+  padding: 7px 16px;
   border: 1px solid var(--glass-border);
   border-radius: 999px;
   color: var(--semi-color-text-2);
   background: var(--glass-control);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .statusChip.success {
@@ -110,12 +194,14 @@
 .content {
   min-width: 0;
   overflow: auto;
-  padding: 24px;
+  padding: 0;
 }
 
 @media (max-width: 760px) {
   .shell {
     min-width: 0;
+    gap: 12px;
+    padding: 12px;
   }
 
   .statusChip {
@@ -126,7 +212,7 @@
   }
 
   .content {
-    padding: 16px;
+    padding: 0;
   }
 }
 

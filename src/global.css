@@ -1,36 +1,50 @@
 :root {
   color-scheme: light;
-  --app-surface: rgb(242 245 251 / 93%);
-  --content-surface: rgb(255 255 255 / 76%);
-  --glass: rgb(250 252 255 / 66%);
-  --glass-strong: rgb(244 248 255 / 72%);
-  --glass-control: rgb(255 255 255 / 52%);
-  --glass-border: rgb(62 74 104 / 14%);
-  --glass-highlight: rgb(255 255 255 / 70%);
-  --accent: #5368e8;
-  --accent-soft: rgb(83 104 232 / 12%);
+  --app-surface:
+    radial-gradient(circle at 9% 12%, rgb(128 179 255 / 58%), transparent 31%),
+    radial-gradient(circle at 91% 30%, rgb(255 211 202 / 63%), transparent 31%),
+    radial-gradient(circle at 62% 92%, rgb(132 181 255 / 45%), transparent 35%),
+    linear-gradient(145deg, #d7e8ff 0%, #e9efff 43%, #f8deda 73%, #a9caf5 100%);
+  --content-surface: rgb(255 255 255 / 64%);
+  --glass: rgb(255 255 255 / 55%);
+  --glass-strong: rgb(250 252 255 / 58%);
+  --glass-control: rgb(255 255 255 / 48%);
+  --glass-border: rgb(255 255 255 / 72%);
+  --glass-highlight: rgb(255 255 255 / 72%);
+  --accent: #2f6ff5;
+  --accent-soft: rgb(47 111 245 / 10%);
   --status-success: #168653;
   --status-muted: #8790a5;
-  --radius-card: 18px;
+  --warning: #ff8500;
+  --warning-soft: rgb(255 245 229 / 70%);
+  --radius-card: 22px;
   --radius-control: 14px;
-  --shadow-card: 0 12px 36px rgb(35 49 85 / 9%);
+  --shadow-card: 0 18px 44px rgb(63 84 129 / 10%);
+  --shadow-panel: 0 24px 70px rgb(45 69 118 / 12%);
   --font-mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --app-surface: rgb(16 19 28 / 91%);
-  --content-surface: rgb(33 37 49 / 74%);
-  --glass: rgb(28 32 43 / 68%);
-  --glass-strong: rgb(25 29 40 / 76%);
+  --app-surface:
+    radial-gradient(circle at 16% 82%, rgb(29 78 146 / 48%), transparent 34%),
+    radial-gradient(circle at 91% 72%, rgb(152 54 86 / 35%), transparent 32%),
+    radial-gradient(circle at 60% 9%, rgb(25 55 121 / 30%), transparent 37%),
+    linear-gradient(145deg, #050b18 0%, #09152b 48%, #1a1734 73%, #071326 100%);
+  --content-surface: rgb(23 30 51 / 66%);
+  --glass: rgb(18 26 47 / 64%);
+  --glass-strong: rgb(15 24 43 / 72%);
   --glass-control: rgb(255 255 255 / 7%);
-  --glass-border: rgb(255 255 255 / 11%);
-  --glass-highlight: rgb(255 255 255 / 8%);
-  --accent: #91a2ff;
-  --accent-soft: rgb(124 145 255 / 15%);
+  --glass-border: rgb(191 209 255 / 17%);
+  --glass-highlight: rgb(255 255 255 / 10%);
+  --accent: #4381ff;
+  --accent-soft: rgb(67 129 255 / 12%);
   --status-success: #52d596;
   --status-muted: #778096;
-  --shadow-card: 0 14px 42px rgb(0 0 0 / 24%);
+  --warning: #ff8a00;
+  --warning-soft: rgb(84 54 22 / 18%);
+  --shadow-card: 0 18px 48px rgb(0 0 0 / 18%);
+  --shadow-panel: 0 28px 78px rgb(0 0 0 / 24%);
 }
 
 * {
@@ -47,7 +61,8 @@ body,
 body {
   margin: 0;
   overflow: hidden;
-  background: transparent;
+  color: var(--semi-color-text-0);
+  background: #d7e8ff;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Microsoft YaHei", sans-serif;
   text-rendering: optimizeLegibility;
