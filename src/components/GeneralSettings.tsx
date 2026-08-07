@@ -9,22 +9,9 @@ import {
 } from "@tauri-apps/plugin-autostart";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
-import {
-  Banner,
-  Button,
-  Card,
-  Modal,
-  Notification,
-  Radio,
-  RadioGroup,
-  Spin,
-  Switch,
-  Typography,
-} from "@douyinfe/semi-ui";
-import { IconRefresh } from "@douyinfe/semi-icons";
-import { useTheme } from "../ThemeContext";
-import type { ThemeMode } from "../types";
-import styles from "./components.module.css";
+import { Alert, App as AntApp, Button, Card, Spin, Switch, Typography } from "antd";
+import { ReloadOutlined } from "@ant-design/icons";
+import styles from "./components.module.scss";
 
 const { Text } = Typography;
 const REPOSITORY_URL = "https://github.com/luqiangbo/dock-mapper";
@@ -36,7 +23,7 @@ export default function GeneralSettings() {
   const [minimizeLoading, setMinimizeLoading] = useState(true);
   const [checking, setChecking] = useState(false);
   const [version, setVersion] = useState("—");
-  const { mode, setMode } = useTheme();
+  const { modal, notification } = AntApp.useApp();
 
   useEffect(() => {
     void isAutostartEnabled()
@@ -56,9 +43,9 @@ export default function GeneralSettings() {
       if (checked) await enableAutostart();
       else await disableAutostart();
       setAutoStart(checked);
-      Notification.success({ content: checked ? "开机自启已开启" : "开机自启已关闭" });
+      notification.success({ message: checked ? "开机自启已开启" : "开机自启已关闭" });
     } catch (error) {
-      Notification.error({ content: `操作失败：${error}` });
+      notification.error({ message: "操作失败", description: String(error) });
     } finally {
       setAutoStartLoading(false);
     }
@@ -70,7 +57,7 @@ export default function GeneralSettings() {
       await invoke("set_minimize_to_tray", { enabled: checked });
       setMinimizeToTray(checked);
     } catch (error) {
-      Notification.error({ content: `操作失败：${error}` });
+      notification.error({ message: "操作失败", description: String(error) });
     } finally {
       setMinimizeLoading(false);
     }
@@ -81,10 +68,10 @@ export default function GeneralSettings() {
     try {
       const update = await check();
       if (!update) {
-        Notification.success({ content: "当前已是最新版本" });
+        notification.success({ message: "当前已是最新版本" });
         return;
       }
-      Modal.confirm({
+      modal.confirm({
         title: `发现 DockMapper ${update.version}`,
         content: "下载完成后应用将自动重启。",
         okText: "下载并安装",
@@ -95,7 +82,7 @@ export default function GeneralSettings() {
         },
       });
     } catch (error) {
-      Notification.error({ content: `检查更新失败：${error}` });
+      notification.error({ message: "检查更新失败", description: String(error) });
     } finally {
       setChecking(false);
     }
@@ -133,19 +120,6 @@ export default function GeneralSettings() {
         </div>
       </Card>
 
-      <Card className={styles.surfaceCard} title="外观">
-        <RadioGroup
-          type="button"
-          value={mode}
-          onChange={(event) => setMode(event.target.value as ThemeMode)}
-          aria-label="主题模式"
-        >
-          <Radio value="light">浅色</Radio>
-          <Radio value="dark">深色</Radio>
-          <Radio value="system">跟随系统</Radio>
-        </RadioGroup>
-      </Card>
-
       <Card className={styles.surfaceCard} title="更新与关于">
         <div className={styles.settingsGroup}>
           <div className={styles.settingRow}>
@@ -153,7 +127,7 @@ export default function GeneralSettings() {
               <Text strong>DockMapper {version}</Text>
               <span className={styles.description}>Tauri 2 + React · Windows 10/11 x64</span>
             </div>
-            <Button type="tertiary" onClick={() => void openUrl(REPOSITORY_URL)}>
+            <Button onClick={() => void openUrl(REPOSITORY_URL)}>
               GitHub
             </Button>
           </div>
@@ -163,7 +137,7 @@ export default function GeneralSettings() {
               <span className={styles.description}>从签名的 GitHub Release 检查更新</span>
             </div>
             <Button
-              icon={<IconRefresh />}
+              icon={<ReloadOutlined />}
               loading={checking}
               onClick={() => void checkForUpdate()}
             >
@@ -173,10 +147,10 @@ export default function GeneralSettings() {
         </div>
       </Card>
 
-      <Banner
+      <Alert
         type="info"
-        closeIcon={null}
-        title="管理员权限说明"
+        showIcon
+        message="管理员权限说明"
         description="仅在需要映射高权限窗口时使用管理员模式；开机自启默认使用当前用户权限。"
       />
     </div>

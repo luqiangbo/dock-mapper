@@ -1,0 +1,246 @@
+$compact-radius: 10px;
+
+.shell {
+  min-width: 640px;
+  height: 100vh;
+  padding: 10px;
+  background: var(--app-surface);
+}
+
+.siderPanel {
+  min-width: 0;
+  overflow: hidden;
+  padding-right: 6px;
+  container-type: inline-size;
+}
+
+.sider {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  background: var(--glass-strong);
+  box-shadow: var(--shadow-panel), inset 0 1px var(--glass-highlight);
+  backdrop-filter: blur(32px) saturate(150%);
+}
+
+.brand {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  gap: 10px;
+  margin: 0 16px;
+  padding: 0 0 10px;
+  border-bottom: 1px solid var(--glass-border);
+  white-space: nowrap;
+
+  :global(.ant-typography) {
+    font-size: 15px;
+  }
+}
+
+.brandMark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 42%);
+  border-radius: $compact-radius;
+  color: white;
+  background: linear-gradient(145deg, #6f91ff, #4d5cf2);
+  box-shadow: 0 5px 14px rgb(70 89 210 / 30%), inset 0 1px rgb(255 255 255 / 42%);
+  font-size: 17px;
+  font-weight: 750;
+}
+
+.nav {
+  min-width: 0;
+  flex: 1;
+  padding: 8px !important;
+  border: 0 !important;
+  background: transparent !important;
+
+  :global(.ant-menu-item) {
+    min-width: 0;
+    min-height: 38px;
+    margin-block: 2px;
+    border-radius: $compact-radius;
+    line-height: 38px;
+    cursor: pointer;
+  }
+
+  :global(.ant-menu-item-selected) {
+    color: var(--accent) !important;
+    background: var(--accent-soft) !important;
+    box-shadow: inset 0 1px rgb(255 255 255 / 12%);
+  }
+
+  :global(.ant-menu-item-selected::after) {
+    display: none;
+  }
+
+  :global(.ant-menu-item-icon) {
+    color: var(--text-secondary);
+  }
+
+  :global(.ant-menu-item-selected .ant-menu-item-icon) {
+    color: var(--accent);
+  }
+}
+
+.workspacePanel {
+  min-width: 0;
+  overflow: hidden;
+  padding-left: 6px;
+}
+
+.workspace {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  gap: 8px;
+  background: transparent;
+}
+
+.header {
+  display: flex;
+  min-height: 64px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  background: var(--glass);
+  box-shadow: var(--shadow-card), inset 0 1px var(--glass-highlight);
+  backdrop-filter: blur(28px) saturate(145%);
+}
+
+.pageTitle,
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dragRegion {
+  align-self: stretch;
+  flex: 1;
+  margin-inline: 10px;
+  cursor: move;
+}
+
+.pageTitle {
+  color: var(--accent);
+  font-size: 18px;
+
+  :global(.ant-typography) {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 16px;
+  }
+}
+
+.headerActions {
+  :global(.ant-btn) {
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    color: var(--text-secondary);
+    background: var(--glass-control);
+
+    &:hover {
+      color: var(--accent);
+      border-color: var(--glass-border);
+      background: var(--glass-control);
+    }
+  }
+}
+
+.windowControls {
+  display: flex;
+  gap: 1px;
+  margin-left: 3px;
+  padding-left: 8px;
+  border-left: 1px solid var(--glass-border);
+
+  button {
+    appearance: none;
+    display: grid;
+    width: 34px;
+    height: 32px;
+    padding: 0;
+    border: 0;
+    border-radius: 7px;
+    place-items: center;
+    color: var(--text-secondary);
+    background: transparent;
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease;
+
+    &:hover {
+      background: var(--glass-control);
+    }
+
+    &:last-child:hover {
+      color: white;
+      background: #c42b3b;
+    }
+  }
+
+  svg {
+    width: 12px;
+    height: 12px;
+    overflow: visible;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.6;
+  }
+}
+
+.statusButton.success {
+  color: var(--status-success) !important;
+}
+
+.content {
+  min-width: 0;
+  overflow: auto;
+  padding: 0;
+}
+
+@container (max-width: 190px) {
+  .brand {
+    gap: 7px;
+    margin-inline: 10px;
+
+    :global(.ant-typography) {
+      font-size: 14px;
+    }
+  }
+
+  .brandMark {
+    width: 32px;
+    height: 32px;
+    flex-basis: 32px;
+    font-size: 16px;
+  }
+
+  .nav {
+    padding-inline: 5px !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .shell {
+    min-width: 0;
+    padding: 8px;
+  }
+
+}

@@ -1,0 +1,283 @@
+$compact-gap: 8px;
+$compact-radius: 10px;
+
+.page {
+  display: flex;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto 10px;
+  flex-direction: column;
+  gap: $compact-gap;
+}
+
+.overviewPanel {
+  padding: 16px;
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  background: var(--glass);
+  box-shadow: var(--shadow-card), inset 0 1px var(--glass-highlight);
+  backdrop-filter: blur(28px) saturate(145%);
+}
+
+.overviewGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: $compact-gap;
+}
+
+.glassCard,
+.surfaceCard {
+  overflow: hidden;
+  border: 1px solid var(--glass-border) !important;
+  border-radius: 16px !important;
+  background: var(--content-surface) !important;
+  box-shadow: var(--shadow-card), inset 0 1px var(--glass-highlight);
+
+  :global(.ant-card-body) {
+    padding: 16px 18px;
+  }
+}
+
+.metric {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.metricIcon,
+.surfaceIcon {
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--glass-border);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.metricIcon {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  border-radius: 12px;
+  font-size: 21px;
+}
+
+.metricValue {
+  display: block;
+  margin-top: 3px;
+  font: 650 21px/1.2 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.sectionHeader,
+.toolbar,
+.settingRow,
+.adminAction {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $compact-gap;
+}
+
+.sectionHeader {
+  min-height: 50px;
+
+  h5,
+  h6 {
+    margin: 0;
+  }
+}
+
+.toolbar {
+  padding: 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: $compact-radius;
+  background: var(--glass-control);
+  backdrop-filter: blur(16px);
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border: 1px solid var(--glass-border);
+  border-radius: $compact-radius;
+  color: var(--text-secondary);
+  background: var(--glass-control);
+
+  &::before {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--status-muted);
+    content: "";
+  }
+
+  &.running::before {
+    background: var(--status-success);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-success) 14%, transparent);
+  }
+
+  &.error::before {
+    background: var(--danger);
+  }
+}
+
+.adminNotice {
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 20%, transparent);
+  border-radius: 10px;
+  background: var(--warning-soft);
+
+  .adminButton {
+    flex: 0 1 auto;
+    min-height: 30px;
+    margin-left: auto;
+    padding-inline: 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+}
+
+.warningIcon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--warning);
+  font-size: 22px;
+}
+
+.adminCopy {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 4px;
+
+  strong {
+    font-size: 15px;
+  }
+}
+
+.sectionIdentity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+
+  > div {
+    min-width: 0;
+  }
+
+  h6 {
+    margin-bottom: 4px;
+    font-size: 15px;
+  }
+}
+
+.surfaceIcon {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  border-radius: 12px;
+  font-size: 20px;
+}
+
+.settingsGroup {
+  display: flex;
+  flex-direction: column;
+}
+
+.settingRow {
+  min-height: 46px;
+  padding: 6px 0;
+
+  & + & {
+    border-top: 1px solid var(--glass-border);
+  }
+}
+
+.settingCopy {
+  min-width: 0;
+}
+
+.description {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.table {
+  :global(.ant-table-container) {
+    border-radius: $compact-radius;
+  }
+}
+
+.dangerText {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.modalFields,
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.modalFields {
+  gap: 10px;
+}
+
+.fullWidth {
+  width: 100%;
+}
+
+@media (max-width: 860px) {
+  .overviewGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .adminCopy {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 680px) {
+  .overviewPanel {
+    padding: 12px;
+  }
+
+  .adminNotice {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .adminButton {
+    width: auto;
+    margin-left: 0;
+  }
+
+  .sectionHeader {
+    align-items: flex-start;
+  }
+}
+
+@media (forced-colors: active) {
+  .glassCard,
+  .surfaceCard,
+  .toolbar {
+    border: 1px solid CanvasText !important;
+    background: Canvas !important;
+    color: CanvasText !important;
+    backdrop-filter: none;
+  }
+}

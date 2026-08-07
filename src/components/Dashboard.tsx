@@ -1,17 +1,17 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Button, Card, Spin, Typography } from "@douyinfe/semi-ui";
+import { Button, Card, Spin, Typography } from "antd";
 import {
-  IconAlertCircle,
-  IconArrowDown,
-  IconArrowUp,
-  IconKey,
-  IconLive,
-} from "@douyinfe/semi-icons";
+  ArrowDownOutlined,
+  ArrowUpOutlined,
+  DashboardOutlined,
+  ExclamationCircleOutlined,
+  KeyOutlined,
+} from "@ant-design/icons";
 import type { EngineStatus, SysStatus } from "../types";
 import { formatSpeed } from "../utils/format";
-import styles from "./components.module.css";
+import styles from "./components.module.scss";
 
 const { Text, Title } = Typography;
 
@@ -61,14 +61,14 @@ export default function Dashboard() {
       <section className={styles.overviewPanel}>
         {!isAdmin && isAdmin !== null && (
           <div className={styles.adminNotice} role="status">
-            <span className={styles.warningIcon}><IconAlertCircle /></span>
+            <span className={styles.warningIcon}><ExclamationCircleOutlined /></span>
             <div className={styles.adminCopy}>
               <strong>当前为普通用户权限</strong>
               <Text type="secondary">高权限窗口中的按键映射可能不生效。</Text>
             </div>
             <Button
-              theme="solid"
-              type="warning"
+              className={styles.adminButton}
+              type="default"
               onClick={() => void invoke("relaunch_as_admin")}
             >
               以管理员身份重启
@@ -79,7 +79,7 @@ export default function Dashboard() {
         <div className={styles.overviewGrid}>
           <Card className={styles.glassCard}>
             <div className={styles.metric}>
-              <span className={styles.metricIcon}><IconArrowUp /></span>
+              <span className={styles.metricIcon}><ArrowUpOutlined /></span>
               <div>
                 <Text type="secondary">实时上传</Text>
                 <span className={styles.metricValue}>{formatSpeed(sysStatus.upload_speed)}</span>
@@ -88,7 +88,7 @@ export default function Dashboard() {
           </Card>
           <Card className={styles.glassCard}>
             <div className={styles.metric}>
-              <span className={styles.metricIcon}><IconArrowDown /></span>
+              <span className={styles.metricIcon}><ArrowDownOutlined /></span>
               <div>
                 <Text type="secondary">实时下载</Text>
                 <span className={styles.metricValue}>{formatSpeed(sysStatus.download_speed)}</span>
@@ -97,7 +97,7 @@ export default function Dashboard() {
           </Card>
           <Card className={styles.glassCard}>
             <div className={styles.metric}>
-              <span className={styles.metricIcon}><IconLive /></span>
+              <span className={styles.metricIcon}><DashboardOutlined /></span>
               <div>
                 <Text type="secondary">内存占用</Text>
                 <span className={styles.metricValue}>{sysStatus.memory_usage.toFixed(0)}%</span>
@@ -110,9 +110,9 @@ export default function Dashboard() {
       <Card className={styles.surfaceCard}>
         <div className={styles.sectionHeader}>
           <div className={styles.sectionIdentity}>
-            <span className={styles.surfaceIcon}><IconKey /></span>
+            <span className={styles.surfaceIcon}><KeyOutlined /></span>
             <div>
-              <Title heading={6}>键盘映射引擎</Title>
+              <Title level={5}>键盘映射引擎</Title>
               <Text type="secondary">
                 {engine?.last_error ??
                   (engine?.enabled
@@ -128,9 +128,9 @@ export default function Dashboard() {
       <Card className={styles.surfaceCard}>
         <div className={styles.sectionHeader}>
           <div className={styles.sectionIdentity}>
-            <span className={styles.surfaceIcon}><IconAlertCircle /></span>
+            <span className={styles.surfaceIcon}><ExclamationCircleOutlined /></span>
             <div>
-              <Title heading={6}>权限状态</Title>
+              <Title level={5}>权限状态</Title>
               <Text type="secondary">
                 管理员权限仅用于让映射覆盖高权限窗口；其他功能可在普通权限下使用。
               </Text>

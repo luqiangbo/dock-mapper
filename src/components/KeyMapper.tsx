@@ -1,18 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  Button,
-  Modal,
-  Notification,
-  Select,
-  Switch,
-  Table,
-  Tag,
-  Typography,
-} from "@douyinfe/semi-ui";
-import { IconDelete, IconPlus } from "@douyinfe/semi-icons";
+import { App as AntApp, Button, Modal, Select, Switch, Table, Tag, Typography } from "antd";
+import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import type { EngineStatus, KeyCode, KeyMapping, SupportedKey } from "../types";
-import styles from "./components.module.css";
+import styles from "./components.module.scss";
 
 const { Text } = Typography;
 
@@ -24,6 +15,7 @@ export default function KeyMapper() {
   const [newSource, setNewSource] = useState<KeyCode | null>(null);
   const [newTarget, setNewTarget] = useState<KeyCode | null>(null);
   const [saving, setSaving] = useState(false);
+  const { notification } = AntApp.useApp();
 
   useEffect(() => {
     Promise.all([
@@ -38,9 +30,9 @@ export default function KeyMapper() {
       })
       .catch((error) => {
         console.error(error);
-        Notification.error({ content: "加载按键映射失败" });
+        notification.error({ message: "加载按键映射失败" });
       });
-  }, []);
+  }, [notification]);
 
   const groupedKeys = useMemo(() => {
     return supportedKeys.reduce<Map<string, SupportedKey[]>>((groups, key) => {
@@ -51,32 +43,41 @@ export default function KeyMapper() {
     }, new Map());
   }, [supportedKeys]);
 
+  const keyOptions = useMemo(
+    () =>
+      [...groupedKeys.entries()].map(([group, keys]) => ({
+        label: group,
+        options: keys.map((key) => ({ label: key.label, value: key.code })),
+      })),
+    [groupedKeys],
+  );
+
   const syncMappings = useCallback(async (updated: KeyMapping[]) => {
     setSaving(true);
     try {
       await invoke("sync_key_mappings", { mappings: updated });
       setMappings(updated);
-      Notification.success({ content: "按键映射已更新" });
+      notification.success({ message: "按键映射已更新" });
       return true;
     } catch (error) {
-      Notification.error({ content: `同步失败：${error}` });
+      notification.error({ message: "同步失败", description: String(error) });
       return false;
     } finally {
       setSaving(false);
     }
-  }, []);
+  }, [notification]);
 
   const addMapping = async () => {
     if (!newSource || !newTarget) {
-      Notification.warning({ content: "请选择源按键和目标按键" });
+      notification.warning({ message: "请选择源按键和目标按键" });
       return;
     }
     if (newSource === newTarget) {
-      Notification.warning({ content: "源按键与目标按键不能相同" });
+      notification.warning({ message: "源按键与目标按键不能相同" });
       return;
     }
     if (mappings.some((mapping) => mapping.source_key === newSource)) {
-      Notification.warning({ content: "该源按键已有映射规则" });
+      notification.warning({ message: "该源按键已有映射规则" });
       return;
     }
 
@@ -100,22 +101,11 @@ export default function KeyMapper() {
     try {
       const status = await invoke<EngineStatus>("set_engine_enabled", { enabled });
       setEngine(status);
-      Notification.info({ content: enabled ? "映射引擎已开启" : "映射引擎已暂停" });
+      notification.info({ message: enabled ? "映射引擎已开启" : "映射引擎已暂停" });
     } catch (error) {
-      Notification.error({ content: `切换失败：${error}` });
+      notification.error({ message: "切换失败", description: String(error) });
     }
   };
-
-  const renderKeyOptions = () =>
-    [...groupedKeys.entries()].flatMap(([group, keys]) => [
-      <Select.OptGroup key={`group-${group}`} label={group}>
-        {keys.map((key) => (
-          <Select.Option key={key.code} value={key.code}>
-            {key.label}
-          </Select.Option>
-        ))}
-      </Select.OptGroup>,
-    ]);
 
   const columns = [
     {
@@ -151,8 +141,8 @@ export default function KeyMapper() {
       render: (_: unknown, record: KeyMapping) => (
         <Button
           aria-label={`删除 ${record.source_key} 映射`}
-          type="danger"
-          icon={<IconDelete />}
+          danger
+          icon={<DeleteOutlined />}
           size="small"
           disabled={saving}
           onClick={() => void syncMappings(mappings.filter((item) => item.id !== record.id))}
@@ -185,7 +175,7 @@ export default function KeyMapper() {
           <Text strong>映射规则</Text>
           <span className={styles.description}>规则 ID 与停用状态会完整持久化</span>
         </div>
-        <Button icon={<IconPlus />} type="primary" onClick={() => setAddVisible(true)}>
+        <Button icon={<PlusOutlined />} type="primary" onClick={() => setAddVisible(true)}>
           添加规则
         </Button>
       </div>
@@ -197,12 +187,12 @@ export default function KeyMapper() {
         dataSource={mappings}
         pagination={false}
         loading={saving}
-        empty={<Text type="secondary">暂无映射规则</Text>}
+        locale={{ emptyText: <Text type="secondary">暂无映射规则</Text> }}
       />
 
       <Modal
         title="添加按键映射"
-        visible={addVisible}
+        open={addVisible}
         onOk={() => void addMapping()}
         onCancel={() => {
           setAddVisible(false);
@@ -217,28 +207,22 @@ export default function KeyMapper() {
           <label className={styles.field}>
             <Text strong>源按键（物理按键）</Text>
             <Select
-            placeholder="请选择"
-            value={newSource ?? undefined}
-            onChange={(value) => {
-              if (typeof value === "string") setNewSource(value as KeyCode);
-            }}
-            className={styles.fullWidth}
-          >
-            {renderKeyOptions()}
-            </Select>
+              placeholder="请选择"
+              value={newSource ?? undefined}
+              options={keyOptions}
+              onChange={(value) => setNewSource(value as KeyCode)}
+              className={styles.fullWidth}
+            />
           </label>
           <label className={styles.field}>
             <Text strong>目标按键（映射为）</Text>
             <Select
-            placeholder="请选择"
-            value={newTarget ?? undefined}
-            onChange={(value) => {
-              if (typeof value === "string") setNewTarget(value as KeyCode);
-            }}
-            className={styles.fullWidth}
-          >
-            {renderKeyOptions()}
-            </Select>
+              placeholder="请选择"
+              value={newTarget ?? undefined}
+              options={keyOptions}
+              onChange={(value) => setNewTarget(value as KeyCode)}
+              className={styles.fullWidth}
+            />
           </label>
         </div>
       </Modal>

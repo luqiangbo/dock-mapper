@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { CaretDownFilled, CaretUpFilled } from "@ant-design/icons";
 import type { MemoryScheme, SysStatus, WidgetConfig } from "./types";
 import { formatSpeedParts } from "./utils/format";
-import "./widget.css";
+import "./widget.scss";
 
 function memoryColor(usage: number): string {
   if (usage < 70) return "#35c985";
@@ -127,17 +128,16 @@ function TaskbarWidget() {
     <div className="widget-container" ref={containerRef}>
       <div className="net-speed" aria-label="实时网速">
         <div className="speed-row">
-          <span className="up-arrow" aria-hidden="true">↑</span>
+          <CaretUpFilled className="speed-arrow up-arrow" aria-hidden="true" />
           <span className="speed-value">{upload.value}</span>
           <span className="speed-unit">{upload.unit}</span>
         </div>
         <div className="speed-row">
-          <span className="down-arrow" aria-hidden="true">↓</span>
+          <CaretDownFilled className="speed-arrow down-arrow" aria-hidden="true" />
           <span className="speed-value">{download.value}</span>
           <span className="speed-unit">{download.unit}</span>
         </div>
       </div>
-      <span className="separator" aria-hidden="true" />
       <MemoryIndicator usage={status.memory_usage} scheme={scheme} />
     </div>
   );
