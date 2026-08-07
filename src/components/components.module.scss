@@ -1,3 +1,5 @@
+@use "../styles/glass" as glass;
+
 $compact-gap: 8px;
 $compact-radius: 10px;
 
@@ -12,11 +14,7 @@ $compact-radius: 10px;
 
 .overviewPanel {
   padding: 16px;
-  border: 1px solid var(--glass-border);
-  border-radius: 16px;
-  background: var(--glass);
-  box-shadow: var(--shadow-card), inset 0 1px var(--glass-highlight);
-  backdrop-filter: blur(28px) saturate(145%);
+  @include glass.surface(var(--glass-surface), 16px);
 }
 
 .overviewGrid {
@@ -28,10 +26,9 @@ $compact-radius: 10px;
 .glassCard,
 .surfaceCard {
   overflow: hidden;
-  border: 1px solid var(--glass-border) !important;
-  border-radius: 16px !important;
-  background: var(--content-surface) !important;
-  box-shadow: var(--shadow-card), inset 0 1px var(--glass-highlight);
+  @include glass.surface(var(--glass-surface), 14px);
+  border-radius: 14px !important;
+  background: var(--glass-surface) !important;
 
   :global(.ant-card-body) {
     padding: 16px 18px;
@@ -89,10 +86,7 @@ $compact-radius: 10px;
 
 .toolbar {
   padding: 8px;
-  border: 1px solid var(--glass-border);
-  border-radius: $compact-radius;
-  background: var(--glass-control);
-  backdrop-filter: blur(16px);
+  @include glass.control($compact-radius);
 }
 
 .status {
@@ -101,10 +95,8 @@ $compact-radius: 10px;
   gap: 6px;
   flex: 0 0 auto;
   padding: 5px 9px;
-  border: 1px solid var(--glass-border);
-  border-radius: $compact-radius;
   color: var(--text-secondary);
-  background: var(--glass-control);
+  @include glass.control($compact-radius);
 
   &::before {
     width: 6px;
@@ -230,6 +222,16 @@ $compact-radius: 10px;
   display: flex;
   flex-direction: column;
   gap: 7px;
+}
+
+.field {
+  :global(.ant-select-selector) {
+    @include glass.control(8px);
+  }
+}
+
+:global(.ant-input-number) {
+  @include glass.control(8px);
 }
 
 .modalFields {

@@ -6,7 +6,7 @@ import { ThemeProvider, useTheme } from "./ThemeContext";
 import "./global.scss";
 
 function ThemedApp() {
-  const { resolved } = useTheme();
+  const { accentColor, resolved } = useTheme();
 
   return (
     <ConfigProvider
@@ -14,8 +14,23 @@ function ThemedApp() {
       theme={{
         algorithm: resolved === "dark" ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
         token: {
-          colorPrimary: "#2f6ff5",
+          colorPrimary: accentColor,
           borderRadius: 10,
+        },
+        components: {
+          Button: {
+            borderRadius: 8,
+            primaryShadow: "none",
+            defaultBg: "var(--glass-control)",
+            defaultBorderColor: "var(--glass-border)",
+            defaultColor: "var(--text-primary)",
+            defaultHoverBg: "var(--glass-control-hover)",
+            defaultHoverBorderColor: accentColor,
+            defaultHoverColor: accentColor,
+            defaultActiveBg: "var(--glass-control-active)",
+            defaultActiveBorderColor: accentColor,
+            defaultActiveColor: accentColor,
+          },
         },
       }}
     >

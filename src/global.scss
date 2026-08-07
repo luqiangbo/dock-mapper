@@ -1,18 +1,22 @@
 :root {
   color-scheme: light;
   --app-surface:
-    radial-gradient(circle at 9% 12%, rgb(128 179 255 / 58%), transparent 31%),
-    radial-gradient(circle at 91% 30%, rgb(255 211 202 / 63%), transparent 31%),
-    radial-gradient(circle at 62% 92%, rgb(132 181 255 / 45%), transparent 35%),
+    radial-gradient(circle at 9% 12%, rgb(128 179 255 / 42%), transparent 31%),
+    radial-gradient(circle at 91% 30%, rgb(255 211 202 / 45%), transparent 31%),
+    radial-gradient(circle at 62% 92%, rgb(132 181 255 / 32%), transparent 35%),
     linear-gradient(145deg, #d7e8ff 0%, #e9efff 43%, #f8deda 73%, #a9caf5 100%);
-  --content-surface: rgb(255 255 255 / 64%);
-  --glass: rgb(255 255 255 / 55%);
-  --glass-strong: rgb(250 252 255 / 58%);
-  --glass-control: rgb(255 255 255 / 48%);
-  --glass-border: rgb(255 255 255 / 72%);
+  --glass-panel: rgb(255 255 255 / 66%);
+  --glass-surface: rgb(255 255 255 / 50%);
+  --glass-control: rgb(255 255 255 / 34%);
+  --glass-border: rgb(255 255 255 / 58%);
   --glass-highlight: rgb(255 255 255 / 72%);
+  --glass-shadow: 0 12px 32px rgb(45 69 118 / 13%);
+  --glass-blur: 24px;
   --accent: #2f6ff5;
   --accent-soft: rgb(47 111 245 / 10%);
+  --button-accent: #6f61c5;
+  --glass-control-hover: rgb(255 255 255 / 48%);
+  --glass-control-active: rgb(255 255 255 / 58%);
   --text-primary: #172033;
   --text-secondary: #5f6b82;
   --text-tertiary: #8790a5;
@@ -25,26 +29,28 @@
   --warning-soft: rgb(255 245 229 / 70%);
   --radius-card: 16px;
   --radius-control: 10px;
-  --shadow-card: 0 14px 36px rgb(63 84 129 / 9%);
-  --shadow-panel: 0 20px 60px rgb(45 69 118 / 11%);
   --font-mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
   --app-surface:
-    radial-gradient(circle at 16% 82%, rgb(29 78 146 / 48%), transparent 34%),
-    radial-gradient(circle at 91% 72%, rgb(152 54 86 / 35%), transparent 32%),
-    radial-gradient(circle at 60% 9%, rgb(25 55 121 / 30%), transparent 37%),
+    radial-gradient(circle at 16% 82%, rgb(29 78 146 / 38%), transparent 34%),
+    radial-gradient(circle at 91% 72%, rgb(152 54 86 / 28%), transparent 32%),
+    radial-gradient(circle at 60% 9%, rgb(25 55 121 / 24%), transparent 37%),
     linear-gradient(145deg, #050b18 0%, #09152b 48%, #1a1734 73%, #071326 100%);
-  --content-surface: rgb(23 30 51 / 66%);
-  --glass: rgb(18 26 47 / 64%);
-  --glass-strong: rgb(15 24 43 / 72%);
+  --glass-panel: rgb(15 24 43 / 80%);
+  --glass-surface: rgb(23 30 51 / 66%);
   --glass-control: rgb(255 255 255 / 7%);
-  --glass-border: rgb(191 209 255 / 17%);
-  --glass-highlight: rgb(255 255 255 / 10%);
+  --glass-border: rgb(191 209 255 / 15%);
+  --glass-highlight: rgb(255 255 255 / 12%);
+  --glass-shadow: 0 16px 42px rgb(0 0 0 / 24%);
+  --glass-blur: 24px;
   --accent: #4381ff;
   --accent-soft: rgb(67 129 255 / 12%);
+  --button-accent: #a89cff;
+  --glass-control-hover: rgb(255 255 255 / 12%);
+  --glass-control-active: rgb(255 255 255 / 17%);
   --text-primary: #edf2ff;
   --text-secondary: #aeb9d4;
   --text-tertiary: #778096;
@@ -55,8 +61,6 @@
   --status-muted: #778096;
   --warning: #ff8a00;
   --warning-soft: rgb(84 54 22 / 18%);
-  --shadow-card: 0 14px 40px rgb(0 0 0 / 17%);
-  --shadow-panel: 0 24px 68px rgb(0 0 0 / 22%);
 }
 
 * {
@@ -125,9 +129,9 @@ body[style*="overflow: hidden"] {
 @media (prefers-contrast: more) {
   :root {
     --glass-border: currentColor;
-    --content-surface: var(--surface-base);
-    --glass: var(--surface-base);
-    --glass-strong: var(--surface-base);
+    --glass-panel: var(--surface-base);
+    --glass-surface: var(--surface-base);
+    --glass-control: var(--surface-base);
   }
 }
 

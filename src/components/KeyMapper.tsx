@@ -175,7 +175,7 @@ export default function KeyMapper() {
           <Text strong>映射规则</Text>
           <span className={styles.description}>规则 ID 与停用状态会完整持久化</span>
         </div>
-        <Button icon={<PlusOutlined />} type="primary" onClick={() => setAddVisible(true)}>
+        <Button icon={<PlusOutlined />} onClick={() => setAddVisible(true)}>
           添加规则
         </Button>
       </div>

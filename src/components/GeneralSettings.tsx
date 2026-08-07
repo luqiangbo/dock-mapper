@@ -9,8 +9,18 @@ import {
 } from "@tauri-apps/plugin-autostart";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
-import { Alert, App as AntApp, Button, Card, Spin, Switch, Typography } from "antd";
+import {
+  Alert,
+  App as AntApp,
+  Button,
+  Card,
+  ColorPicker,
+  Spin,
+  Switch,
+  Typography,
+} from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
+import { useTheme } from "../ThemeContext";
 import styles from "./components.module.scss";
 
 const { Text } = Typography;
@@ -23,6 +33,7 @@ export default function GeneralSettings() {
   const [minimizeLoading, setMinimizeLoading] = useState(true);
   const [checking, setChecking] = useState(false);
   const [version, setVersion] = useState("—");
+  const { accentColor, setAccentColor } = useTheme();
   const { modal, notification } = AntApp.useApp();
 
   useEffect(() => {
@@ -116,6 +127,22 @@ export default function GeneralSettings() {
                 onChange={(value) => void changeMinimize(value)}
               />
             )}
+          </div>
+        </div>
+      </Card>
+
+      <Card className={styles.surfaceCard} title="主题">
+        <div className={styles.settingsGroup}>
+          <div className={styles.settingRow}>
+            <div className={styles.settingCopy}>
+              <Text strong>主题色</Text>
+              <span className={styles.description}>自定义按钮、选中状态和交互反馈的强调色</span>
+            </div>
+            <ColorPicker
+              value={accentColor}
+              showText
+              onChangeComplete={(color) => setAccentColor(color.toHexString())}
+            />
           </div>
         </div>
       </Card>
