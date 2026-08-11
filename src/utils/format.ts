@@ -5,9 +5,7 @@ export function formatSpeed(bytesPerSec: number): string {
   return `${(kib / 1024).toFixed(1)} MB/s`;
 }
 
-export function formatSpeedParts(
-  bytesPerSec: number,
-): { value: string; unit: string } {
+export function formatSpeedParts(bytesPerSec: number): { value: string; unit: string } {
   if (bytesPerSec < 1024) return { value: bytesPerSec.toFixed(0), unit: "B/s" };
   const kib = bytesPerSec / 1024;
   if (kib < 1024) return { value: kib.toFixed(1), unit: "K/s" };

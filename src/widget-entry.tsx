@@ -18,10 +18,7 @@ function CapsuleIndicator({ usage }: { usage: number }) {
   const urgency = usage >= 90 ? " led-flash" : usage >= 70 ? " led-breathe" : "";
   return (
     <div className="capsule-indicator">
-      <span
-        className={`led-dot${urgency}`}
-        style={{ "--led-color": color } as CSSProperties}
-      />
+      <span className={`led-dot${urgency}`} style={{ "--led-color": color } as CSSProperties} />
       <span className="capsule-label" aria-label={`内存占用 ${usage.toFixed(0)}%`}>
         RAM {usage.toFixed(0)}%
       </span>

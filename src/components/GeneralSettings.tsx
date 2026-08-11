@@ -9,16 +9,7 @@ import {
 } from "@tauri-apps/plugin-autostart";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
-import {
-  Alert,
-  App as AntApp,
-  Button,
-  Card,
-  ColorPicker,
-  Spin,
-  Switch,
-  Typography,
-} from "antd";
+import { Alert, App as AntApp, Button, Card, ColorPicker, Spin, Switch, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useTheme } from "../ThemeContext";
 import styles from "./components.module.scss";
@@ -45,7 +36,9 @@ export default function GeneralSettings() {
       .then(setMinimizeToTray)
       .catch((error) => console.error("读取托盘设置失败", error))
       .finally(() => setMinimizeLoading(false));
-    void getVersion().then(setVersion).catch(() => setVersion("未知"));
+    void getVersion()
+      .then(setVersion)
+      .catch(() => setVersion("未知"));
   }, []);
 
   const changeAutostart = useCallback(async (checked: boolean) => {
@@ -122,10 +115,7 @@ export default function GeneralSettings() {
             {minimizeLoading ? (
               <Spin size="small" />
             ) : (
-              <Switch
-                checked={minimizeToTray}
-                onChange={(value) => void changeMinimize(value)}
-              />
+              <Switch checked={minimizeToTray} onChange={(value) => void changeMinimize(value)} />
             )}
           </div>
         </div>
@@ -154,9 +144,7 @@ export default function GeneralSettings() {
               <Text strong>DockMapper {version}</Text>
               <span className={styles.description}>Tauri 2 + React · Windows 10/11 x64</span>
             </div>
-            <Button onClick={() => void openUrl(REPOSITORY_URL)}>
-              GitHub
-            </Button>
+            <Button onClick={() => void openUrl(REPOSITORY_URL)}>GitHub</Button>
           </div>
           <div className={styles.settingRow}>
             <div className={styles.settingCopy}>

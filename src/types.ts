@@ -11,7 +11,7 @@ export interface KeyMapping {
 
 export interface SupportedKey {
   code: KeyCode;
-  label: string;
+     label: string;
   group: string;
 }
 

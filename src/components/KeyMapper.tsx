@@ -52,20 +52,23 @@ export default function KeyMapper() {
     [groupedKeys],
   );
 
-  const syncMappings = useCallback(async (updated: KeyMapping[]) => {
-    setSaving(true);
-    try {
-      await invoke("sync_key_mappings", { mappings: updated });
-      setMappings(updated);
-      notification.success({ message: "按键映射已更新" });
-      return true;
-    } catch (error) {
-      notification.error({ message: "同步失败", description: String(error) });
-      return false;
-    } finally {
-      setSaving(false);
-    }
-  }, [notification]);
+  const syncMappings = useCallback(
+    async (updated: KeyMapping[]) => {
+      setSaving(true);
+      try {
+        await invoke("sync_key_mappings", { mappings: updated });
+        setMappings(updated);
+        notification.success({ message: "按键映射已更新" });
+        return true;
+      } catch (error) {
+        notification.error({ message: "同步失败", description: String(error) });
+        return false;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [notification],
+  );
 
   const addMapping = async () => {
     if (!newSource || !newTarget) {

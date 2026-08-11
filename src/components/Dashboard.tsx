@@ -25,10 +25,18 @@ export default function Dashboard() {
   });
 
   useEffect(() => {
-    void invoke<boolean>("check_is_admin").then(setIsAdmin).catch(() => setIsAdmin(false));
-    void invoke<EngineStatus>("get_engine_status").then(setEngine).catch(() => {
-      setEngine({ running: false, enabled: false, last_error: "读取引擎状态失败" });
-    });
+    void invoke<boolean>("check_is_admin")
+      .then(setIsAdmin)
+      .catch(() => setIsAdmin(false));
+    void invoke<EngineStatus>("get_engine_status")
+      .then(setEngine)
+      .catch(() => {
+        setEngine({
+          running: false,
+          enabled: false,
+          last_error: "读取引擎状态失败",
+        });
+      });
 
     const statusListener = listen<SysStatus>("sys-status-update", (event) => {
       setSysStatus(event.payload);
@@ -61,7 +69,9 @@ export default function Dashboard() {
       <section className={styles.overviewPanel}>
         {!isAdmin && isAdmin !== null && (
           <div className={styles.adminNotice} role="status">
-            <span className={styles.warningIcon}><ExclamationCircleOutlined /></span>
+            <span className={styles.warningIcon}>
+              <ExclamationCircleOutlined />
+            </span>
             <div className={styles.adminCopy}>
               <strong>当前为普通用户权限</strong>
               <Text type="secondary">高权限窗口中的按键映射可能不生效。</Text>
@@ -79,7 +89,9 @@ export default function Dashboard() {
         <div className={styles.overviewGrid}>
           <Card className={styles.glassCard}>
             <div className={styles.metric}>
-              <span className={styles.metricIcon}><ArrowUpOutlined /></span>
+              <span className={styles.metricIcon}>
+                <ArrowUpOutlined />
+              </span>
               <div>
                 <Text type="secondary">实时上传</Text>
                 <span className={styles.metricValue}>{formatSpeed(sysStatus.upload_speed)}</span>
@@ -88,7 +100,9 @@ export default function Dashboard() {
           </Card>
           <Card className={styles.glassCard}>
             <div className={styles.metric}>
-              <span className={styles.metricIcon}><ArrowDownOutlined /></span>
+              <span className={styles.metricIcon}>
+                <ArrowDownOutlined />
+              </span>
               <div>
                 <Text type="secondary">实时下载</Text>
                 <span className={styles.metricValue}>{formatSpeed(sysStatus.download_speed)}</span>
@@ -97,7 +111,9 @@ export default function Dashboard() {
           </Card>
           <Card className={styles.glassCard}>
             <div className={styles.metric}>
-              <span className={styles.metricIcon}><DashboardOutlined /></span>
+              <span className={styles.metricIcon}>
+                <DashboardOutlined />
+              </span>
               <div>
                 <Text type="secondary">内存占用</Text>
                 <span className={styles.metricValue}>{sysStatus.memory_usage.toFixed(0)}%</span>
@@ -110,7 +126,9 @@ export default function Dashboard() {
       <Card className={styles.surfaceCard}>
         <div className={styles.sectionHeader}>
           <div className={styles.sectionIdentity}>
-            <span className={styles.surfaceIcon}><KeyOutlined /></span>
+            <span className={styles.surfaceIcon}>
+              <KeyOutlined />
+            </span>
             <div>
               <Title level={5}>键盘映射引擎</Title>
               <Text type="secondary">
@@ -121,14 +139,20 @@ export default function Dashboard() {
               </Text>
             </div>
           </div>
-          {engine === null ? <Spin size="small" /> : <span className={engineClass}>{engineLabel}</span>}
+          {engine === null ? (
+            <Spin size="small" />
+          ) : (
+            <span className={engineClass}>{engineLabel}</span>
+          )}
         </div>
       </Card>
 
       <Card className={styles.surfaceCard}>
         <div className={styles.sectionHeader}>
           <div className={styles.sectionIdentity}>
-            <span className={styles.surfaceIcon}><ExclamationCircleOutlined /></span>
+            <span className={styles.surfaceIcon}>
+              <ExclamationCircleOutlined />
+            </span>
             <div>
               <Title level={5}>权限状态</Title>
               <Text type="secondary">

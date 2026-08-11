@@ -26,9 +26,7 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 function loadMode(): ThemeMode {
   const value = localStorage.getItem(THEME_KEY);
-  return value === "light" || value === "dark" || value === "system"
-    ? value
-    : "system";
+  return value === "light" || value === "dark" || value === "system" ? value : "system";
 }
 
 function isHexColor(value: string): boolean {

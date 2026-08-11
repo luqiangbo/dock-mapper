@@ -33,7 +33,11 @@ body,
   color: var(--widget-text);
   background: transparent;
   box-shadow: none;
-  font: 11px/1.1 "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font:
+    11px/1.1 "Segoe UI",
+    "PingFang SC",
+    "Microsoft YaHei",
+    sans-serif;
   user-select: none;
   -webkit-app-region: no-drag;
 }
@@ -143,11 +147,15 @@ body,
 }
 
 @keyframes breathe {
-  50% { opacity: 0.45; }
+  50% {
+    opacity: 0.45;
+  }
 }
 
 @keyframes flash {
-  50% { opacity: 0.18; }
+  50% {
+    opacity: 0.18;
+  }
 }
 
 @media (forced-colors: active) {

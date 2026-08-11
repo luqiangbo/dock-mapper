@@ -1,8 +1,7 @@
 {
   "name": "dock-mapper",
-  "private": true,
   "version": "1.0.5",
-  "packageManager": "pnpm@10.15.0",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "rsbuild dev",
@@ -11,30 +10,34 @@
     "tauri": "tauri",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
+    "format": "oxfmt src index.html widget.html rsbuild.config.ts tsconfig.json package.json .oxfmtrc.json .oxlintrc.json",
+    "format:check": "oxfmt --check src index.html widget.html rsbuild.config.ts tsconfig.json package.json .oxfmtrc.json .oxlintrc.json",
     "test": "vitest run --passWithNoTests",
     "version:sync": "node .github/scripts/sync-version.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "6.3.2",
     "@tauri-apps/api": "^2.11.1",
-    "@tauri-apps/plugin-autostart": "^2",
-    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-autostart": "^2.5.1",
+    "@tauri-apps/plugin-opener": "^2.5.4",
     "@tauri-apps/plugin-process": "^2.3.1",
-    "@tauri-apps/plugin-updater": "^2",
-    "antd": "6.5.4",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "@tauri-apps/plugin-updater": "^2.10.1",
+    "antd": "6.6.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
-    "@rsbuild/core": "^2.1.4",
+    "@rsbuild/core": "^2.1.11",
     "@rsbuild/plugin-react": "^2.1.0",
     "@rsbuild/plugin-sass": "2.0.1",
     "@tauri-apps/cli": "^2.11.4",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "oxlint": "^1.36.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "oxfmt": "^0.63.0",
+    "oxlint": "^1.78.0",
     "sass": "1.102.0",
     "typescript": "^7.0.2",
-    "vitest": "^3.2.4"
-  }
+    "vitest": "^4.1.10"
+  },
+  "packageManager": "pnpm@11.20.0"
 }

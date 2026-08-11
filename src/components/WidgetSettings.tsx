@@ -14,7 +14,9 @@ export default function WidgetSettings() {
   useEffect(() => {
     void invoke<WidgetConfig>("get_widget_config")
       .then(setConfig)
-      .catch((error) => notification.error({ message: "加载挂件配置失败", description: String(error) }));
+      .catch((error) =>
+        notification.error({ message: "加载挂件配置失败", description: String(error) }),
+      );
   }, [notification]);
 
   const updateConfig = async (next: WidgetConfig) => {

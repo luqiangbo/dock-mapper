@@ -89,7 +89,9 @@ export default function App() {
       >
         <aside className={styles.sider}>
           <div className={styles.brand}>
-            <span className={styles.brandMark} aria-hidden="true">D</span>
+            <span className={styles.brandMark} aria-hidden="true">
+              D
+            </span>
             <Text strong>DockMapper</Text>
           </div>
 
@@ -108,80 +110,80 @@ export default function App() {
 
       <Splitter.Panel className={styles.workspacePanel} min={0}>
         <Layout className={styles.workspace}>
-        <Header className={styles.header}>
-          <div className={styles.pageTitle}>
-            {currentPage.icon}
-            <Title level={5}>{currentPage.label}</Title>
-          </div>
-          <div className={styles.dragRegion} data-tauri-drag-region />
-          <div className={styles.headerActions}>
-            <Tooltip
-              title={
-                isAdmin === null
-                  ? "正在检测权限"
-                  : isAdmin
-                    ? "管理员权限，映射可作用于高权限窗口"
-                    : "普通用户权限"
-              }
-            >
-              <Button
-                aria-label={isAdmin ? "管理员权限" : "普通用户权限"}
-                type="text"
-                icon={<UserOutlined />}
-                className={`${styles.statusButton} ${isAdmin ? styles.success : ""}`}
-              />
-            </Tooltip>
-            <Tooltip title="打开 GitHub">
-              <Button
-                aria-label="打开 GitHub"
-                icon={<GithubOutlined />}
-                type="text"
-                onClick={() => void openUrl(REPOSITORY_URL)}
-              />
-            </Tooltip>
-            <Tooltip title={resolved === "dark" ? "切换浅色" : "切换深色"}>
-              <Button
-                aria-label="切换主题"
-                icon={resolved === "dark" ? <SunOutlined /> : <MoonOutlined />}
-                type="text"
-                onClick={() => setMode(resolved === "dark" ? "light" : "dark")}
-              />
-            </Tooltip>
-            <div className={styles.windowControls}>
-              <button
-                type="button"
-                aria-label="最小化窗口"
-                title="最小化"
-                onClick={() => void getCurrentWindow().minimize()}
-              >
-                <svg viewBox="0 0 12 12" aria-hidden="true">
-                  <path d="M2.5 6h7" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                aria-label="最大化或还原窗口"
-                title="最大化或还原"
-                onClick={() => void getCurrentWindow().toggleMaximize()}
-              >
-                <svg viewBox="0 0 12 12" aria-hidden="true">
-                  <rect x="2.5" y="2.5" width="7" height="7" rx="1" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                aria-label="关闭窗口"
-                title="关闭"
-                onClick={() => void getCurrentWindow().close()}
-              >
-                <svg viewBox="0 0 12 12" aria-hidden="true">
-                  <path d="M3 3l6 6M9 3L3 9" />
-                </svg>
-              </button>
+          <Header className={styles.header}>
+            <div className={styles.pageTitle}>
+              {currentPage.icon}
+              <Title level={5}>{currentPage.label}</Title>
             </div>
-          </div>
-        </Header>
-        <Content className={styles.content}>{page}</Content>
+            <div className={styles.dragRegion} data-tauri-drag-region />
+            <div className={styles.headerActions}>
+              <Tooltip
+                title={
+                  isAdmin === null
+                    ? "正在检测权限"
+                    : isAdmin
+                      ? "管理员权限，映射可作用于高权限窗口"
+                      : "普通用户权限"
+                }
+              >
+                <Button
+                  aria-label={isAdmin ? "管理员权限" : "普通用户权限"}
+                  type="text"
+                  icon={<UserOutlined />}
+                  className={`${styles.statusButton} ${isAdmin ? styles.success : ""}`}
+                />
+              </Tooltip>
+              <Tooltip title="打开 GitHub">
+                <Button
+                  aria-label="打开 GitHub"
+                  icon={<GithubOutlined />}
+                  type="text"
+                  onClick={() => void openUrl(REPOSITORY_URL)}
+                />
+              </Tooltip>
+              <Tooltip title={resolved === "dark" ? "切换浅色" : "切换深色"}>
+                <Button
+                  aria-label="切换主题"
+                  icon={resolved === "dark" ? <SunOutlined /> : <MoonOutlined />}
+                  type="text"
+                  onClick={() => setMode(resolved === "dark" ? "light" : "dark")}
+                />
+              </Tooltip>
+              <div className={styles.windowControls}>
+                <button
+                  type="button"
+                  aria-label="最小化窗口"
+                  title="最小化"
+                  onClick={() => void getCurrentWindow().minimize()}
+                >
+                  <svg viewBox="0 0 12 12" aria-hidden="true">
+                    <path d="M2.5 6h7" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  aria-label="最大化或还原窗口"
+                  title="最大化或还原"
+                  onClick={() => void getCurrentWindow().toggleMaximize()}
+                >
+                  <svg viewBox="0 0 12 12" aria-hidden="true">
+                    <rect x="2.5" y="2.5" width="7" height="7" rx="1" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  aria-label="关闭窗口"
+                  title="关闭"
+                  onClick={() => void getCurrentWindow().close()}
+                >
+                  <svg viewBox="0 0 12 12" aria-hidden="true">
+                    <path d="M3 3l6 6M9 3L3 9" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </Header>
+          <Content className={styles.content}>{page}</Content>
         </Layout>
       </Splitter.Panel>
     </Splitter>
