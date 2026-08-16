@@ -1,14 +1,14 @@
 mod admin;
 mod config;
-mod key_mapper;
+#[cfg(target_os = "windows")]
+mod dxgi_capture;
+mod litesnap;
+mod scancode_mapper;
 mod sys_monitor;
 mod taskbar;
 
 use serde::{Deserialize, Deserializer, Serialize};
-use std::{
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
+use std::{path::PathBuf, sync::Mutex};
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -19,6 +19,7 @@ const DEFAULT_WIDGET_WIDTH: f64 = 180.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum KeyCode {
+    Disabled,
     CapsLock,
     ShiftLeft,
     ShiftRight,
@@ -106,6 +107,7 @@ pub enum KeyCode {
 impl KeyCode {
     pub fn code(self) -> &'static str {
         match self {
+            Self::Disabled => "Disabled",
             Self::CapsLock => "CapsLock",
             Self::ShiftLeft => "ShiftLeft",
             Self::ShiftRight => "ShiftRight",
@@ -193,6 +195,7 @@ impl KeyCode {
 
     pub fn vk(self) -> u16 {
         match self {
+            Self::Disabled => 0,
             Self::Backspace => 0x08,
             Self::Tab => 0x09,
             Self::Return => 0x0D,
@@ -376,7 +379,6 @@ impl Default for WidgetConfig {
 pub struct AppState {
     pub config: Mutex<config::AppConfig>,
     config_path: PathBuf,
-    key_mapper: Arc<key_mapper::KeyMapperEngine>,
     widget_width: Mutex<f64>,
     mutation_lock: Mutex<()>,
 }
@@ -393,6 +395,7 @@ fn persist(state: &AppState) -> Result<(), String> {
 #[tauri::command]
 fn get_supported_keys() -> Vec<SupportedKey> {
     const KEYS: &[KeyCode] = &[
+        KeyCode::Disabled,
         KeyCode::CapsLock,
         KeyCode::ShiftLeft,
         KeyCode::ShiftRight,
@@ -499,7 +502,11 @@ fn get_supported_keys() -> Vec<SupportedKey> {
 
 #[tauri::command]
 fn get_key_mappings(state: State<'_, AppState>) -> Result<Vec<KeyMapping>, String> {
-    state.key_mapper.mappings()
+    state
+        .config
+        .lock()
+        .map(|config| config.key_mappings.clone())
+        .map_err(|_| "配置状态已损坏".to_string())
 }
 
 #[tauri::command]
@@ -512,8 +519,7 @@ fn sync_key_mappings(
         .mutation_lock
         .lock()
         .map_err(|_| "配置写入锁已损坏".to_string())?;
-    let previous_mappings = state.key_mapper.mappings()?;
-    state.key_mapper.sync_mappings(mappings.clone())?;
+    scancode_mapper::encode(&mappings)?;
     let previous_config = {
         let mut config = state
             .config
@@ -524,7 +530,6 @@ fn sync_key_mappings(
         previous
     };
     if let Err(error) = persist(&state) {
-        let _ = state.key_mapper.sync_mappings(previous_mappings);
         *state
             .config
             .lock()
@@ -537,7 +542,16 @@ fn sync_key_mappings(
 
 #[tauri::command]
 fn get_engine_status(state: State<'_, AppState>) -> EngineStatus {
-    state.key_mapper.status()
+    let applied = state
+        .config
+        .lock()
+        .map(|config| config.scancode_map_applied)
+        .unwrap_or(false);
+    EngineStatus {
+        running: false,
+        enabled: applied,
+        last_error: None,
+    }
 }
 
 #[tauri::command]
@@ -546,33 +560,114 @@ fn set_engine_enabled(
     state: State<'_, AppState>,
     enabled: bool,
 ) -> Result<EngineStatus, String> {
+    let _ = app;
+    let _ = state;
+    let _ = enabled;
+    Err("按键映射已改为系统扫描码模式，请使用“应用到系统”按钮".into())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ScancodeMapStatus {
+    pub applied: bool,
+    pub has_external_map: bool,
+    pub requires_restart: bool,
+    pub backup_available: bool,
+}
+
+#[tauri::command]
+fn get_scancode_map_status(state: State<'_, AppState>) -> Result<ScancodeMapStatus, String> {
+    let config = state
+        .config
+        .lock()
+        .map_err(|_| "配置状态已损坏".to_string())?
+        .clone();
+    let desired = scancode_mapper::encode(&config.key_mappings)?;
+    let current = scancode_mapper::read()?;
+    let current_is_ours = current.as_deref() == Some(desired.as_slice());
+    Ok(ScancodeMapStatus {
+        applied: config.scancode_map_applied && current_is_ours,
+        has_external_map: current.is_some() && !current_is_ours,
+        requires_restart: config.scancode_map_applied,
+        backup_available: config.scancode_map_backup.is_some(),
+    })
+}
+
+#[tauri::command]
+fn apply_scancode_map(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    confirm_takeover: bool,
+) -> Result<ScancodeMapStatus, String> {
+    if !admin::is_elevated() {
+        return Err("写入系统键盘映射需要管理员权限".into());
+    }
     let _mutation = state
         .mutation_lock
         .lock()
         .map_err(|_| "配置写入锁已损坏".to_string())?;
-    let previous_enabled = state.key_mapper.status().enabled;
-    state.key_mapper.set_enabled(enabled);
-    let previous_config = {
-        let mut config = state
-            .config
-            .lock()
-            .map_err(|_| "配置状态已损坏".to_string())?;
-        let previous = config.clone();
-        config.engine_enabled = enabled;
-        previous
-    };
-    if let Err(error) = persist(&state) {
-        state.key_mapper.set_enabled(previous_enabled);
-        *state
-            .config
-            .lock()
-            .map_err(|_| "配置状态已损坏".to_string())? = previous_config;
-        return Err(error);
+    let mut config = state
+        .config
+        .lock()
+        .map_err(|_| "配置状态已损坏".to_string())?;
+    let desired = scancode_mapper::encode(&config.key_mappings)?;
+    let current = scancode_mapper::read()?;
+    if current.as_deref() != Some(desired.as_slice())
+        && current.is_some()
+        && !config.scancode_map_applied
+        && !confirm_takeover
+    {
+        return Err("系统已存在其他工具写入的 Scancode Map；请确认备份后接管".into());
     }
-    let status = state.key_mapper.status();
-    app.emit("engine-status-changed", &status)
+    if config.scancode_map_backup.is_none() {
+        config.scancode_map_backup =
+            Some(scancode_mapper::backup_encode(current.as_deref()).unwrap_or_default());
+    }
+    scancode_mapper::write(Some(&desired))?;
+    config.scancode_map_applied = true;
+    persist(&state)?;
+    drop(config);
+    app.emit("scancode-map-changed", ())
         .map_err(|error| error.to_string())?;
-    Ok(status)
+    Ok(ScancodeMapStatus {
+        applied: true,
+        has_external_map: false,
+        requires_restart: true,
+        backup_available: true,
+    })
+}
+
+#[tauri::command]
+fn restore_scancode_map(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ScancodeMapStatus, String> {
+    if !admin::is_elevated() {
+        return Err("恢复系统键盘映射需要管理员权限".into());
+    }
+    let _mutation = state
+        .mutation_lock
+        .lock()
+        .map_err(|_| "配置写入锁已损坏".to_string())?;
+    let mut config = state
+        .config
+        .lock()
+        .map_err(|_| "配置状态已损坏".to_string())?;
+    let backup = scancode_mapper::backup_decode(config.scancode_map_backup.as_deref())?;
+    if config.scancode_map_backup.is_none() {
+        return Err("没有可恢复的应用前映射".into());
+    }
+    scancode_mapper::write(backup.as_deref())?;
+    config.scancode_map_applied = false;
+    persist(&state)?;
+    drop(config);
+    app.emit("scancode-map-changed", ())
+        .map_err(|error| error.to_string())?;
+    Ok(ScancodeMapStatus {
+        applied: false,
+        has_external_map: false,
+        requires_restart: false,
+        backup_available: true,
+    })
 }
 
 #[tauri::command]
@@ -639,6 +734,52 @@ fn update_widget_config(
 }
 
 #[tauri::command]
+fn get_screenshot_config(state: State<'_, AppState>) -> Result<config::ScreenshotConfig, String> {
+    state
+        .config
+        .lock()
+        .map(|config| config.screenshot_config.clone())
+        .map_err(|_| "配置状态已损坏".to_string())
+}
+
+#[tauri::command]
+fn update_screenshot_config(
+    state: State<'_, AppState>,
+    mut screenshot_config: config::ScreenshotConfig,
+) -> Result<config::ScreenshotConfig, String> {
+    let _mutation = state
+        .mutation_lock
+        .lock()
+        .map_err(|_| "配置写入锁已损坏".to_string())?;
+    config::normalize_screenshot_config(&mut screenshot_config);
+    let previous_config = {
+        let mut current = state
+            .config
+            .lock()
+            .map_err(|_| "配置状态已损坏".to_string())?;
+        let previous = current.clone();
+        current.screenshot_config = screenshot_config.clone();
+        previous
+    };
+    if let Err(error) = persist(&state) {
+        *state
+            .config
+            .lock()
+            .map_err(|_| "配置状态已损坏".to_string())? = previous_config;
+        return Err(error);
+    }
+    Ok(screenshot_config)
+}
+
+#[tauri::command]
+fn choose_screenshot_save_directory() -> Option<String> {
+    rfd::FileDialog::new()
+        .set_title("选择截图默认保存目录")
+        .pick_folder()
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
 fn sync_widget_dynamic_width(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -688,12 +829,14 @@ fn set_minimize_to_tray(state: State<'_, AppState>, enabled: bool) -> Result<(),
 
 fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let show = MenuItemBuilder::with_id("show", "显示主窗口").build(app)?;
+    let capture = MenuItemBuilder::with_id("capture", "截图").build(app)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let about = MenuItemBuilder::with_id("about", "关于 DockMapper").build(app)?;
     let separator2 = PredefinedMenuItem::separator(app)?;
     let quit = MenuItemBuilder::with_id("quit", "退出").build(app)?;
     let menu = MenuBuilder::new(app)
         .item(&show)
+        .item(&capture)
         .item(&separator)
         .item(&about)
         .item(&separator2)
@@ -714,6 +857,9 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
+            }
+            "capture" => {
+                litesnap::start_capture(app);
             }
             "quit" => app.exit(0),
             _ => {}
@@ -743,28 +889,31 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
+        .register_uri_scheme_protocol("dockmapper-shot", |_, request| {
+            litesnap::serve_capture_uri(request)
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_autostart::Builder::new().build())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .manage(litesnap::create_state())
         .setup(|app| {
             #[cfg(desktop)]
             setup_tray(app)?;
 
             let config_path = app.path().app_data_dir()?.join("config.json");
             let loaded_config = config::load(&config_path);
-            let key_mapper = key_mapper::KeyMapperEngine::new(
-                loaded_config.key_mappings.clone(),
-                loaded_config.engine_enabled,
-            )?;
             let state = AppState {
                 config: Mutex::new(loaded_config),
                 config_path,
-                key_mapper: key_mapper.clone(),
                 widget_width: Mutex::new(DEFAULT_WIDGET_WIDTH),
                 mutation_lock: Mutex::new(()),
             };
             app.manage(state);
+            if let Err(error) = litesnap::initialize(app.handle()) {
+                eprintln!("注册截图快捷键失败：{error}");
+            }
 
             if let Some(window) = app.get_webview_window("main") {
                 let app_handle = app.handle().clone();
@@ -793,7 +942,6 @@ pub fn run() {
             taskbar::embed_widget_to_taskbar(&widget);
 
             sys_monitor::start_sys_monitor(app.handle().clone());
-            key_mapper.start()?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -802,6 +950,28 @@ pub fn run() {
             sync_key_mappings,
             get_engine_status,
             set_engine_enabled,
+            get_scancode_map_status,
+            apply_scancode_map,
+            restore_scancode_map,
+            litesnap::start_screenshot,
+            litesnap::close_overlay,
+            litesnap::show_capture_overlay,
+            litesnap::overlay_ready,
+            litesnap::scroll_control_ready,
+            litesnap::get_full_screenshot,
+            litesnap::report_capture_rendered,
+            litesnap::begin_scroll_capture,
+            litesnap::finish_scroll_capture,
+            litesnap::cancel_scroll_capture,
+            litesnap::copy_image,
+            litesnap::copy_text,
+            litesnap::save_image,
+            litesnap::pin_image,
+            litesnap::get_pin_image,
+            litesnap::close_pin_window,
+            get_screenshot_config,
+            update_screenshot_config,
+            choose_screenshot_save_directory,
             refresh_widget_position,
             check_is_admin,
             relaunch_as_admin,
@@ -814,12 +984,5 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("构建 DockMapper 失败");
 
-    app.run(|app, event| {
-        if matches!(
-            event,
-            tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
-        ) {
-            app.state::<AppState>().key_mapper.stop();
-        }
-    });
+    app.run(|_, _| {});
 }

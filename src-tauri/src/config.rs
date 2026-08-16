@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+pub const CURRENT_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -16,6 +16,28 @@ pub struct AppConfig {
     pub engine_enabled: bool,
     pub widget_config: WidgetConfig,
     pub minimize_to_tray: bool,
+    pub screenshot_config: ScreenshotConfig,
+    /// 原始 Scancode Map 的 Base64 备份；仅在 DockMapper 首次接管时写入。
+    pub scancode_map_backup: Option<String>,
+    pub scancode_map_applied: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ScreenshotConfig {
+    pub shortcut: String,
+    pub save_directory: Option<String>,
+    pub filename_prefix: String,
+}
+
+impl Default for ScreenshotConfig {
+    fn default() -> Self {
+        Self {
+            shortcut: "Control+1".into(),
+            save_directory: None,
+            filename_prefix: "DockMapper".into(),
+        }
+    }
 }
 
 impl Default for AppConfig {
@@ -26,6 +48,9 @@ impl Default for AppConfig {
             engine_enabled: true,
             widget_config: WidgetConfig::default(),
             minimize_to_tray: true,
+            screenshot_config: ScreenshotConfig::default(),
+            scancode_map_backup: None,
+            scancode_map_applied: false,
         }
     }
 }
@@ -84,9 +109,38 @@ pub fn save(path: &Path, config: &AppConfig) -> Result<(), String> {
     Ok(())
 }
 
+pub fn normalize_screenshot_config(config: &mut ScreenshotConfig) {
+    config.filename_prefix = config
+        .filename_prefix
+        .trim()
+        .chars()
+        .filter(|character| {
+            !matches!(
+                character,
+                '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
+            )
+        })
+        .take(48)
+        .collect();
+    if config.filename_prefix.is_empty() {
+        config.filename_prefix = ScreenshotConfig::default().filename_prefix;
+    }
+    if config
+        .save_directory
+        .as_ref()
+        .is_some_and(|directory| directory.trim().is_empty())
+    {
+        config.save_directory = None;
+    }
+}
+
 fn migrate(config: &mut AppConfig) {
     config.widget_config.refresh_interval_secs =
         config.widget_config.refresh_interval_secs.clamp(1, 5);
+    if config.screenshot_config.shortcut == "Control+Shift+A" {
+        config.screenshot_config.shortcut = "Control+1".into();
+    }
+    normalize_screenshot_config(&mut config.screenshot_config);
     config.schema_version = CURRENT_SCHEMA_VERSION;
 }
 
@@ -130,5 +184,36 @@ mod tests {
         assert!(!loaded.engine_enabled);
         assert_eq!(loaded.widget_config.refresh_interval_secs, 4);
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn migrates_legacy_screenshot_shortcut_to_fixed_ctrl_1() {
+        let mut config = AppConfig {
+            screenshot_config: ScreenshotConfig {
+                shortcut: "Control+Shift+A".into(),
+                ..ScreenshotConfig::default()
+            },
+            ..AppConfig::default()
+        };
+
+        migrate(&mut config);
+
+        assert_eq!(config.screenshot_config.shortcut, "Control+1");
+        assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn screenshot_defaults_are_normalized_for_safe_file_names() {
+        let mut config = AppConfig {
+            screenshot_config: ScreenshotConfig {
+                filename_prefix: " <Dock:Mapper?> ".into(),
+                save_directory: Some("   ".into()),
+                ..ScreenshotConfig::default()
+            },
+            ..AppConfig::default()
+        };
+        migrate(&mut config);
+        assert_eq!(config.screenshot_config.filename_prefix, "DockMapper");
+        assert_eq!(config.screenshot_config.save_directory, None);
     }
 }

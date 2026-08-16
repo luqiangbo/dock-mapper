@@ -11,7 +11,7 @@ export interface KeyMapping {
 
 export interface SupportedKey {
   code: KeyCode;
-     label: string;
+  label: string;
   group: string;
 }
 
@@ -19,6 +19,19 @@ export interface EngineStatus {
   running: boolean;
   enabled: boolean;
   last_error: string | null;
+}
+
+export interface ScancodeMapStatus {
+  applied: boolean;
+  has_external_map: boolean;
+  requires_restart: boolean;
+  backup_available: boolean;
+}
+
+export interface ScreenshotConfig {
+  shortcut: string;
+  save_directory: string | null;
+  filename_prefix: string;
 }
 
 export interface WidgetConfig {

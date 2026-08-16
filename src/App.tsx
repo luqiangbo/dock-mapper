@@ -5,6 +5,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button, Layout, Menu, Splitter, Tooltip, Typography } from "antd";
 import {
   DashboardOutlined,
+  CameraOutlined,
   GithubOutlined,
   KeyOutlined,
   MenuOutlined,
@@ -17,6 +18,7 @@ import Dashboard from "./components/Dashboard";
 import KeyMapper from "./components/KeyMapper";
 import WidgetSettings from "./components/WidgetSettings";
 import GeneralSettings from "./components/GeneralSettings";
+import ScreenshotSettings from "./components/ScreenshotSettings";
 import { useTheme } from "./ThemeContext";
 import styles from "./App.module.scss";
 
@@ -27,7 +29,7 @@ const SIDER_MIN_WIDTH = 168;
 const SIDER_MAX_WIDTH = 320;
 const SIDER_INITIAL_WIDTH = 208;
 
-type PageKey = "dashboard" | "keymapper" | "widget" | "settings";
+type PageKey = "dashboard" | "keymapper" | "screenshot" | "widget" | "settings";
 
 interface PageItem {
   key: PageKey;
@@ -38,6 +40,7 @@ interface PageItem {
 const PAGES: PageItem[] = [
   { key: "dashboard", label: "仪表盘", icon: <DashboardOutlined /> },
   { key: "keymapper", label: "按键映射", icon: <KeyOutlined /> },
+  { key: "screenshot", label: "截图", icon: <CameraOutlined /> },
   { key: "widget", label: "挂件设置", icon: <MenuOutlined /> },
   { key: "settings", label: "全局设置", icon: <SettingOutlined /> },
 ];
@@ -64,6 +67,8 @@ export default function App() {
     switch (activePage) {
       case "keymapper":
         return <KeyMapper />;
+      case "screenshot":
+        return <ScreenshotSettings />;
       case "widget":
         return <WidgetSettings />;
       case "settings":

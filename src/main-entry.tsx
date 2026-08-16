@@ -1,51 +1,49 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { App as AntApp, ConfigProvider, theme as antdTheme } from "antd";
-import App from "./App";
-import { ThemeProvider, useTheme } from "./ThemeContext";
-import "./global.scss";
+import { I18nContext, getMessages } from "./screenshots/litesnap/i18n";
+import ScreenshotOverlay from "./screenshots/litesnap/components/ScreenshotOverlay";
+import PinImage from "./screenshots/litesnap/components/PinImage";
+import ScrollCaptureControl from "./screenshots/litesnap/components/ScrollCaptureControl";
+import "./screenshots/litesnap/api";
 
-function ThemedApp() {
-  const { accentColor, resolved } = useTheme();
+const view = new URLSearchParams(window.location.search).get("view");
+const root = ReactDOM.createRoot(document.getElementById("root")!);
+const liteSnapView = view === "overlay" || view === "pin" || view === "scroll-capture";
+
+function LiteSnapWindow() {
+  const content =
+    view === "pin" ? (
+      <PinImage />
+    ) : view === "scroll-capture" ? (
+      <ScrollCaptureControl />
+    ) : (
+      <ScreenshotOverlay />
+    );
 
   return (
-    <ConfigProvider
-      componentSize="small"
-      theme={{
-        algorithm: resolved === "dark" ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
-        token: {
-          colorPrimary: accentColor,
-          borderRadius: 10,
-        },
-        components: {
-          Button: {
-            borderRadius: 8,
-            primaryShadow: "none",
-            defaultBg: "var(--glass-control)",
-            defaultBorderColor: "var(--glass-border)",
-            defaultColor: "var(--text-primary)",
-            defaultHoverBg: "var(--glass-control-hover)",
-            defaultHoverBorderColor: accentColor,
-            defaultHoverColor: accentColor,
-            defaultActiveBg: "var(--glass-control-active)",
-            defaultActiveBorderColor: accentColor,
-            defaultActiveColor: accentColor,
-          },
-        },
-      }}
-    >
-      <AntApp>
-        <App />
-      </AntApp>
-    </ConfigProvider>
+    <I18nContext.Provider value={{ language: "zh", t: getMessages("zh") }}>
+      {content}
+    </I18nContext.Provider>
   );
 }
 
-const root = ReactDOM.createRoot(document.getElementById("root")!);
-root.render(
-  <React.StrictMode>
-    <ThemeProvider>
-      <ThemedApp />
-    </ThemeProvider>
-  </React.StrictMode>,
-);
+if (liteSnapView) {
+  // LiteSnap windows run in separate WebViews. Loading its reset and canvas
+  // styles only here prevents Ant Design/global application styles affecting
+  // the transparent overlay and its pointer geometry.
+  void import("./screenshots/litesnap/assets/main.css").then(() => {
+    root.render(
+      <React.StrictMode>
+        <LiteSnapWindow />
+      </React.StrictMode>,
+    );
+  });
+} else {
+  void import("./main-shell").then(({ default: MainShell }) => {
+    root.render(
+      <React.StrictMode>
+        <MainShell />
+      </React.StrictMode>,
+    );
+  });
+}

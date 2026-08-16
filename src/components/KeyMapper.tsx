@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { App as AntApp, Button, Modal, Select, Switch, Table, Tag, Typography } from "antd";
+import { Alert, App as AntApp, Button, Modal, Select, Switch, Table, Tag, Typography } from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
-import type { EngineStatus, KeyCode, KeyMapping, SupportedKey } from "../types";
+import type { KeyCode, KeyMapping, ScancodeMapStatus, SupportedKey } from "../types";
 import styles from "./components.module.scss";
 
 const { Text } = Typography;
@@ -10,23 +10,23 @@ const { Text } = Typography;
 export default function KeyMapper() {
   const [mappings, setMappings] = useState<KeyMapping[]>([]);
   const [supportedKeys, setSupportedKeys] = useState<SupportedKey[]>([]);
-  const [engine, setEngine] = useState<EngineStatus | null>(null);
+  const [mapStatus, setMapStatus] = useState<ScancodeMapStatus | null>(null);
   const [addVisible, setAddVisible] = useState(false);
   const [newSource, setNewSource] = useState<KeyCode | null>(null);
   const [newTarget, setNewTarget] = useState<KeyCode | null>(null);
   const [saving, setSaving] = useState(false);
-  const { notification } = AntApp.useApp();
+  const { modal, notification } = AntApp.useApp();
 
   useEffect(() => {
     Promise.all([
       invoke<KeyMapping[]>("get_key_mappings"),
       invoke<SupportedKey[]>("get_supported_keys"),
-      invoke<EngineStatus>("get_engine_status"),
+      invoke<ScancodeMapStatus>("get_scancode_map_status"),
     ])
       .then(([rules, keys, status]) => {
         setMappings(rules);
         setSupportedKeys(keys);
-        setEngine(status);
+        setMapStatus(status);
       })
       .catch((error) => {
         console.error(error);
@@ -50,6 +50,14 @@ export default function KeyMapper() {
         options: keys.map((key) => ({ label: key.label, value: key.code })),
       })),
     [groupedKeys],
+  );
+  const sourceKeyOptions = useMemo(
+    () =>
+      keyOptions.map((group) => ({
+        ...group,
+        options: group.options.filter((key) => key.value !== "Disabled"),
+      })),
+    [keyOptions],
   );
 
   const syncMappings = useCallback(
@@ -100,13 +108,46 @@ export default function KeyMapper() {
     }
   };
 
-  const setEngineEnabled = async (enabled: boolean) => {
+  const applyToSystem = async (confirmTakeover = false) => {
+    setSaving(true);
     try {
-      const status = await invoke<EngineStatus>("set_engine_enabled", { enabled });
-      setEngine(status);
-      notification.info({ message: enabled ? "映射引擎已开启" : "映射引擎已暂停" });
+      const status = await invoke<ScancodeMapStatus>("apply_scancode_map", { confirmTakeover });
+      setMapStatus(status);
+      notification.success({
+        message: "系统映射已写入",
+        description: "请重新登录或重启 Windows 后生效。",
+      });
     } catch (error) {
-      notification.error({ message: "切换失败", description: String(error) });
+      const text = String(error);
+      if (text.includes("确认备份后接管")) {
+        modal.confirm({
+          title: "检测到其他工具的键盘映射",
+          content: "DockMapper 会备份当前 Scancode Map 后接管。恢复时可写回该备份。",
+          okText: "备份并接管",
+          cancelText: "取消",
+          onOk: () => applyToSystem(true),
+        });
+      } else {
+        notification.error({ message: "写入系统映射失败", description: text });
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const restoreOriginal = async () => {
+    setSaving(true);
+    try {
+      const status = await invoke<ScancodeMapStatus>("restore_scancode_map");
+      setMapStatus(status);
+      notification.success({
+        message: "已恢复应用前映射",
+        description: "请重新登录或重启 Windows 后生效。",
+      });
+    } catch (error) {
+      notification.error({ message: "恢复失败", description: String(error) });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -160,23 +201,45 @@ export default function KeyMapper() {
     <div className={styles.page}>
       <div className={styles.toolbar}>
         <div>
-          <Text strong>全局映射引擎</Text>
+          <Text strong>系统扫描码映射</Text>
           <span className={styles.description}>
-            {engine?.last_error ?? (engine?.running ? "原生键盘钩子已加载" : "键盘钩子未运行")}
+            {mapStatus?.applied
+              ? "已写入系统，重新登录或重启后生效"
+              : "编辑规则后，使用管理员权限应用到系统"}
           </span>
         </div>
-        <Switch
-          aria-label="全局映射引擎"
-          checked={engine?.enabled ?? false}
-          disabled={!engine || Boolean(engine.last_error)}
-          onChange={(checked) => void setEngineEnabled(checked)}
-        />
+        <div className={styles.actionRow}>
+          <Button loading={saving} onClick={() => void applyToSystem()}>
+            应用到系统
+          </Button>
+          <Button
+            disabled={!mapStatus?.backup_available || saving}
+            onClick={() => void restoreOriginal()}
+          >
+            恢复应用前映射
+          </Button>
+        </div>
       </div>
+
+      {mapStatus?.has_external_map && !mapStatus.applied ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="发现其他工具的系统键盘映射"
+          description="应用 DockMapper 前会备份它；系统 Scancode Map 无法安全合并多个工具的规则。"
+        />
+      ) : null}
+      <Alert
+        type="info"
+        showIcon
+        message="稳定性说明"
+        description="映射由 Windows 键盘驱动在登录时加载，DockMapper 无需常驻，也不会与其他键盘钩子竞争。AltGr、Fn、组合键不支持该系统级模式。"
+      />
 
       <div className={styles.toolbar}>
         <div>
           <Text strong>映射规则</Text>
-          <span className={styles.description}>规则 ID 与停用状态会完整持久化</span>
+          <span className={styles.description}>规则保存为草稿；应用后需重新登录或重启</span>
         </div>
         <Button icon={<PlusOutlined />} onClick={() => setAddVisible(true)}>
           添加规则
@@ -212,7 +275,7 @@ export default function KeyMapper() {
             <Select
               placeholder="请选择"
               value={newSource ?? undefined}
-              options={keyOptions}
+              options={sourceKeyOptions}
               onChange={(value) => setNewSource(value as KeyCode)}
               className={styles.fullWidth}
             />

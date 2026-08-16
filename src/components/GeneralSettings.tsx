@@ -142,7 +142,7 @@ export default function GeneralSettings() {
           <div className={styles.settingRow}>
             <div className={styles.settingCopy}>
               <Text strong>DockMapper {version}</Text>
-              <span className={styles.description}>Tauri 2 + React · Windows 10/11 x64</span>
+              <span className={styles.description}>Tauri 2 + React · Windows 11 x64</span>
             </div>
             <Button onClick={() => void openUrl(REPOSITORY_URL)}>GitHub</Button>
           </div>
