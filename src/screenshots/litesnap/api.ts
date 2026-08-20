@@ -37,6 +37,11 @@ export interface ScrollCaptureResult {
   imageHeight: number;
 }
 
+export interface OcrResult {
+  text: string;
+  engine: "onnx" | "rusto";
+}
+
 export interface Api {
   closeOverlay: () => void;
   showCaptureOverlay: () => Promise<boolean>;
@@ -58,6 +63,8 @@ export interface Api {
   copyText: (value: string) => Promise<boolean>;
   saveImage: (png: Uint8Array) => Promise<boolean>;
   pinImage: (png: Uint8Array) => Promise<boolean>;
+  recognizeSelectionOnnx: (png: Uint8Array) => Promise<OcrResult>;
+  recognizeSelectionRusto: (png: Uint8Array) => Promise<OcrResult>;
   openUrl: (url: string) => Promise<boolean>;
   getSettings: () => Promise<AppSettings>;
   setLanguage: (language: Language) => Promise<AppSettings>;
@@ -136,6 +143,10 @@ export const api: Api = {
     isWindows
       ? invoke("pin_image", { dataBase64: await pngBase64(png) })
       : invoke("pin_image", { data: bytes(png) }),
+  recognizeSelectionOnnx: async (png) =>
+    invoke("recognize_selection_onnx", { imageBase64: await pngBase64(png) }),
+  recognizeSelectionRusto: async (png) =>
+    invoke("recognize_selection_rusto", { imageBase64: await pngBase64(png) }),
   openUrl: (url) => invoke("open_url", { url }),
   getSettings: () => invoke("get_settings"),
   setLanguage: (language) => invoke("set_language", { language }),

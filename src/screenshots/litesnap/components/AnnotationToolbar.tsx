@@ -9,6 +9,7 @@ import {
   DownloadOutlined,
   EditOutlined,
   FontSizeOutlined,
+  FileSearchOutlined,
   HighlightOutlined,
   PushpinOutlined,
   RollbackOutlined,
@@ -50,6 +51,8 @@ interface AnnotationToolbarProps {
   toolsDisabled?: boolean;
   scrollCaptureDisabled?: boolean;
   confirmDisabled?: boolean;
+  ocrDisabled?: boolean;
+  ocrRunning?: boolean;
   showEmojiPicker?: boolean;
   pickerColor?: string;
   onToolChange: (tool: AnnotTool) => void;
@@ -57,6 +60,7 @@ interface AnnotationToolbarProps {
   onScrollCapture: () => void;
   onSave: () => void;
   onPin: () => void;
+  onOcr: () => void;
   onCancel: () => void;
   onConfirm: () => void;
   style?: React.CSSProperties;
@@ -68,6 +72,8 @@ function AnnotationToolbar({
   toolsDisabled,
   scrollCaptureDisabled,
   confirmDisabled,
+  ocrDisabled,
+  ocrRunning,
   showEmojiPicker,
   pickerColor,
   onToolChange,
@@ -75,6 +81,7 @@ function AnnotationToolbar({
   onScrollCapture,
   onSave,
   onPin,
+  onOcr,
   onCancel,
   onConfirm,
   style,
@@ -161,6 +168,13 @@ function AnnotationToolbar({
         {pickerColor && (
           <span className="picker-color-chip" style={{ backgroundColor: pickerColor }} />
         )}
+        <TooltipButton
+          label={ocrRunning ? "正在并行识别文字" : "对比识别文字（双离线 OCR）"}
+          disabled={locked || ocrDisabled}
+          onClick={onOcr}
+        >
+          <FileSearchOutlined spin={ocrRunning} />
+        </TooltipButton>
       </div>
 
       <div className="wx-toolbar__divider" />

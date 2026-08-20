@@ -2175,12 +2175,36 @@ fn handle_start_capture(app: &AppHandle) {
     });
 }
 
-fn close_overlay_impl(app: &AppHandle) {
+fn hide_overlay_for_commit(app: &AppHandle) {
     cancel_scroll_impl(app);
     if let Some(window) = app.get_webview_window("overlay") {
         let _ = window.hide();
     }
+    // Commit actions can spend tens of milliseconds decoding a PNG and talking
+    // to the clipboard. Make the hide visible before that synchronous work so
+    // WebView2 never exposes a last composited, DPI-scaled frame on close.
+    #[cfg(target_os = "windows")]
+    unsafe {
+        let _ = windows::Win32::Graphics::Dwm::DwmFlush();
+    }
+}
+
+fn finish_overlay_commit(app: &AppHandle) {
     *app.state::<AppState>().capture.lock().unwrap() = None;
+}
+
+fn restore_overlay_after_commit_failure(app: &AppHandle) {
+    if app.state::<AppState>().capture.lock().unwrap().is_some() {
+        if let Some(window) = app.get_webview_window("overlay") {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    }
+}
+
+fn close_overlay_impl(app: &AppHandle) {
+    hide_overlay_for_commit(app);
+    finish_overlay_commit(app);
 }
 
 fn write_clipboard_png(data: &[u8]) -> Result<(), String> {
@@ -3059,9 +3083,13 @@ fn check_screen_permission() -> serde_json::Value {
 
 #[tauri::command]
 pub fn copy_image(app: AppHandle, data: Vec<u8>) -> Result<bool, String> {
-    write_clipboard_png(&data)?;
+    hide_overlay_for_commit(&app);
+    if let Err(error) = write_clipboard_png(&data) {
+        restore_overlay_after_commit_failure(&app);
+        return Err(error);
+    }
     remember_confirmed_image(&app, &data);
-    close_overlay_impl(&app);
+    finish_overlay_commit(&app);
     Ok(true)
 }
 
@@ -3071,19 +3099,23 @@ pub fn save_image(
     config_state: State<'_, crate::AppState>,
     data: Vec<u8>,
 ) -> Result<bool, String> {
-    write_clipboard_png(&data)?;
+    hide_overlay_for_commit(&app);
+    if let Err(error) = write_clipboard_png(&data) {
+        restore_overlay_after_commit_failure(&app);
+        return Err(error);
+    }
     remember_confirmed_image(&app, &data);
-    close_overlay_impl(&app);
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
-    let screenshot_config = config_state
-        .config
-        .lock()
-        .map_err(|_| "配置状态已损坏".to_string())?
-        .screenshot_config
-        .clone();
+    let screenshot_config = match config_state.config.lock() {
+        Ok(config) => config.screenshot_config.clone(),
+        Err(_) => {
+            restore_overlay_after_commit_failure(&app);
+            return Err("配置状态已损坏".into());
+        }
+    };
     let mut dialog = rfd::FileDialog::new()
         .set_title("Save Screenshot")
         .set_file_name(format!("{}-{stamp}.png", screenshot_config.filename_prefix))
@@ -3095,9 +3127,14 @@ pub fn save_image(
         }
     }
     let Some(path) = dialog.save_file() else {
+        restore_overlay_after_commit_failure(&app);
         return Ok(false);
     };
-    fs::write(path, data).map_err(|error| error.to_string())?;
+    if let Err(error) = fs::write(path, data) {
+        restore_overlay_after_commit_failure(&app);
+        return Err(error.to_string());
+    }
+    finish_overlay_commit(&app);
     Ok(true)
 }
 

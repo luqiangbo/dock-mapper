@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-window",
   "description": "DockMapper 主配置窗口的最小权限",
-  "windows": ["main", "overlay", "scroll-control", "pin"],
+  "windows": ["main"],
   "permissions": [
     "core:default",
     "core:event:allow-listen",

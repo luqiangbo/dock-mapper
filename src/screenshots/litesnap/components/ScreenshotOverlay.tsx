@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Selection } from "../store";
 import { useStore } from "../store";
 import { useI18n } from "../i18n";
+import type { OcrResult } from "../api";
 import AnnotationToolbar, {
   STROKE_COLORS,
   toolUsesColor,
@@ -50,6 +51,22 @@ interface PickerSample {
   imageY: number;
   left: number;
   top: number;
+}
+
+type OcrEngine = OcrResult["engine"];
+
+interface OcrPanelState {
+  result: OcrResult | null;
+  error: string | null;
+  pending: boolean;
+  elapsedMs: number | null;
+}
+
+function emptyOcrPanels(): Record<OcrEngine, OcrPanelState> {
+  return {
+    onnx: { result: null, error: null, pending: false, elapsedMs: null },
+    rusto: { result: null, error: null, pending: false, elapsedMs: null },
+  };
 }
 
 const RESIZE_HANDLES = ["nw", "n", "ne", "w", "e", "sw", "s", "se"] as const;
@@ -300,6 +317,8 @@ function ScreenshotOverlay(): React.JSX.Element {
   const scrollCapturing = useRef(false);
   const scrollResultReceived = useRef(false);
   const pendingAction = useRef(0);
+  // 递增令牌使得选区变化、关闭或新截图后的迟到 OCR 结果立即失效。
+  const ocrRequest = useRef(0);
   const initialSelectionHeight = useRef(0);
   const imageScaleRef = useRef({ scaleX: 1, scaleY: 1 });
   const lastTextFontSize = useRef<TextSize>(TEXT_SIZES[1]);
@@ -355,9 +374,17 @@ function ScreenshotOverlay(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [pickerSample, setPickerSample] = useState<PickerSample | null>(null);
   const [pickerCopied, setPickerCopied] = useState(false);
+  const [ocrPanels, setOcrPanels] = useState<Record<OcrEngine, OcrPanelState>>(emptyOcrPanels);
+  const [ocrRunning, setOcrRunning] = useState(false);
 
   const selection = useStore((s) => s.selection);
   const setSelection = useStore((s) => s.setSelection);
+
+  useEffect(() => {
+    ocrRequest.current += 1;
+    setOcrRunning(false);
+    setOcrPanels(emptyOcrPanels());
+  }, [selection?.x, selection?.y, selection?.width, selection?.height]);
 
   const copyPickerColor = useCallback(async () => {
     const sample = pickerSample;
@@ -535,10 +562,100 @@ function ScreenshotOverlay(): React.JSX.Element {
     return new Uint8Array(await blob.arrayBuffer());
   }, [textObjects, emojiObjects]);
 
+  const exportOcrPng = useCallback(async (): Promise<Uint8Array> => {
+    const canvas = shotRef.current;
+    if (!canvas) throw new Error("No canvas");
+    const source = document.createElement("canvas");
+    const ctx = source.getContext("2d");
+    if (!ctx) throw new Error("Canvas unavailable");
+    ctx.imageSmoothingEnabled = false;
+    const frozenImage = fullImageRef.current;
+    // 常规截图可始终从冻结原图重新裁切，避免矩形、画笔、文字等标注影响 OCR。
+    // 长截图是独立的拼接结果，且启动滚动前已禁止有标注，因此可安全读取其画布。
+    if (frozenImage && selection && !isLongImage) {
+      const { sx, sy, sw, sh } = selectionToImageCrop(selection, frozenImage);
+      source.width = sw;
+      source.height = sh;
+      ctx.drawImage(frozenImage, sx, sy, sw, sh, 0, 0, sw, sh);
+    } else {
+      source.width = canvas.width;
+      source.height = canvas.height;
+      ctx.drawImage(canvas, 0, 0);
+    }
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      source.toBlob(
+        (value) => (value ? resolve(value) : reject(new Error("toBlob failed"))),
+        "image/png",
+      );
+    });
+    return new Uint8Array(await blob.arrayBuffer());
+  }, [isLongImage, selection]);
+
+  const recognizeSelection = useCallback(() => {
+    if (!selection || !shotReady || ocrRunning) return;
+    const request = ++ocrRequest.current;
+    setOcrPanels({
+      onnx: { result: null, error: null, pending: true, elapsedMs: null },
+      rusto: { result: null, error: null, pending: true, elapsedMs: null },
+    });
+    setOcrRunning(true);
+    void (async () => {
+      try {
+        // 两个引擎使用同一冻结选区，但彼此独立完成或报错，便于直接对比。
+        const png = await exportOcrPng();
+        const requests: Array<[OcrEngine, Promise<OcrResult>]> = [
+          ["onnx", window.api.recognizeSelectionOnnx(png)],
+          ["rusto", window.api.recognizeSelectionRusto(png)],
+        ];
+        const startedAt = performance.now();
+        await Promise.all(
+          requests.map(async ([engine, operation]) => {
+            try {
+              const result = await operation;
+              if (request !== ocrRequest.current) return;
+              setOcrPanels((current) => ({
+                ...current,
+                [engine]: {
+                  result,
+                  error: null,
+                  pending: false,
+                  elapsedMs: Math.round(performance.now() - startedAt),
+                },
+              }));
+            } catch (err) {
+              if (request !== ocrRequest.current) return;
+              setOcrPanels((current) => ({
+                ...current,
+                [engine]: {
+                  result: null,
+                  error: err instanceof Error ? err.message : t.ocr.engineFailed,
+                  pending: false,
+                  elapsedMs: Math.round(performance.now() - startedAt),
+                },
+              }));
+            }
+          }),
+        );
+      } catch (err) {
+        if (request !== ocrRequest.current) return;
+        setError(err instanceof Error ? err.message : t.ocr.exportFailed);
+        setOcrPanels({
+          onnx: { result: null, error: t.ocr.exportFailed, pending: false, elapsedMs: null },
+          rusto: { result: null, error: t.ocr.exportFailed, pending: false, elapsedMs: null },
+        });
+      } finally {
+        if (request === ocrRequest.current) setOcrRunning(false);
+      }
+    })();
+  }, [exportOcrPng, ocrRunning, selection, shotReady, t.ocr.engineFailed, t.ocr.exportFailed]);
+
   const cancelOverlay = useCallback(() => {
     // Invalidate an export that is still waiting for canvas encoding before it
     // reaches the native pin/save/copy command.
     pendingAction.current += 1;
+    ocrRequest.current += 1;
+    setOcrRunning(false);
+    setOcrPanels(emptyOcrPanels());
     setBusy(false);
     window.api.closeOverlay();
   }, []);
@@ -1515,6 +1632,65 @@ function ScreenshotOverlay(): React.JSX.Element {
 
       {error && <div className="overlay-hint-bar overlay-hint-bar--error">{error}</div>}
 
+      {phase === "editing" &&
+        (ocrRunning ||
+          ocrPanels.onnx.result ||
+          ocrPanels.rusto.result ||
+          ocrPanels.onnx.error ||
+          ocrPanels.rusto.error) && (
+          <div className="ocr-result-panel" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="ocr-result-panel__header">
+              <strong>{t.ocr.title}</strong>
+              <span>{t.ocr.compareHint}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  ocrRequest.current += 1;
+                  setOcrRunning(false);
+                  setOcrPanels(emptyOcrPanels());
+                }}
+              >
+                {t.ocr.close}
+              </button>
+            </div>
+            <div className="ocr-result-panel__engines">
+              {(["onnx", "rusto"] as const).map((engine) => {
+                const panel = ocrPanels[engine];
+                const label = engine === "onnx" ? t.ocr.onnxEngine : t.ocr.rustoEngine;
+                return (
+                  <section key={engine} className="ocr-result-panel__engine">
+                    <div className="ocr-result-panel__actions">
+                      <strong>{label}</strong>
+                      {panel.elapsedMs !== null && (
+                        <span className="ocr-result-panel__elapsed">
+                          {t.ocr.completedIn(panel.elapsedMs)}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        disabled={!panel.result}
+                        onClick={() => panel.result && void window.api.copyText(panel.result.text)}
+                      >
+                        {t.ocr.copy}
+                      </button>
+                    </div>
+                    <textarea
+                      className="ocr-result-panel__text"
+                      aria-label={label}
+                      readOnly
+                      value={panel.result?.text ?? ""}
+                      placeholder={
+                        panel.pending ? t.ocr.recognizing : (panel.error ?? t.ocr.noTextFound)
+                      }
+                    />
+                    {panel.error && <p className="ocr-result-panel__hint">{panel.error}</p>}
+                  </section>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
       {selection && selection.width > 0 && selection.height > 0 && phase === "selecting" && (
         <div
           className="selection-size"
@@ -1568,6 +1744,8 @@ function ScreenshotOverlay(): React.JSX.Element {
             toolsDisabled={toolsLocked}
             scrollCaptureDisabled={hasAnnotations}
             confirmDisabled={toolsLocked}
+            ocrDisabled={!selection || !shotReady || ocrRunning}
+            ocrRunning={ocrRunning}
             showEmojiPicker={showEmojiPicker}
             pickerColor={pickerSample ? `#${pickerSample.hex}` : undefined}
             style={toolbarPos}
@@ -1605,6 +1783,7 @@ function ScreenshotOverlay(): React.JSX.Element {
                 }
               })();
             }}
+            onOcr={recognizeSelection}
             onCancel={cancelOverlay}
             onConfirm={() => {
               void (async () => {

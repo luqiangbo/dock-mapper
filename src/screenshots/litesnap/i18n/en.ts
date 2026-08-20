@@ -43,6 +43,13 @@ export interface Messages {
     close: string;
     noTextFound: string;
     noTextDetected: string;
+    compareHint: string;
+    onnxEngine: string;
+    rustoEngine: string;
+    recognizing: string;
+    completedIn: (milliseconds: number) => string;
+    engineFailed: string;
+    exportFailed: string;
   };
   errors: {
     decodeFailed: string;
@@ -114,11 +121,18 @@ export const en: Messages = {
     scrollPreviewHint: "Scroll here to preview the full image",
   },
   ocr: {
-    title: "Extracted text",
-    copy: "Copy text",
+    title: "OCR comparison",
+    copy: "Copy",
     close: "Close",
     noTextFound: "No text found.",
     noTextDetected: "(no text detected)",
+    compareHint: "Same selection, parallel offline OCR",
+    onnxEngine: "ONNX · PP-OCRv6 small",
+    rustoEngine: "RustO MNN · PP-OCRv6 small",
+    recognizing: "Recognizing…",
+    completedIn: (milliseconds) => `${milliseconds} ms`,
+    engineFailed: "This OCR engine failed.",
+    exportFailed: "Failed to export the OCR selection.",
   },
   errors: {
     decodeFailed: "Failed to decode screenshot",

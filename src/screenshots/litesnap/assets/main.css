@@ -916,3 +916,93 @@ body,
 .pin-resize:focus-visible {
   opacity: 1;
 }
+
+.ocr-result-panel {
+  position: fixed;
+  z-index: 32;
+  right: 18px;
+  top: 18px;
+  width: min(820px, calc(100vw - 36px));
+  max-height: min(62vh, 520px);
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 10px;
+  background: rgba(28, 30, 42, 0.94);
+  box-shadow: 0 12px 38px rgba(0, 0, 0, 0.32);
+  color: #f7f8ff;
+  font:
+    13px/1.45 "Segoe UI",
+    sans-serif;
+}
+
+.ocr-result-panel__header,
+.ocr-result-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ocr-result-panel__header span {
+  margin-right: auto;
+  color: #b9bed3;
+  font-size: 11px;
+}
+
+.ocr-result-panel button {
+  border: 0;
+  border-radius: 5px;
+  padding: 4px 7px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.13);
+  cursor: pointer;
+}
+
+.ocr-result-panel button:hover {
+  background: rgba(99, 102, 241, 0.72);
+}
+.ocr-result-panel__actions {
+  margin: 10px 0;
+}
+.ocr-result-panel__actions strong {
+  margin-right: auto;
+  font-size: 12px;
+}
+.ocr-result-panel__elapsed {
+  color: #b9bed3;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.ocr-result-panel__engines {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.ocr-result-panel__engine {
+  min-width: 0;
+}
+.ocr-result-panel__text {
+  display: block;
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  padding: 8px;
+  color: inherit;
+  background: rgba(0, 0, 0, 0.2);
+  font: inherit;
+  line-height: inherit;
+  white-space: pre-wrap;
+}
+.ocr-result-panel__hint {
+  margin: 8px 0 0;
+  color: #b9bed3;
+  font-size: 12px;
+}
+@media (max-width: 720px) {
+  .ocr-result-panel__engines {
+    grid-template-columns: 1fr;
+  }
+}

@@ -3,6 +3,7 @@ mod config;
 #[cfg(target_os = "windows")]
 mod dxgi_capture;
 mod litesnap;
+mod ocr;
 mod scancode_mapper;
 mod sys_monitor;
 mod taskbar;
@@ -772,6 +773,26 @@ fn update_screenshot_config(
 }
 
 #[tauri::command]
+async fn recognize_selection_onnx(
+    app: AppHandle,
+    image_base64: String,
+) -> Result<ocr::OcrTextResult, String> {
+    tokio::task::spawn_blocking(move || ocr::recognize_onnx(&app, &image_base64))
+        .await
+        .map_err(|error| format!("ONNX OCR 后台任务异常：{error}"))?
+}
+
+#[tauri::command]
+async fn recognize_selection_rusto(
+    app: AppHandle,
+    image_base64: String,
+) -> Result<ocr::OcrTextResult, String> {
+    tokio::task::spawn_blocking(move || ocr::recognize_rusto(&app, &image_base64))
+        .await
+        .map_err(|error| format!("RustO OCR 后台任务异常：{error}"))?
+}
+
+#[tauri::command]
 fn choose_screenshot_save_directory() -> Option<String> {
     rfd::FileDialog::new()
         .set_title("选择截图默认保存目录")
@@ -972,6 +993,8 @@ pub fn run() {
             get_screenshot_config,
             update_screenshot_config,
             choose_screenshot_save_directory,
+            recognize_selection_onnx,
+            recognize_selection_rusto,
             refresh_widget_position,
             check_is_admin,
             relaunch_as_admin,

@@ -7,7 +7,7 @@
     "dev": "rsbuild dev",
     "build": "rsbuild build",
     "preview": "rsbuild preview",
-    "tauri": "tauri",
+    "tauri": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tauri.ps1",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "format": "oxfmt src index.html widget.html rsbuild.config.ts tsconfig.json package.json .oxfmtrc.json .oxlintrc.json",
