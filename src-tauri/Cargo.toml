@@ -45,9 +45,12 @@ tokio = { version = "1", features = ["full"] }
 arboard = "3.6"
 base64 = "0.22"
 directories = "6"
-image = { version = "0.24", default-features = false, features = ["png"] }
+# LiteSnap 的截图拼接、PNG 编解码和像素级测试仍直接使用 0.24 API；OCR
+# 后端则通过别名隔离在 image 0.25，避免类型冲突。
+image = "0.24"
 # OCR 后端的公开 API 使用 image 0.25；截图采集仍依赖 0.24，二者隔离。
 ocr-image = { package = "image", version = "0.25", default-features = false, features = ["png"] }
+quircs = "0.10"
 rfd = "0.15"
 screenshots = "0.8.10"
 tauri-plugin-global-shortcut = "2.3"

@@ -3,8 +3,9 @@
 //! 同一张选区 PNG 可分别交给 ONNX Runtime 与 RustO/MNN。两种模型都作为
 //! Tauri 资源随应用发布，不下载模型、不依赖 Windows OCR 语言包或网络服务。
 
+use crate::config::OcrEngine as SelectedOcrEngine;
 use base64::{engine::general_purpose::STANDARD, Engine};
-use paddleocr_rs_onnx::{OcrEngine, OrderBy};
+use paddleocr_rs_onnx::{OcrBlock, OcrEngine, OrderBy};
 use rusto::{DetectTextResult, ImageSource, InitializeConfig, OcrRunOptions, RustO};
 use serde::Serialize;
 use std::{
@@ -25,6 +26,11 @@ static RUSTO_ENGINE: OnceLock<Mutex<Option<RustO>>> = OnceLock::new();
 pub struct OcrTextResult {
     pub text: String,
     pub engine: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct QrDecodeResult {
+    pub contents: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -155,6 +161,81 @@ fn normalize_lines(lines: impl IntoIterator<Item = String>) -> String {
         .join("\n")
 }
 
+fn normalized_block_text(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[derive(Clone)]
+struct TextBlock {
+    text: String,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+}
+
+fn normalize_positioned_blocks(blocks: Vec<TextBlock>) -> String {
+    let mut lines: Vec<Vec<TextBlock>> = Vec::new();
+    for block in blocks
+        .into_iter()
+        .filter(|block| !block.text.trim().is_empty())
+    {
+        let center_y = block.y + block.height / 2.0;
+        if let Some(line) = lines.last_mut() {
+            let reference = &line[0];
+            let reference_center = reference.y + reference.height / 2.0;
+            let tolerance = reference.height.max(block.height) * 0.55;
+            if (center_y - reference_center).abs() <= tolerance {
+                line.push(block);
+                continue;
+            }
+        }
+        lines.push(vec![block]);
+    }
+
+    lines
+        .into_iter()
+        .map(|mut line| {
+            line.sort_by(|left, right| left.x.total_cmp(&right.x));
+            let mut text = String::new();
+            for (index, block) in line.iter().enumerate() {
+                let value = normalized_block_text(&block.text);
+                if value.is_empty() {
+                    continue;
+                }
+                if index > 0 {
+                    let previous = &line[index - 1];
+                    let character_width =
+                        previous.width / previous.text.chars().count().max(1) as f32;
+                    let gap = block.x - (previous.x + previous.width);
+                    if gap > character_width * 0.35 {
+                        text.push(' ');
+                    }
+                }
+                text.push_str(&value);
+            }
+            text.trim().to_owned()
+        })
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn normalize_onnx_blocks(blocks: Vec<OcrBlock>) -> String {
+    normalize_positioned_blocks(
+        blocks
+            .into_iter()
+            .map(|block| TextBlock {
+                text: block.text,
+                x: block.x,
+                y: block.y,
+                width: block.width,
+                height: block.height,
+            })
+            .collect(),
+    )
+}
+
 pub fn recognize_onnx(app: &AppHandle, image_base64: &str) -> Result<OcrTextResult, String> {
     let png = decode_png(image_base64)?;
     let image = ocr_image::load_from_memory(&png)
@@ -167,7 +248,7 @@ pub fn recognize_onnx(app: &AppHandle, image_base64: &str) -> Result<OcrTextResu
         .recognize_all(&image, OrderBy::Horizontal)
         .map_err(|error| format!("ONNX OCR 识别失败：{error}"))?;
     Ok(OcrTextResult {
-        text: normalize_lines(results.into_iter().map(|item| item.text)),
+        text: normalize_onnx_blocks(results),
         engine: ONNX_ENGINE_ID.into(),
     })
 }
@@ -181,15 +262,59 @@ pub fn recognize_rusto(app: &AppHandle, image_base64: &str) -> Result<OcrTextRes
         .detect_text(&ImageSource::Bytes(png), &OcrRunOptions::default())
         .map_err(|error| format!("RustO MNN OCR 识别失败：{error}"))?;
     let text = match result {
-        DetectTextResult::Structured(results) => {
-            normalize_lines(results.into_iter().map(|item| item.text))
-        }
-        DetectTextResult::Spatial(text) => text,
+        DetectTextResult::Structured(results) => normalize_positioned_blocks(
+            results
+                .into_iter()
+                .map(|item| TextBlock {
+                    text: item.text,
+                    x: item.frame.left,
+                    y: item.frame.top,
+                    width: item.frame.width,
+                    height: item.frame.height,
+                })
+                .collect(),
+        ),
+        DetectTextResult::Spatial(text) => normalize_lines(text.lines().map(normalized_block_text)),
     };
     Ok(OcrTextResult {
         text,
         engine: RUSTO_ENGINE_ID.into(),
     })
+}
+
+pub fn recognize(
+    app: &AppHandle,
+    image_base64: &str,
+    engine: SelectedOcrEngine,
+) -> Result<OcrTextResult, String> {
+    match engine {
+        SelectedOcrEngine::Onnx => recognize_onnx(app, image_base64),
+        SelectedOcrEngine::Rusto => recognize_rusto(app, image_base64),
+    }
+}
+
+pub fn decode_qr(image_base64: &str) -> Result<QrDecodeResult, String> {
+    let png = decode_png(image_base64)?;
+    let image = ocr_image::load_from_memory(&png)
+        .map_err(|error| format!("读取二维码图片失败：{error}"))?
+        .to_luma8();
+    let mut decoder = quircs::Quirc::default();
+    let codes = decoder.identify(
+        image.width() as usize,
+        image.height() as usize,
+        image.as_raw(),
+    );
+    let mut contents = Vec::new();
+    for code in codes.flatten() {
+        let decoded = code
+            .decode()
+            .map_err(|error| format!("二维码解码失败：{error}"))?;
+        let value = String::from_utf8_lossy(&decoded.payload).trim().to_owned();
+        if !value.is_empty() && !contents.contains(&value) {
+            contents.push(value);
+        }
+    }
+    Ok(QrDecodeResult { contents })
 }
 
 #[cfg(test)]
@@ -201,6 +326,14 @@ mod tests {
         assert_eq!(
             normalize_lines([" first ".into(), "".into(), "second ".into()]),
             "first\nsecond"
+        );
+    }
+
+    #[test]
+    fn preserves_chinese_but_normalizes_whitespace() {
+        assert_eq!(
+            normalized_block_text(" DockMapper\t截图 "),
+            "DockMapper 截图"
         );
     }
 

@@ -32,6 +32,8 @@ export interface ScreenshotConfig {
   shortcut: string;
   save_directory: string | null;
   filename_prefix: string;
+  ocr_engine: "onnx" | "rusto";
+  color_copy_format: "hex" | "rgb" | "hsl" | "hsv" | "css";
 }
 
 export interface WidgetConfig {

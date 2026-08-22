@@ -2,7 +2,6 @@ export interface Messages {
   toolbar: {
     rectangle: string;
     ellipse: string;
-    emojiSticker: string;
     arrow: string;
     pen: string;
     highlight: string;
@@ -77,7 +76,6 @@ export interface Messages {
     done: string;
     cancel: string;
     moveHint: string;
-    emojiMoveHint: string;
   };
 }
 
@@ -85,7 +83,6 @@ export const en: Messages = {
   toolbar: {
     rectangle: "Rectangle",
     ellipse: "Ellipse",
-    emojiSticker: "Emoji sticker",
     arrow: "Arrow",
     pen: "Pen",
     highlight: "Highlighter",
@@ -160,6 +157,5 @@ export const en: Messages = {
     done: "Done",
     cancel: "Cancel",
     moveHint: "Drag text to move · Double-click to edit",
-    emojiMoveHint: "Drag to move · Drag corner to resize · Backspace to delete",
   },
 };

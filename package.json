@@ -10,8 +10,8 @@
     "tauri": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tauri.ps1",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
-    "format": "oxfmt src index.html widget.html rsbuild.config.ts tsconfig.json package.json .oxfmtrc.json .oxlintrc.json",
-    "format:check": "oxfmt --check src index.html widget.html rsbuild.config.ts tsconfig.json package.json .oxfmtrc.json .oxlintrc.json",
+    "format": "oxfmt src index.html litesnap.html widget.html rsbuild.config.ts tsconfig.json package.json .oxfmtrc.json .oxlintrc.json",
+    "format:check": "oxfmt --check src index.html litesnap.html widget.html rsbuild.config.ts tsconfig.json package.json .oxfmtrc.json .oxlintrc.json",
     "test": "vitest run --passWithNoTests",
     "version:sync": "node .github/scripts/sync-version.mjs"
   },
@@ -22,24 +22,24 @@
     "@tauri-apps/plugin-opener": "^2.5.4",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.10.1",
-    "antd": "6.6.0",
-    "emoji-picker-react": "^4.16.1",
+    "antd": "6.6.1",
+    "lucide-react": "1.33.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "zustand": "^5.0.14"
   },
   "devDependencies": {
-    "@rsbuild/core": "^2.1.11",
+    "@rsbuild/core": "^2.1.13",
     "@rsbuild/plugin-react": "^2.1.0",
     "@rsbuild/plugin-sass": "2.0.1",
     "@tauri-apps/cli": "^2.11.4",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
-    "oxfmt": "^0.63.0",
-    "oxlint": "^1.78.0",
-    "sass": "1.102.0",
+    "oxfmt": "^0.64.0",
+    "oxlint": "^1.79.0",
+    "sass": "1.103.0",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "packageManager": "pnpm@11.20.0"
 }

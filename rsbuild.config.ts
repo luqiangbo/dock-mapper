@@ -7,12 +7,16 @@ export default defineConfig({
   source: {
     entry: {
       index: "./src/main-entry.tsx",
+      litesnap: "./src/litesnap-entry.tsx",
       widget: "./src/widget-entry.tsx",
     },
   },
   html: {
     template({ entryName }) {
-      return entryName === "widget" ? "./widget.html" : "./index.html";
+      if (entryName === "widget") {
+        return "./widget.html";
+      }
+      return entryName === "litesnap" ? "./litesnap.html" : "./index.html";
     },
   },
   server: {

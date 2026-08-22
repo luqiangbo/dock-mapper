@@ -773,23 +773,30 @@ fn update_screenshot_config(
 }
 
 #[tauri::command]
-async fn recognize_selection_onnx(
+async fn recognize_selection(
     app: AppHandle,
+    state: State<'_, AppState>,
     image_base64: String,
 ) -> Result<ocr::OcrTextResult, String> {
-    tokio::task::spawn_blocking(move || ocr::recognize_onnx(&app, &image_base64))
+    let engine = state
+        .config
+        .lock()
+        .map_err(|_| "配置状态已损坏".to_string())?
+        .screenshot_config
+        .ocr_engine;
+    tokio::task::spawn_blocking(move || ocr::recognize(&app, &image_base64, engine))
         .await
-        .map_err(|error| format!("ONNX OCR 后台任务异常：{error}"))?
+        .map_err(|error| format!("OCR 后台任务异常：{error}"))?
 }
 
 #[tauri::command]
-async fn recognize_selection_rusto(
-    app: AppHandle,
+async fn decode_qr_selection(
+    _app: AppHandle,
     image_base64: String,
-) -> Result<ocr::OcrTextResult, String> {
-    tokio::task::spawn_blocking(move || ocr::recognize_rusto(&app, &image_base64))
+) -> Result<ocr::QrDecodeResult, String> {
+    tokio::task::spawn_blocking(move || ocr::decode_qr(&image_base64))
         .await
-        .map_err(|error| format!("RustO OCR 后台任务异常：{error}"))?
+        .map_err(|error| format!("二维码解码后台任务异常：{error}"))?
 }
 
 #[tauri::command]
@@ -990,11 +997,12 @@ pub fn run() {
             litesnap::pin_image,
             litesnap::get_pin_image,
             litesnap::close_pin_window,
+            litesnap::scale_pin_window,
             get_screenshot_config,
             update_screenshot_config,
             choose_screenshot_save_directory,
-            recognize_selection_onnx,
-            recognize_selection_rusto,
+            recognize_selection,
+            decode_qr_selection,
             refresh_widget_position,
             check_is_admin,
             relaunch_as_admin,

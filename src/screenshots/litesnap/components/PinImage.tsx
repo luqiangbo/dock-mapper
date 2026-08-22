@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, PhysicalSize } from "@tauri-apps/api/window";
 
 export default function PinImage(): React.JSX.Element {
+  const pinId = new URLSearchParams(window.location.search).get("id") ?? getCurrentWindow().label;
   const [imageUrl, setImageUrl] = useState("");
   const imageUrlRef = useRef("");
   const aspectRatio = useRef(1);
@@ -17,7 +18,7 @@ export default function PinImage(): React.JSX.Element {
 
     const refreshImage = async (): Promise<void> => {
       try {
-        const png = await invoke<string>("get_pin_image");
+        const png = await invoke<string>("get_pin_image", { id: pinId });
         if (disposed) return;
         const nextUrl = `data:image/png;base64,${png}`;
         imageUrlRef.current = nextUrl;
@@ -30,7 +31,9 @@ export default function PinImage(): React.JSX.Element {
 
     // Register first, then request current data. This closes the race between
     // the hidden prewarmed renderer loading and the first pin operation.
-    void listen("pin-image-updated", () => void refreshImage()).then((off) => {
+    void listen<string>("pin-image-updated", ({ payload }) => {
+      if (payload === pinId) void refreshImage();
+    }).then((off) => {
       if (disposed) {
         off();
         return;
@@ -44,7 +47,7 @@ export default function PinImage(): React.JSX.Element {
       unlisten?.();
       imageUrlRef.current = "";
     };
-  }, []);
+  }, [pinId]);
 
   useEffect(() => {
     const appWindow = getCurrentWindow();
@@ -103,8 +106,20 @@ export default function PinImage(): React.JSX.Element {
     void getCurrentWindow().startDragging();
   };
 
+  const scaleAtPointer = (event: React.WheelEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+    void invoke("scale_pin_window", {
+      id: pinId,
+      anchorX: (event.clientX - bounds.left) / Math.max(1, bounds.width),
+      anchorY: (event.clientY - bounds.top) / Math.max(1, bounds.height),
+      factor,
+    });
+  };
+
   return (
-    <div className="pin-wrap" onPointerDown={startDragging}>
+    <div className="pin-wrap" onPointerDown={startDragging} onWheel={scaleAtPointer}>
       {imageUrl ? (
         <img
           src={imageUrl}
@@ -121,7 +136,7 @@ export default function PinImage(): React.JSX.Element {
         aria-label="Close"
         title="Close"
         onPointerDown={(event) => event.stopPropagation()}
-        onClick={() => void invoke("close_pin_window")}
+        onClick={() => void invoke("close_pin_window", { id: pinId })}
       >
         ×
       </button>

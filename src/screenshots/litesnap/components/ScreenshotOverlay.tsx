@@ -1,59 +1,41 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Selection } from "../store";
 import { useStore } from "../store";
 import { useI18n } from "../i18n";
 import type { OcrResult } from "../api";
-import AnnotationToolbar, {
-  STROKE_COLORS,
-  toolUsesColor,
-  type AnnotTool,
-} from "./AnnotationToolbar";
+import type { ScreenshotConfig } from "../../../types";
+import AnnotationToolbar, { STROKE_COLORS, type AnnotTool } from "./AnnotationToolbar";
 import { loadImageFromUrl, loadPngFromBase64 } from "../utils/scrollStitch";
-import ColorPalette from "./ColorPalette";
-import EmojiPicker from "./EmojiPicker";
-import TextEditor, {
+import {
+  fontFamily,
   TEXT_SIZES,
   type TextEditorState,
   type TextObject,
   type TextSize,
-} from "./TextEditor";
+} from "./textTypes";
+import ToolOptionsBar from "./ToolOptionsBar";
+import {
+  DEFAULT_NUMBER_STYLE,
+  DEFAULT_TEXT_STYLE,
+  type ArrowStyle,
+  type NumberStyle,
+  type ToolSettings,
+} from "./annotationTypes";
 
 const MIN_SIZE = 8;
-const LINE_WIDTH = 3;
-const HIGHLIGHT_WIDTH = 20;
-const HIGHLIGHT_ALPHA = 0.32;
-
-// Intrinsic widths of the floating bars, used only to position them; both bars
-// size themselves from their content so these must track the CSS metrics.
-const TOOLBAR_WIDTH = 492;
-const PALETTE_WIDTH = 176;
-
-const DEFAULT_EMOJI_SIZE = 40;
-const EMOJI_MIN_SIZE = 16;
-const EMOJI_MAX_SIZE = 240;
-
-const TOOLBAR_HEIGHT = 42;
-const PALETTE_HEIGHT = 40;
-const EMOJI_PICKER_HEIGHT = 380;
-
-interface EmojiObject {
-  id: string;
-  emoji: string;
-  canvasX: number;
-  canvasY: number;
-  size: number;
-  scale: number;
-}
+const TOOLBAR_WIDTH = 720;
 
 interface PickerSample {
   hex: string;
+  red: number;
+  green: number;
+  blue: number;
   imageX: number;
   imageY: number;
   left: number;
   top: number;
 }
-
-type OcrEngine = OcrResult["engine"];
 
 interface OcrPanelState {
   result: OcrResult | null;
@@ -62,11 +44,71 @@ interface OcrPanelState {
   elapsedMs: number | null;
 }
 
-function emptyOcrPanels(): Record<OcrEngine, OcrPanelState> {
-  return {
-    onnx: { result: null, error: null, pending: false, elapsedMs: null },
-    rusto: { result: null, error: null, pending: false, elapsedMs: null },
-  };
+interface NumberObject {
+  id: string;
+  value: number;
+  canvasX: number;
+  canvasY: number;
+  style: NumberStyle;
+}
+
+const EMPTY_OCR: OcrPanelState = { result: null, error: null, pending: false, elapsedMs: null };
+
+type ColorCopyFormat = ScreenshotConfig["color_copy_format"];
+
+function rgbToHsl(red: number, green: number, blue: number): [number, number, number] {
+  const r = red / 255;
+  const g = green / 255;
+  const b = blue / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const lightness = (max + min) / 2;
+  if (max === min) return [0, 0, Math.round(lightness * 100)];
+  const delta = max - min;
+  const saturation = delta / (1 - Math.abs(2 * lightness - 1));
+  let hue = 0;
+  if (max === r) hue = ((g - b) / delta) % 6;
+  else if (max === g) hue = (b - r) / delta + 2;
+  else hue = (r - g) / delta + 4;
+  return [
+    Math.round((hue * 60 + 360) % 360),
+    Math.round(saturation * 100),
+    Math.round(lightness * 100),
+  ];
+}
+
+function rgbToHsv(red: number, green: number, blue: number): [number, number, number] {
+  const r = red / 255;
+  const g = green / 255;
+  const b = blue / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  let hue = 0;
+  if (delta) {
+    if (max === r) hue = ((g - b) / delta) % 6;
+    else if (max === g) hue = (b - r) / delta + 2;
+    else hue = (r - g) / delta + 4;
+  }
+  return [
+    Math.round((hue * 60 + 360) % 360),
+    Math.round((max ? delta / max : 0) * 100),
+    Math.round(max * 100),
+  ];
+}
+
+function formatPickerColor(sample: PickerSample, format: ColorCopyFormat): string {
+  const { red, green, blue } = sample;
+  if (format === "hex") return `#${sample.hex}`;
+  if (format === "rgb") return `rgb(${red}, ${green}, ${blue})`;
+  if (format === "css")
+    return `color(srgb ${Math.round((red / 255) * 100)}% ${Math.round((green / 255) * 100)}% ${Math.round((blue / 255) * 100)}%)`;
+  if (format === "hsl") {
+    const [hue, saturation, lightness] = rgbToHsl(red, green, blue);
+    return `hsl(${hue} ${saturation}% ${lightness}%)`;
+  }
+  const [hue, saturation, value] = rgbToHsv(red, green, blue);
+  return `hsv(${hue} ${saturation}% ${value}%)`;
 }
 
 const RESIZE_HANDLES = ["nw", "n", "ne", "w", "e", "sw", "s", "se"] as const;
@@ -124,12 +166,13 @@ function strokeHighlightPath(
   points: Array<{ x: number; y: number }>,
   color: string,
   lineWidth: number,
+  opacity: number,
 ): void {
   if (points.length === 0) return;
   ctx.save();
   ctx.globalCompositeOperation = "source-over";
   ctx.globalAlpha = 1;
-  ctx.strokeStyle = hexToRgba(color, HIGHLIGHT_ALPHA);
+  ctx.strokeStyle = hexToRgba(color, opacity);
   ctx.lineWidth = lineWidth;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
@@ -217,39 +260,51 @@ function drawArrow(
   y1: number,
   x2: number,
   y2: number,
+  style: ArrowStyle = "filled",
+  headScale = 1,
 ): void {
   const length = Math.hypot(x2 - x1, y2 - y1);
   if (length < 1) return;
-
-  // Annotation coordinates are physical canvas pixels. On Retina displays the
-  // canvas is commonly 2x the CSS size, so a fixed 12px arrowhead becomes only
-  // 6px on screen and is almost invisible. Derive it from the already-scaled
-  // stroke width and cap it for short arrows.
-  const head = Math.min(Math.max(16, ctx.lineWidth * 5), length * 0.55);
-  const wingAngle = Math.PI / 5;
+  const head = Math.min(Math.max(ctx.lineWidth * 4.8 * headScale, 12 * headScale), length * 0.42);
+  const wingAngle = Math.PI / 6;
   const angle = Math.atan2(y2 - y1, x2 - x1);
-  const shaftInset = head * Math.cos(wingAngle);
-  const shaftEndX = x2 - shaftInset * Math.cos(angle);
-  const shaftEndY = y2 - shaftInset * Math.sin(angle);
-
   ctx.save();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-
-  // End the round-capped shaft underneath the arrowhead. Drawing it all the
-  // way to (x2, y2) lets the cap protrude past the tip, which is especially
-  // visible as a detached-looking dot on a Retina canvas.
+  const inset = style === "filled" || style === "double" ? head * 0.78 : 0;
+  const startX = style === "double" ? x1 + inset * Math.cos(angle) : x1;
+  const startY = style === "double" ? y1 + inset * Math.sin(angle) : y1;
+  const endX = style === "filled" || style === "double" ? x2 - inset * Math.cos(angle) : x2;
+  const endY = style === "filled" || style === "double" ? y2 - inset * Math.sin(angle) : y2;
   ctx.beginPath();
-  ctx.moveTo(x1, y1);
-  ctx.lineTo(shaftEndX, shaftEndY);
+  ctx.moveTo(startX, startY);
+  ctx.lineTo(endX, endY);
   ctx.stroke();
 
-  ctx.beginPath();
-  ctx.moveTo(x2, y2);
-  ctx.lineTo(x2 - head * Math.cos(angle - wingAngle), y2 - head * Math.sin(angle - wingAngle));
-  ctx.lineTo(x2 - head * Math.cos(angle + wingAngle), y2 - head * Math.sin(angle + wingAngle));
-  ctx.closePath();
-  ctx.fill();
+  const arrowHead = (x: number, y: number, direction: number, filled: boolean): void => {
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(
+      x - head * Math.cos(direction - wingAngle),
+      y - head * Math.sin(direction - wingAngle),
+    );
+    ctx.lineTo(
+      x - head * Math.cos(direction + wingAngle),
+      y - head * Math.sin(direction + wingAngle),
+    );
+    if (filled) {
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      ctx.stroke();
+    }
+  };
+  if (style === "filled") arrowHead(x2, y2, angle, true);
+  if (style === "outline") arrowHead(x2, y2, angle, false);
+  if (style === "double") {
+    arrowHead(x2, y2, angle, true);
+    arrowHead(x1, y1, angle + Math.PI, true);
+  }
   ctx.restore();
 }
 
@@ -322,6 +377,7 @@ function ScreenshotOverlay(): React.JSX.Element {
   const initialSelectionHeight = useRef(0);
   const imageScaleRef = useRef({ scaleX: 1, scaleY: 1 });
   const lastTextFontSize = useRef<TextSize>(TEXT_SIZES[1]);
+  const nextNumber = useRef(1);
   const textDragRef = useRef<{
     id: string;
     startX: number;
@@ -329,14 +385,18 @@ function ScreenshotOverlay(): React.JSX.Element {
     originCanvasX: number;
     originCanvasY: number;
   } | null>(null);
-  const emojiDragRef = useRef<{
-    id: string;
-    mode: "move" | "resize";
+  const textEditorDragRef = useRef<{
     startX: number;
     startY: number;
     originCanvasX: number;
     originCanvasY: number;
-    originSize: number;
+  } | null>(null);
+  const numberDragRef = useRef<{
+    id: string;
+    startX: number;
+    startY: number;
+    originCanvasX: number;
+    originCanvasY: number;
   } | null>(null);
   const regionDragRef = useRef<{
     handle: ResizeHandle | "move";
@@ -349,7 +409,6 @@ function ScreenshotOverlay(): React.JSX.Element {
     baseSx: number;
     baseSy: number;
     baseTextObjects: TextObject[];
-    baseEmojiObjects: EmojiObject[];
   } | null>(null);
 
   const [phase, setPhase] = useState<"loading" | "selecting" | "editing">("loading");
@@ -359,22 +418,32 @@ function ScreenshotOverlay(): React.JSX.Element {
   const [shotReady, setShotReady] = useState(false);
   const [tool, setTool] = useState<AnnotTool>(null);
   const [strokeColor, setStrokeColor] = useState<string>(STROKE_COLORS[0]);
+  const [strokeWidth, setStrokeWidth] = useState(3);
+  const [fillOpacity, setFillOpacity] = useState(0);
+  const [arrowHeadSize, setArrowHeadSize] = useState(1);
+  const [penWidth, setPenWidth] = useState(3);
+  const [highlightWidth, setHighlightWidth] = useState(20);
+  const [highlightOpacity, setHighlightOpacity] = useState(0.32);
+  const [mosaicBlock, setMosaicBlock] = useState(12);
+  const [textStyle, setTextStyle] = useState(DEFAULT_TEXT_STYLE);
+  const [numberStyle, setNumberStyle] = useState(DEFAULT_NUMBER_STYLE);
   const [canUndo, setCanUndo] = useState(false);
-  const [selectedEmoji, setSelectedEmoji] = useState("😀");
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [textEditor, setTextEditor] = useState<TextEditorState | null>(null);
   const [textDraft, setTextDraft] = useState("");
   const [textObjects, setTextObjects] = useState<TextObject[]>([]);
+  const [numberObjects, setNumberObjects] = useState<NumberObject[]>([]);
   const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
-  const [emojiObjects, setEmojiObjects] = useState<EmojiObject[]>([]);
-  const [selectedEmojiId, setSelectedEmojiId] = useState<string | null>(null);
+  const [selectedNumberId, setSelectedNumberId] = useState<string | null>(null);
   const [editHeight, setEditHeight] = useState(0);
   const [viewScrollTop, setViewScrollTop] = useState(0);
   const [adjustingRegion, setAdjustingRegion] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pickerSample, setPickerSample] = useState<PickerSample | null>(null);
   const [pickerCopied, setPickerCopied] = useState(false);
-  const [ocrPanels, setOcrPanels] = useState<Record<OcrEngine, OcrPanelState>>(emptyOcrPanels);
+  const [pickerFormat, setPickerFormat] = useState<ColorCopyFormat>("hex");
+  const [ocrPanel, setOcrPanel] = useState<OcrPanelState>(EMPTY_OCR);
+  const [qrContents, setQrContents] = useState<string[] | null>(null);
+  const [arrowStyle, setArrowStyle] = useState<ArrowStyle>("filled");
   const [ocrRunning, setOcrRunning] = useState(false);
 
   const selection = useStore((s) => s.selection);
@@ -383,13 +452,30 @@ function ScreenshotOverlay(): React.JSX.Element {
   useEffect(() => {
     ocrRequest.current += 1;
     setOcrRunning(false);
-    setOcrPanels(emptyOcrPanels());
+    setOcrPanel(EMPTY_OCR);
+    setQrContents(null);
   }, [selection?.x, selection?.y, selection?.width, selection?.height]);
+
+  useEffect(() => {
+    void window.api
+      .getScreenshotConfig()
+      .then((config) => {
+        setPickerFormat(config.color_copy_format);
+      })
+      .catch(() => undefined);
+  }, []);
 
   const copyPickerColor = useCallback(async () => {
     const sample = pickerSample;
     if (!sample) return;
-    await window.api.copyText(sample.hex);
+    await window.api.copyText(formatPickerColor(sample, pickerFormat));
+    setPickerCopied(true);
+    window.setTimeout(() => setPickerCopied(false), 900);
+  }, [pickerFormat, pickerSample]);
+
+  const copyPickerHex = useCallback(async () => {
+    if (!pickerSample) return;
+    await window.api.copyText(pickerSample.hex);
     setPickerCopied(true);
     window.setTimeout(() => setPickerCopied(false), 900);
   }, [pickerSample]);
@@ -399,7 +485,7 @@ function ScreenshotOverlay(): React.JSX.Element {
   // with an annotated canvas corrupts its baseline and can leave the overlay busy
   // forever, so only allow it while the selected crop is still untouched.
   const hasAnnotations =
-    canUndo || textObjects.length > 0 || emojiObjects.length > 0 || textEditor !== null || drawing;
+    canUndo || textObjects.length > 0 || numberObjects.length > 0 || textEditor !== null || drawing;
   const isLongImage =
     initialSelectionHeight.current > 0 && displayHeight > initialSelectionHeight.current + 2;
   // A stitched long screenshot is no longer a plain crop of the frozen frame,
@@ -537,20 +623,61 @@ function ScreenshotOverlay(): React.JSX.Element {
     ctx.drawImage(canvas, 0, 0);
     for (const obj of textObjects) {
       const fontPx = Math.round(obj.fontSize * obj.scale);
-      ctx.fillStyle = obj.color;
-      ctx.font = `bold ${fontPx}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
-      ctx.textBaseline = "top";
-      const lines = obj.text.split("\n");
+      const width = Math.max(1, obj.width * obj.scale);
       const lineHeight = Math.round(fontPx * 1.25);
-      lines.forEach((line, index) => {
-        ctx.fillText(line, obj.canvasX, obj.canvasY + index * lineHeight);
+      ctx.fillStyle = hexToRgba(obj.backgroundColor, obj.backgroundOpacity);
+      ctx.fillRect(
+        obj.canvasX,
+        obj.canvasY,
+        width,
+        Math.max(obj.height * obj.scale, lineHeight + 12),
+      );
+      ctx.fillStyle = obj.color;
+      ctx.font = `${obj.bold ? "700" : "400"} ${fontPx}px ${fontFamily(obj.font)}`;
+      ctx.textBaseline = "top";
+      ctx.lineWidth = Math.max(0, obj.strokeWidth * obj.scale);
+      ctx.strokeStyle = obj.strokeColor;
+      const words = obj.text.split(/(\s+)/);
+      const lines: string[] = [];
+      let line = "";
+      for (const word of words) {
+        if (word.includes("\n")) {
+          const parts = word.split("\n");
+          line += parts.shift() ?? "";
+          lines.push(line);
+          line = parts.join("\n");
+          continue;
+        }
+        if (ctx.measureText(line + word).width > width - 12 && line.trim()) {
+          lines.push(line.trimEnd());
+          line = word.trimStart();
+        } else line += word;
+      }
+      lines.push(line);
+      lines.forEach((value, index) => {
+        const y = obj.canvasY + 6 + index * lineHeight;
+        if (ctx.lineWidth) ctx.strokeText(value, obj.canvasX + 6, y);
+        ctx.fillText(value, obj.canvasX + 6, y);
       });
     }
-    for (const obj of emojiObjects) {
-      const glyphPx = Math.round(obj.size * obj.scale);
-      ctx.font = `${glyphPx}px -apple-system, "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
-      ctx.textBaseline = "top";
-      ctx.fillText(obj.emoji, obj.canvasX, obj.canvasY);
+    for (const number of numberObjects) {
+      const radius = Math.max(
+        12,
+        Math.round(
+          (number.style.size * canvas.width) / Math.max(1, selection?.width ?? canvas.width) / 2,
+        ),
+      );
+      ctx.fillStyle = number.style.backgroundColor;
+      ctx.beginPath();
+      ctx.arc(number.canvasX, number.canvasY, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = number.style.textColor;
+      ctx.font = `700 ${Math.round(radius * 1.05)}px system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(String(number.value), number.canvasX, number.canvasY + 1);
+      ctx.textAlign = "start";
+      ctx.textBaseline = "alphabetic";
     }
 
     const blob = await new Promise<Blob>((resolve, reject) => {
@@ -560,7 +687,7 @@ function ScreenshotOverlay(): React.JSX.Element {
       );
     });
     return new Uint8Array(await blob.arrayBuffer());
-  }, [textObjects, emojiObjects]);
+  }, [textObjects, numberObjects, selection?.width]);
 
   const exportOcrPng = useCallback(async (): Promise<Uint8Array> => {
     const canvas = shotRef.current;
@@ -594,54 +721,28 @@ function ScreenshotOverlay(): React.JSX.Element {
   const recognizeSelection = useCallback(() => {
     if (!selection || !shotReady || ocrRunning) return;
     const request = ++ocrRequest.current;
-    setOcrPanels({
-      onnx: { result: null, error: null, pending: true, elapsedMs: null },
-      rusto: { result: null, error: null, pending: true, elapsedMs: null },
-    });
+    setOcrPanel({ result: null, error: null, pending: true, elapsedMs: null });
     setOcrRunning(true);
     void (async () => {
       try {
-        // 两个引擎使用同一冻结选区，但彼此独立完成或报错，便于直接对比。
         const png = await exportOcrPng();
-        const requests: Array<[OcrEngine, Promise<OcrResult>]> = [
-          ["onnx", window.api.recognizeSelectionOnnx(png)],
-          ["rusto", window.api.recognizeSelectionRusto(png)],
-        ];
         const startedAt = performance.now();
-        await Promise.all(
-          requests.map(async ([engine, operation]) => {
-            try {
-              const result = await operation;
-              if (request !== ocrRequest.current) return;
-              setOcrPanels((current) => ({
-                ...current,
-                [engine]: {
-                  result,
-                  error: null,
-                  pending: false,
-                  elapsedMs: Math.round(performance.now() - startedAt),
-                },
-              }));
-            } catch (err) {
-              if (request !== ocrRequest.current) return;
-              setOcrPanels((current) => ({
-                ...current,
-                [engine]: {
-                  result: null,
-                  error: err instanceof Error ? err.message : t.ocr.engineFailed,
-                  pending: false,
-                  elapsedMs: Math.round(performance.now() - startedAt),
-                },
-              }));
-            }
-          }),
-        );
+        const result = await window.api.recognizeSelection(png);
+        if (request !== ocrRequest.current) return;
+        setOcrPanel({
+          result,
+          error: null,
+          pending: false,
+          elapsedMs: Math.round(performance.now() - startedAt),
+        });
       } catch (err) {
         if (request !== ocrRequest.current) return;
         setError(err instanceof Error ? err.message : t.ocr.exportFailed);
-        setOcrPanels({
-          onnx: { result: null, error: t.ocr.exportFailed, pending: false, elapsedMs: null },
-          rusto: { result: null, error: t.ocr.exportFailed, pending: false, elapsedMs: null },
+        setOcrPanel({
+          result: null,
+          error: err instanceof Error ? err.message : t.ocr.engineFailed,
+          pending: false,
+          elapsedMs: null,
         });
       } finally {
         if (request === ocrRequest.current) setOcrRunning(false);
@@ -655,7 +756,7 @@ function ScreenshotOverlay(): React.JSX.Element {
     pendingAction.current += 1;
     ocrRequest.current += 1;
     setOcrRunning(false);
-    setOcrPanels(emptyOcrPanels());
+    setOcrPanel(EMPTY_OCR);
     setBusy(false);
     window.api.closeOverlay();
   }, []);
@@ -694,8 +795,16 @@ function ScreenshotOverlay(): React.JSX.Element {
           canvasX: point.canvasX,
           canvasY: point.canvasY,
           scale: textEditor.scale,
+          width: textEditor.width,
+          height: textEditor.height,
           fontSize: textEditor.fontSize,
           color: textEditor.color,
+          font: textEditor.font,
+          bold: textEditor.bold,
+          strokeColor: textEditor.strokeColor,
+          strokeWidth: textEditor.strokeWidth,
+          backgroundColor: textEditor.backgroundColor,
+          backgroundOpacity: textEditor.backgroundOpacity,
         };
         setTextObjects((prev) => {
           const idx = prev.findIndex((item) => item.id === next.id);
@@ -728,8 +837,6 @@ function ScreenshotOverlay(): React.JSX.Element {
       const scrollTop = viewport?.scrollTop ?? 0;
       const textLeft = selection.x + obj.canvasX / scale;
       const textTop = selection.y + obj.canvasY / scale - scrollTop;
-      // Offset so the textarea (below drag handle + size/color bar) lands on the text
-      const panelOffsetY = 58;
       setSelectedTextId(obj.id);
       setTextDraft(obj.text);
       setTextEditor({
@@ -737,13 +844,31 @@ function ScreenshotOverlay(): React.JSX.Element {
         canvasX: obj.canvasX,
         canvasY: obj.canvasY,
         left: Math.max(8, textLeft),
-        top: Math.max(8, textTop - panelOffsetY),
+        top: Math.max(8, textTop),
         scale: obj.scale,
+        width: obj.width,
+        height: obj.height,
         fontSize: obj.fontSize,
         color: obj.color,
+        font: obj.font,
+        bold: obj.bold,
+        strokeColor: obj.strokeColor,
+        strokeWidth: obj.strokeWidth,
+        backgroundColor: obj.backgroundColor,
+        backgroundOpacity: obj.backgroundOpacity,
       });
       lastTextFontSize.current = obj.fontSize;
       setStrokeColor(obj.color);
+      setTextStyle({
+        fontSize: obj.fontSize,
+        color: obj.color,
+        font: obj.font,
+        bold: obj.bold,
+        strokeColor: obj.strokeColor,
+        strokeWidth: obj.strokeWidth,
+        backgroundColor: obj.backgroundColor,
+        backgroundOpacity: obj.backgroundOpacity,
+      });
       setTool("text");
     },
     [selection],
@@ -754,10 +879,12 @@ function ScreenshotOverlay(): React.JSX.Element {
   useEffect(() => {
     let cancelled = false;
     let revision = 0;
+    const overlayLabel = getCurrentWindow().label;
     const loadCapture = async (): Promise<void> => {
       const current = ++revision;
       try {
-        const shot = await window.api.getFullScreenshot();
+        const shot = await window.api.getFullScreenshot(overlayLabel);
+        if (shot.overlayLabel !== overlayLabel) return;
         if (cancelled || current !== revision) return;
         const img = await loadImageFromUrl(shot.url);
         if (cancelled || current !== revision) return;
@@ -770,11 +897,12 @@ function ScreenshotOverlay(): React.JSX.Element {
         setEditHeight(0);
         setViewScrollTop(0);
         setTextObjects([]);
-        setEmojiObjects([]);
+        setNumberObjects([]);
+        nextNumber.current = 1;
         setTextEditor(null);
         setTextDraft("");
         setSelectedTextId(null);
-        setSelectedEmojiId(null);
+        setSelectedNumberId(null);
         history.current = [];
         setCanUndo(false);
         fullImageRef.current = img;
@@ -789,8 +917,7 @@ function ScreenshotOverlay(): React.JSX.Element {
         setError(null);
         await waitForOverlayPaint();
         if (cancelled || current !== revision) return;
-        await window.api.showCaptureOverlay();
-        void window.api.reportCaptureRendered(shot.generation);
+        await window.api.reportCaptureRendered(shot.generation, overlayLabel);
       } catch (err) {
         // A prewarmed overlay has no image until the first capture; waiting
         // for the ready event is expected and must not surface an error.
@@ -800,8 +927,10 @@ function ScreenshotOverlay(): React.JSX.Element {
         }
       }
     };
-    const offCaptureReady = window.api.onCaptureReady(() => void loadCapture());
-    const readyTimer = window.setTimeout(() => void window.api.overlayReady(), 50);
+    const offCaptureReady = window.api.onCaptureReady((label) => {
+      if (label === overlayLabel) void loadCapture();
+    });
+    const readyTimer = window.setTimeout(() => void window.api.overlayReady(overlayLabel), 50);
     return () => {
       cancelled = true;
       window.clearTimeout(readyTimer);
@@ -835,14 +964,14 @@ function ScreenshotOverlay(): React.JSX.Element {
       initialSelectionHeight.current = clamped.height;
       setViewScrollTop(0);
       setTool(null);
-      setShowEmojiPicker(false);
       setShotReady(false);
       setTextObjects([]);
+      setNumberObjects([]);
+      nextNumber.current = 1;
       setSelectedTextId(null);
+      setSelectedNumberId(null);
       setTextEditor(null);
       setTextDraft("");
-      setEmojiObjects([]);
-      setSelectedEmojiId(null);
       setSelection(clamped);
       paintBackground(clamped, clamped.height, 0, true);
 
@@ -898,13 +1027,6 @@ function ScreenshotOverlay(): React.JSX.Element {
           canvasY: item.canvasY + dy,
         })),
       );
-      setEmojiObjects(
-        drag.baseEmojiObjects.map((item) => ({
-          ...item,
-          canvasX: item.canvasX + dx,
-          canvasY: item.canvasY + dy,
-        })),
-      );
 
       initialSelectionHeight.current = next.height;
       setEditHeight(next.height);
@@ -934,16 +1056,14 @@ function ScreenshotOverlay(): React.JSX.Element {
         baseSx: sx,
         baseSy: sy,
         baseTextObjects: textObjects,
-        baseEmojiObjects: emojiObjects,
       };
       // The raster changes size, so previous ImageData snapshots no longer fit.
       history.current = [];
       setCanUndo(false);
       setSelectedTextId(null);
-      setSelectedEmojiId(null);
       setAdjustingRegion(true);
     },
-    [selection, textObjects, emojiObjects],
+    [selection, textObjects],
   );
 
   useEffect(() => {
@@ -957,7 +1077,7 @@ function ScreenshotOverlay(): React.JSX.Element {
         event.key.toLowerCase() === "c"
       ) {
         event.preventDefault();
-        void copyPickerColor();
+        void copyPickerHex();
         return;
       }
       if (event.key === "Escape") {
@@ -966,12 +1086,9 @@ function ScreenshotOverlay(): React.JSX.Element {
           setPickerSample(null);
           return;
         }
-        if (selectedTextId) {
+        if (selectedTextId || selectedNumberId) {
           setSelectedTextId(null);
-          return;
-        }
-        if (selectedEmojiId) {
-          setSelectedEmojiId(null);
+          setSelectedNumberId(null);
           return;
         }
         cancelOverlay();
@@ -979,7 +1096,7 @@ function ScreenshotOverlay(): React.JSX.Element {
       }
       if (
         (event.key === "Backspace" || event.key === "Delete") &&
-        (selectedTextId || selectedEmojiId) &&
+        (selectedTextId || selectedNumberId) &&
         phase === "editing"
       ) {
         event.preventDefault();
@@ -987,9 +1104,9 @@ function ScreenshotOverlay(): React.JSX.Element {
           setTextObjects((prev) => prev.filter((item) => item.id !== selectedTextId));
           setSelectedTextId(null);
         }
-        if (selectedEmojiId) {
-          setEmojiObjects((prev) => prev.filter((item) => item.id !== selectedEmojiId));
-          setSelectedEmojiId(null);
+        if (selectedNumberId) {
+          setNumberObjects((previous) => previous.filter((item) => item.id !== selectedNumberId));
+          setSelectedNumberId(null);
         }
         return;
       }
@@ -1024,9 +1141,9 @@ function ScreenshotOverlay(): React.JSX.Element {
     cancelOverlay,
     textEditor,
     selectedTextId,
-    selectedEmojiId,
+    selectedNumberId,
     tool,
-    copyPickerColor,
+    copyPickerHex,
   ]);
 
   useEffect(() => {
@@ -1063,38 +1180,41 @@ function ScreenshotOverlay(): React.JSX.Element {
           ),
         );
       }
-
-      const emojiDrag = emojiDragRef.current;
-      if (emojiDrag) {
-        if (emojiDrag.mode === "move") {
-          const dx = (event.clientX - emojiDrag.startX) * scale;
-          const dy = (event.clientY - emojiDrag.startY) * scale;
-          setEmojiObjects((prev) =>
-            prev.map((item) =>
-              item.id === emojiDrag.id
-                ? {
-                    ...item,
-                    canvasX: Math.max(0, emojiDrag.originCanvasX + dx),
-                    canvasY: Math.max(0, emojiDrag.originCanvasY + dy),
-                  }
-                : item,
-            ),
-          );
-        } else {
-          const delta = (event.clientX - emojiDrag.startX + (event.clientY - emojiDrag.startY)) / 2;
-          const nextSize = Math.max(
-            EMOJI_MIN_SIZE,
-            Math.min(EMOJI_MAX_SIZE, emojiDrag.originSize + delta),
-          );
-          setEmojiObjects((prev) =>
-            prev.map((item) => (item.id === emojiDrag.id ? { ...item, size: nextSize } : item)),
-          );
-        }
+      const editorDrag = textEditorDragRef.current;
+      if (editorDrag) {
+        const dx = (event.clientX - editorDrag.startX) * scale;
+        const dy = (event.clientY - editorDrag.startY) * scale;
+        setTextEditor((current) =>
+          current
+            ? {
+                ...current,
+                canvasX: Math.max(0, editorDrag.originCanvasX + dx),
+                canvasY: Math.max(0, editorDrag.originCanvasY + dy),
+              }
+            : current,
+        );
+      }
+      const numberDrag = numberDragRef.current;
+      if (numberDrag) {
+        const dx = (event.clientX - numberDrag.startX) * scale;
+        const dy = (event.clientY - numberDrag.startY) * scale;
+        setNumberObjects((previous) =>
+          previous.map((item) =>
+            item.id === numberDrag.id
+              ? {
+                  ...item,
+                  canvasX: Math.max(0, numberDrag.originCanvasX + dx),
+                  canvasY: Math.max(0, numberDrag.originCanvasY + dy),
+                }
+              : item,
+          ),
+        );
       }
     };
     const onUp = (): void => {
       textDragRef.current = null;
-      emojiDragRef.current = null;
+      textEditorDragRef.current = null;
+      numberDragRef.current = null;
       if (regionDragRef.current) {
         regionDragRef.current = null;
         setAdjustingRegion(false);
@@ -1183,6 +1303,9 @@ function ScreenshotOverlay(): React.JSX.Element {
           .map((value) => value.toString(16).padStart(2, "0"))
           .join("")
           .toUpperCase(),
+        red,
+        green,
+        blue,
         imageX,
         imageY,
         left: Math.min(window.innerWidth - 124, event.clientX + 18),
@@ -1197,8 +1320,12 @@ function ScreenshotOverlay(): React.JSX.Element {
   const onShotMouseDown = useCallback(
     (event: React.MouseEvent<HTMLCanvasElement>) => {
       if (phase !== "editing" || busy || !shotReady) return;
+      if (textEditor) {
+        commitText(textDraft);
+        return;
+      }
       setSelectedTextId(null);
-      setSelectedEmojiId(null);
+      setSelectedNumberId(null);
       if (!tool) {
         if (canAdjustRegion) {
           event.preventDefault();
@@ -1208,7 +1335,9 @@ function ScreenshotOverlay(): React.JSX.Element {
       }
       if (tool === "picker") {
         const sample = samplePickerColor(event);
-        if (sample) setStrokeColor(`#${sample.hex}`);
+        if (sample) {
+          setStrokeColor(`#${sample.hex}`);
+        }
         return;
       }
       const canvas = shotRef.current;
@@ -1216,21 +1345,6 @@ function ScreenshotOverlay(): React.JSX.Element {
       if (!canvas || !ctx) return;
       const point = toLocal(event);
       const scale = canvas.width / Math.max(1, selection?.width || canvas.width);
-
-      if (tool === "emoji") {
-        const id = `emoji-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        const newObj: EmojiObject = {
-          id,
-          emoji: selectedEmoji,
-          canvasX: point.x,
-          canvasY: point.y,
-          size: DEFAULT_EMOJI_SIZE,
-          scale,
-        };
-        setEmojiObjects((prev) => [...prev, newObj]);
-        setSelectedEmojiId(id);
-        return;
-      }
 
       if (tool === "text") {
         setSelectedTextId(null);
@@ -1240,10 +1354,26 @@ function ScreenshotOverlay(): React.JSX.Element {
           left: event.clientX,
           top: event.clientY,
           scale,
-          fontSize: lastTextFontSize.current,
-          color: strokeColor,
+          width: 260,
+          height: 96,
+          ...textStyle,
         });
         setTextDraft("");
+        return;
+      }
+
+      if (tool === "number") {
+        const value = nextNumber.current++;
+        setNumberObjects((previous) => [
+          ...previous,
+          {
+            id: `number-${Date.now()}-${value}`,
+            value,
+            canvasX: point.x,
+            canvasY: point.y,
+            style: numberStyle,
+          },
+        ]);
         return;
       }
 
@@ -1254,7 +1384,7 @@ function ScreenshotOverlay(): React.JSX.Element {
         penDrawing.current = true;
         setDrawing(true);
         ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = LINE_WIDTH * scale;
+        ctx.lineWidth = penWidth * scale;
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
         ctx.globalAlpha = 1;
@@ -1277,13 +1407,18 @@ function ScreenshotOverlay(): React.JSX.Element {
       busy,
       tool,
       shotReady,
-      selectedEmoji,
       pushHistory,
       selection,
       strokeColor,
+      textStyle,
+      numberStyle,
+      penWidth,
       canAdjustRegion,
       beginRegionDrag,
       samplePickerColor,
+      textEditor,
+      textDraft,
+      commitText,
     ],
   );
 
@@ -1311,7 +1446,13 @@ function ScreenshotOverlay(): React.JSX.Element {
         const last = history.current[history.current.length - 1];
         if (!last) return;
         ctx.putImageData(last, 0, 0);
-        strokeHighlightPath(ctx, highlightPoints.current, strokeColor, HIGHLIGHT_WIDTH * scale);
+        strokeHighlightPath(
+          ctx,
+          highlightPoints.current,
+          strokeColor,
+          highlightWidth * scale,
+          highlightOpacity,
+        );
         return;
       }
 
@@ -1321,17 +1462,29 @@ function ScreenshotOverlay(): React.JSX.Element {
       ctx.globalAlpha = 1;
       ctx.strokeStyle = strokeColor;
       ctx.fillStyle = strokeColor;
-      ctx.lineWidth = LINE_WIDTH * scale;
+      ctx.lineWidth = strokeWidth * scale;
       const { x: x1, y: y1 } = drawOrigin.current;
       const w = point.x - x1;
       const h = point.y - y1;
 
-      if (tool === "rect") ctx.strokeRect(x1, y1, w, h);
-      else if (tool === "ellipse") {
+      if (tool === "rect") {
+        if (fillOpacity) {
+          ctx.fillStyle = hexToRgba(strokeColor, fillOpacity);
+          ctx.fillRect(x1, y1, w, h);
+          ctx.fillStyle = strokeColor;
+        }
+        ctx.strokeRect(x1, y1, w, h);
+      } else if (tool === "ellipse") {
         ctx.beginPath();
         ctx.ellipse(x1 + w / 2, y1 + h / 2, Math.abs(w / 2), Math.abs(h / 2), 0, 0, Math.PI * 2);
+        if (fillOpacity) {
+          ctx.fillStyle = hexToRgba(strokeColor, fillOpacity);
+          ctx.fill();
+          ctx.fillStyle = strokeColor;
+        }
         ctx.stroke();
-      } else if (tool === "arrow") drawArrow(ctx, x1, y1, point.x, point.y);
+      } else if (tool === "arrow")
+        drawArrow(ctx, x1, y1, point.x, point.y, arrowStyle, arrowHeadSize);
       else if (tool === "mosaic") {
         applyMosaic(
           ctx,
@@ -1339,11 +1492,25 @@ function ScreenshotOverlay(): React.JSX.Element {
           Math.min(y1, point.y),
           Math.abs(w),
           Math.abs(h),
-          Math.max(6, Math.round(10 * scale)),
+          Math.max(4, Math.round(mosaicBlock * scale)),
         );
       }
     },
-    [drawing, phase, tool, selection, strokeColor, samplePickerColor],
+    [
+      drawing,
+      phase,
+      tool,
+      selection,
+      strokeColor,
+      samplePickerColor,
+      arrowStyle,
+      arrowHeadSize,
+      strokeWidth,
+      fillOpacity,
+      highlightWidth,
+      highlightOpacity,
+      mosaicBlock,
+    ],
   );
 
   const onShotMouseUp = useCallback(() => {
@@ -1386,39 +1553,58 @@ function ScreenshotOverlay(): React.JSX.Element {
       window.innerWidth - TOOLBAR_WIDTH - 8,
     );
     if (isLongImage) {
-      return { left, top: window.innerHeight - 50 };
+      return { left, top: window.innerHeight - 92 };
     }
     const below = selection.y + displayHeight + 12;
-    const top = below + 50 > window.innerHeight ? Math.max(8, selection.y - 58) : below;
+    const top = below + 92 > window.innerHeight ? Math.max(8, selection.y - 100) : below;
     return { left, top };
   })();
 
-  const showColors = toolUsesColor(tool);
-
-  // Prefer floating the palette/picker above the toolbar; if there isn't
-  // enough headroom (e.g. a full-screen selection pins the toolbar near the
-  // top edge), drop it below the toolbar instead so it never overlaps it.
-  const placeAboveOrBelow = (height: number): number | undefined => {
-    if (!toolbarPos) return undefined;
-    const above = toolbarPos.top - height - 8;
-    if (above >= 8) return above;
-    return Math.min(toolbarPos.top + TOOLBAR_HEIGHT + 8, window.innerHeight - height - 8);
-  };
-
-  const colorPalettePos =
-    toolbarPos && showColors
-      ? {
-          left: toolbarPos.left + (TOOLBAR_WIDTH - PALETTE_WIDTH) / 2,
-          top: placeAboveOrBelow(PALETTE_HEIGHT) ?? 8,
-        }
-      : undefined;
-
-  const emojiPickerPos = toolbarPos
-    ? { left: toolbarPos.left, top: placeAboveOrBelow(EMOJI_PICKER_HEIGHT) ?? 8 }
-    : undefined;
-
   // Tools usable as soon as crop is on canvas — only lock while an action is running
   const toolsLocked = busy || !shotReady;
+  const toolSettings: ToolSettings = {
+    strokeColor,
+    strokeWidth,
+    fillOpacity,
+    arrowStyle,
+    arrowHeadSize,
+    penWidth,
+    highlightWidth,
+    highlightOpacity,
+    mosaicBlock,
+    pickerFormat,
+    textStyle,
+    numberStyle,
+  };
+  const updateToolSettings = (changes: Partial<ToolSettings>): void => {
+    if (changes.strokeColor !== undefined) setStrokeColor(changes.strokeColor);
+    if (changes.strokeWidth !== undefined) setStrokeWidth(changes.strokeWidth);
+    if (changes.fillOpacity !== undefined) setFillOpacity(changes.fillOpacity);
+    if (changes.arrowStyle !== undefined) setArrowStyle(changes.arrowStyle);
+    if (changes.arrowHeadSize !== undefined) setArrowHeadSize(changes.arrowHeadSize);
+    if (changes.penWidth !== undefined) setPenWidth(changes.penWidth);
+    if (changes.highlightWidth !== undefined) setHighlightWidth(changes.highlightWidth);
+    if (changes.highlightOpacity !== undefined) setHighlightOpacity(changes.highlightOpacity);
+    if (changes.mosaicBlock !== undefined) setMosaicBlock(changes.mosaicBlock);
+    if (changes.numberStyle !== undefined) setNumberStyle(changes.numberStyle);
+    if (changes.textStyle !== undefined) {
+      setTextStyle(changes.textStyle);
+      lastTextFontSize.current = changes.textStyle.fontSize;
+      setTextEditor((current) => (current ? { ...current, ...changes.textStyle } : current));
+    }
+    if (changes.pickerFormat !== undefined) {
+      setPickerFormat(changes.pickerFormat);
+      void window.api
+        .getScreenshotConfig()
+        .then((config) =>
+          window.api.updateScreenshotConfig({
+            ...config,
+            color_copy_format: changes.pickerFormat!,
+          }),
+        )
+        .catch(() => undefined);
+    }
+  };
 
   return (
     <div className="screenshot-overlay">
@@ -1472,9 +1658,16 @@ function ScreenshotOverlay(): React.JSX.Element {
                 style={{
                   left: obj.canvasX / scaleX,
                   top: obj.canvasY / scaleY,
+                  width: obj.width / scaleX,
+                  minHeight: obj.height / scaleY,
                   color: obj.color,
                   fontSize: obj.fontSize,
-                  fontWeight: 700,
+                  fontFamily: fontFamily(obj.font),
+                  fontWeight: obj.bold ? 700 : 400,
+                  WebkitTextStroke: obj.strokeWidth
+                    ? `${obj.strokeWidth}px ${obj.strokeColor}`
+                    : undefined,
+                  backgroundColor: hexToRgba(obj.backgroundColor, obj.backgroundOpacity),
                   lineHeight: 1.25,
                   whiteSpace: "pre-wrap",
                 }}
@@ -1482,7 +1675,6 @@ function ScreenshotOverlay(): React.JSX.Element {
                   event.preventDefault();
                   event.stopPropagation();
                   setSelectedTextId(obj.id);
-                  setSelectedEmojiId(null);
                   textDragRef.current = {
                     id: obj.id,
                     startX: event.clientX,
@@ -1501,74 +1693,113 @@ function ScreenshotOverlay(): React.JSX.Element {
               </div>
             );
           })}
-          {emojiObjects.map((obj) => {
+          {numberObjects.map((item) => {
             const canvas = shotRef.current;
-            const scaleX = canvas ? canvas.width / Math.max(1, selection.width) : 1;
-            const scaleY = canvas ? canvas.height / Math.max(1, displayHeight) : scaleX;
-            const isSelected = selectedEmojiId === obj.id;
+            const scale = canvas ? canvas.width / Math.max(1, selection.width) : 1;
             return (
               <div
-                key={obj.id}
-                className={`emoji-object${isSelected ? " is-selected" : ""}`}
+                key={item.id}
+                className={`number-object${selectedNumberId === item.id ? " is-selected" : ""}`}
                 style={{
-                  left: obj.canvasX / scaleX,
-                  top: obj.canvasY / scaleY,
-                  width: obj.size,
-                  height: obj.size,
-                  fontSize: obj.size,
+                  left: item.canvasX / scale,
+                  top: item.canvasY / scale,
+                  width: item.style.size,
+                  height: item.style.size,
+                  backgroundColor: item.style.backgroundColor,
+                  color: item.style.textColor,
+                  fontSize: Math.round(item.style.size * 0.56),
                 }}
                 onMouseDown={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
-                  setSelectedTextId(null);
-                  setSelectedEmojiId(obj.id);
-                  emojiDragRef.current = {
-                    id: obj.id,
-                    mode: "move",
+                  setSelectedNumberId(item.id);
+                  numberDragRef.current = {
+                    id: item.id,
                     startX: event.clientX,
                     startY: event.clientY,
-                    originCanvasX: obj.canvasX,
-                    originCanvasY: obj.canvasY,
-                    originSize: obj.size,
+                    originCanvasX: item.canvasX,
+                    originCanvasY: item.canvasY,
                   };
                 }}
               >
-                <span className="emoji-object__glyph">{obj.emoji}</span>
-                {isSelected && (
-                  <>
-                    <button
-                      type="button"
-                      className="emoji-object__delete"
-                      onMouseDown={(event) => event.stopPropagation()}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setEmojiObjects((prev) => prev.filter((item) => item.id !== obj.id));
-                        setSelectedEmojiId(null);
-                      }}
-                    >
-                      ×
-                    </button>
-                    <span
-                      className="emoji-object__resize"
-                      onMouseDown={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        emojiDragRef.current = {
-                          id: obj.id,
-                          mode: "resize",
-                          startX: event.clientX,
-                          startY: event.clientY,
-                          originCanvasX: obj.canvasX,
-                          originCanvasY: obj.canvasY,
-                          originSize: obj.size,
-                        };
-                      }}
-                    />
-                  </>
-                )}
+                {item.value}
               </div>
             );
           })}
+          {textEditor &&
+            (() => {
+              const canvas = shotRef.current;
+              const scale = canvas ? canvas.width / Math.max(1, selection.width) : 1;
+              return (
+                <div
+                  className="inline-text-editor"
+                  style={{
+                    left: textEditor.canvasX / scale,
+                    top: textEditor.canvasY / scale,
+                    width: textEditor.width / scale,
+                    minHeight: textEditor.height / scale,
+                    backgroundColor: hexToRgba(
+                      textEditor.backgroundColor,
+                      textEditor.backgroundOpacity,
+                    ),
+                  }}
+                  onMouseDown={(event) => event.stopPropagation()}
+                >
+                  <div
+                    className="inline-text-editor__move"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      textEditorDragRef.current = {
+                        startX: event.clientX,
+                        startY: event.clientY,
+                        originCanvasX: textEditor.canvasX,
+                        originCanvasY: textEditor.canvasY,
+                      };
+                    }}
+                  />
+                  <textarea
+                    autoFocus
+                    value={textDraft}
+                    placeholder="输入文字"
+                    style={{
+                      color: textEditor.color,
+                      fontFamily: fontFamily(textEditor.font),
+                      fontSize: textEditor.fontSize,
+                      fontWeight: textEditor.bold ? 700 : 400,
+                      WebkitTextStroke: textEditor.strokeWidth
+                        ? `${textEditor.strokeWidth}px ${textEditor.strokeColor}`
+                        : undefined,
+                    }}
+                    onChange={(event) => setTextDraft(event.target.value)}
+                    onMouseUp={(event) => {
+                      const rect = event.currentTarget.parentElement?.getBoundingClientRect();
+                      if (rect)
+                        setTextEditor((current) =>
+                          current
+                            ? {
+                                ...current,
+                                width: rect.width * scale,
+                                height: Math.max(current.height, rect.height * scale),
+                              }
+                            : current,
+                        );
+                    }}
+                    onKeyDown={(event) => {
+                      event.stopPropagation();
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        cancelTextEditor();
+                      }
+                      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                        event.preventDefault();
+                        commitText(textDraft);
+                      }
+                    }}
+                  />
+                </div>
+              );
+            })()}
         </div>
       )}
 
@@ -1612,13 +1843,9 @@ function ScreenshotOverlay(): React.JSX.Element {
         </div>
       )}
 
-      {phase === "editing" &&
-        !textEditor &&
-        (textObjects.length > 0 || emojiObjects.length > 0) && (
-          <div className="long-image-scroll-hint">
-            {textObjects.length > 0 ? t.textEditor.moveHint : t.textEditor.emojiMoveHint}
-          </div>
-        )}
+      {phase === "editing" && !textEditor && textObjects.length > 0 && (
+        <div className="long-image-scroll-hint">{t.textEditor.moveHint}</div>
+      )}
 
       {phase === "editing" && isLongImage && (
         <div className="long-image-scroll-hint">{t.scrollCapture.scrollPreviewHint}</div>
@@ -1632,64 +1859,80 @@ function ScreenshotOverlay(): React.JSX.Element {
 
       {error && <div className="overlay-hint-bar overlay-hint-bar--error">{error}</div>}
 
-      {phase === "editing" &&
-        (ocrRunning ||
-          ocrPanels.onnx.result ||
-          ocrPanels.rusto.result ||
-          ocrPanels.onnx.error ||
-          ocrPanels.rusto.error) && (
-          <div className="ocr-result-panel" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="ocr-result-panel__header">
-              <strong>{t.ocr.title}</strong>
-              <span>{t.ocr.compareHint}</span>
+      {phase === "editing" && (ocrRunning || ocrPanel.result || ocrPanel.error) && (
+        <div className="ocr-result-panel" onMouseDown={(event) => event.stopPropagation()}>
+          <div className="ocr-result-panel__header">
+            <strong>{t.ocr.title}</strong>
+            <span>
+              {ocrPanel.result?.engine === "rusto" ? t.ocr.rustoEngine : t.ocr.onnxEngine}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                ocrRequest.current += 1;
+                setOcrRunning(false);
+                setOcrPanel(EMPTY_OCR);
+              }}
+            >
+              {t.ocr.close}
+            </button>
+          </div>
+          <section className="ocr-result-panel__engine">
+            <div className="ocr-result-panel__actions">
+              {ocrPanel.elapsedMs !== null && (
+                <span className="ocr-result-panel__elapsed">
+                  {t.ocr.completedIn(ocrPanel.elapsedMs)}
+                </span>
+              )}
               <button
                 type="button"
-                onClick={() => {
-                  ocrRequest.current += 1;
-                  setOcrRunning(false);
-                  setOcrPanels(emptyOcrPanels());
-                }}
+                disabled={!ocrPanel.result}
+                onClick={() => ocrPanel.result && void window.api.copyText(ocrPanel.result.text)}
               >
-                {t.ocr.close}
+                {t.ocr.copy}
               </button>
             </div>
-            <div className="ocr-result-panel__engines">
-              {(["onnx", "rusto"] as const).map((engine) => {
-                const panel = ocrPanels[engine];
-                const label = engine === "onnx" ? t.ocr.onnxEngine : t.ocr.rustoEngine;
-                return (
-                  <section key={engine} className="ocr-result-panel__engine">
-                    <div className="ocr-result-panel__actions">
-                      <strong>{label}</strong>
-                      {panel.elapsedMs !== null && (
-                        <span className="ocr-result-panel__elapsed">
-                          {t.ocr.completedIn(panel.elapsedMs)}
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        disabled={!panel.result}
-                        onClick={() => panel.result && void window.api.copyText(panel.result.text)}
-                      >
-                        {t.ocr.copy}
-                      </button>
-                    </div>
-                    <textarea
-                      className="ocr-result-panel__text"
-                      aria-label={label}
-                      readOnly
-                      value={panel.result?.text ?? ""}
-                      placeholder={
-                        panel.pending ? t.ocr.recognizing : (panel.error ?? t.ocr.noTextFound)
-                      }
-                    />
-                    {panel.error && <p className="ocr-result-panel__hint">{panel.error}</p>}
-                  </section>
-                );
-              })}
-            </div>
+            <textarea
+              className="ocr-result-panel__text"
+              aria-label={t.ocr.title}
+              readOnly
+              value={ocrPanel.result?.text ?? ""}
+              placeholder={
+                ocrPanel.pending ? t.ocr.recognizing : (ocrPanel.error ?? t.ocr.noTextFound)
+              }
+            />
+            {ocrPanel.error && <p className="ocr-result-panel__hint">{ocrPanel.error}</p>}
+          </section>
+        </div>
+      )}
+
+      {phase === "editing" && qrContents && (
+        <div className="ocr-result-panel" onMouseDown={(event) => event.stopPropagation()}>
+          <div className="ocr-result-panel__header">
+            <strong>二维码识别</strong>
+            <button type="button" onClick={() => setQrContents(null)}>
+              {t.ocr.close}
+            </button>
           </div>
-        )}
+          {qrContents.length === 0 ? (
+            <p className="ocr-result-panel__hint">未在选区中发现二维码。</p>
+          ) : (
+            qrContents.map((content) => (
+              <div key={content} className="ocr-result-panel__actions">
+                <code>{content}</code>
+                <button type="button" onClick={() => void window.api.copyText(content)}>
+                  复制
+                </button>
+                {/^https?:\/\//i.test(content) && (
+                  <button type="button" onClick={() => void window.api.openUrl(content)}>
+                    打开链接
+                  </button>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      )}
 
       {selection && selection.width > 0 && selection.height > 0 && phase === "selecting" && (
         <div
@@ -1707,37 +1950,23 @@ function ScreenshotOverlay(): React.JSX.Element {
             style={{
               backgroundImage: `url(${fullImageRef.current.src})`,
               backgroundSize: `${fullImageRef.current.naturalWidth * 10}px ${fullImageRef.current.naturalHeight * 10}px`,
-              backgroundPosition: `${48 - pickerSample.imageX * 10}px ${48 - pickerSample.imageY * 10}px`,
+              backgroundPosition: `${70 - pickerSample.imageX * 10}px ${70 - pickerSample.imageY * 10}px`,
             }}
           >
             <span />
           </div>
           <div className="picker-preview__meta">
             <i style={{ backgroundColor: `#${pickerSample.hex}` }} />
-            <span>{pickerCopied ? "已复制" : pickerSample.hex}</span>
+            <span>
+              {pickerCopied ? "已复制" : `#${pickerSample.hex}`}
+              <small>{`RGB ${pickerSample.red}, ${pickerSample.green}, ${pickerSample.blue}`}</small>
+            </span>
           </div>
         </div>
       )}
 
       {phase === "editing" && toolbarPos && (
         <>
-          {showEmojiPicker && emojiPickerPos && (
-            <EmojiPicker
-              style={emojiPickerPos}
-              onPick={(emoji) => {
-                setSelectedEmoji(emoji);
-                setTool("emoji");
-              }}
-            />
-          )}
-          {showColors && colorPalettePos && (
-            <ColorPalette
-              strokeColor={strokeColor}
-              disabled={toolsLocked}
-              style={colorPalettePos}
-              onChange={setStrokeColor}
-            />
-          )}
           <AnnotationToolbar
             tool={tool}
             canUndo={canUndo}
@@ -1746,13 +1975,18 @@ function ScreenshotOverlay(): React.JSX.Element {
             confirmDisabled={toolsLocked}
             ocrDisabled={!selection || !shotReady || ocrRunning}
             ocrRunning={ocrRunning}
-            showEmojiPicker={showEmojiPicker}
             pickerColor={pickerSample ? `#${pickerSample.hex}` : undefined}
+            options={
+              tool ? (
+                <ToolOptionsBar tool={tool} settings={toolSettings} onChange={updateToolSettings} />
+              ) : undefined
+            }
             style={toolbarPos}
             onToolChange={(next) => {
+              if (textEditor) commitText(textDraft);
               setTool(next);
-              setShowEmojiPicker(next === "emoji");
               if (next !== "picker") setPickerSample(null);
+              if (next !== "number") nextNumber.current = 1;
             }}
             onUndo={undo}
             onScrollCapture={handleScrollCapture}
@@ -1784,6 +2018,17 @@ function ScreenshotOverlay(): React.JSX.Element {
               })();
             }}
             onOcr={recognizeSelection}
+            onQr={() => {
+              if (!selection || !shotReady || ocrRunning) return;
+              void (async () => {
+                try {
+                  const result = await window.api.decodeQrSelection(await exportOcrPng());
+                  setQrContents(result.contents);
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "二维码识别失败");
+                }
+              })();
+            }}
             onCancel={cancelOverlay}
             onConfirm={() => {
               void (async () => {
@@ -1797,28 +2042,6 @@ function ScreenshotOverlay(): React.JSX.Element {
             }}
           />
         </>
-      )}
-
-      {textEditor && (
-        <TextEditor
-          editor={textEditor}
-          draft={textDraft}
-          onDraftChange={setTextDraft}
-          onMove={(left, top, canvasX, canvasY) => {
-            setTextEditor((prev) => (prev ? { ...prev, left, top, canvasX, canvasY } : prev));
-          }}
-          onFontSizeChange={(size) => {
-            lastTextFontSize.current = size;
-            setTextEditor((prev) => (prev ? { ...prev, fontSize: size } : prev));
-          }}
-          onColorChange={(color) => {
-            setStrokeColor(color);
-            setTextEditor((prev) => (prev ? { ...prev, color } : prev));
-          }}
-          onCommit={(left, top) => commitText(textDraft, left, top)}
-          onCancel={cancelTextEditor}
-          screenToCanvas={screenToCanvas}
-        />
       )}
 
       {busy && <div className="overlay-status">{t.hints.working}</div>}

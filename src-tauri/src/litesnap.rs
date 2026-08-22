@@ -2,6 +2,7 @@
 
 use std::{
     borrow::Cow,
+    collections::HashMap,
     fs,
     io::Cursor,
     path::PathBuf,
@@ -105,7 +106,8 @@ struct CaptureTiming {
 pub struct AppState {
     settings: Mutex<AppSettings>,
     capture: Mutex<Option<CaptureData>>,
-    pin_data: Mutex<Option<Vec<u8>>>,
+    pin_data: Mutex<HashMap<String, Vec<u8>>>,
+    pin_generation: AtomicU64,
     // Ctrl+2 deliberately consumes only a PNG exported by the editor. Keeping
     // it separate from the frozen full-screen capture prevents accidental
     // pinning before the user has confirmed a selection.
@@ -117,6 +119,7 @@ pub struct AppState {
     scroll_generation: AtomicU64,
     scroll_control_ready: AtomicBool,
     overlay_ready: AtomicBool,
+    active_overlay: Mutex<Option<String>>,
     screen_permission_requested: AtomicBool,
     capture_in_progress: AtomicBool,
     capture_generation: AtomicU64,
@@ -136,7 +139,8 @@ pub fn create_state() -> AppState {
         // settings file is intentionally not read or written here.
         settings: Mutex::new(AppSettings::default()),
         capture: Mutex::new(None),
-        pin_data: Mutex::new(None),
+        pin_data: Mutex::new(HashMap::new()),
+        pin_generation: AtomicU64::new(0),
         confirmed_png: Mutex::new(None),
         registered_shortcut: Mutex::new(None),
         shortcut_suspended: AtomicBool::new(false),
@@ -145,6 +149,7 @@ pub fn create_state() -> AppState {
         scroll_generation: AtomicU64::new(0),
         scroll_control_ready: AtomicBool::new(false),
         overlay_ready: AtomicBool::new(false),
+        active_overlay: Mutex::new(None),
         screen_permission_requested: AtomicBool::new(false),
         capture_in_progress: AtomicBool::new(false),
         capture_generation: AtomicU64::new(0),
@@ -161,7 +166,6 @@ pub fn initialize(app: &AppHandle) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         prewarm_scroll_control(app);
-        prewarm_pin_window(app);
         let warmup_app = app.clone();
         thread::spawn(move || {
             if let Ok(mut capture) = warmup_app.state::<AppState>().dxgi_capture.lock() {
@@ -218,6 +222,7 @@ pub struct FullScreenshot {
     display_height: f64,
     image_width: u32,
     image_height: u32,
+    overlay_label: String,
 }
 
 pub fn serve_capture_uri(request: Request<Vec<u8>>) -> Response<std::borrow::Cow<'static, [u8]>> {
@@ -1868,13 +1873,34 @@ fn encode_scroll_preview(snapshot: (RgbaImage, u32, u32)) -> Result<ScrollPrevie
     })
 }
 
-fn build_overlay_window(app: &AppHandle, width: f64, height: f64) -> Result<(), String> {
+fn overlay_label(capture: &CaptureData) -> String {
+    format!("overlay-{}", capture.screen_id)
+}
+
+fn active_overlay_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
+    app.state::<AppState>()
+        .active_overlay
+        .lock()
+        .ok()?
+        .as_deref()
+        .and_then(|label| app.get_webview_window(label))
+}
+
+fn build_overlay_window(
+    app: &AppHandle,
+    label: &str,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
     WebviewWindowBuilder::new(
         app,
-        "overlay",
-        WebviewUrl::App("index.html?view=overlay".into()),
+        label,
+        WebviewUrl::App("litesnap.html?view=overlay".into()),
     )
     .title("LiteSnap")
+    .position(x, y)
     .inner_size(width, height)
     .decorations(false)
     .transparent(true)
@@ -1891,49 +1917,42 @@ fn build_overlay_window(app: &AppHandle, width: f64, height: f64) -> Result<(), 
 }
 
 fn open_overlay(app: &AppHandle, capture: &CaptureData) -> Result<(), String> {
-    if app.get_webview_window("overlay").is_none() {
-        build_overlay_window(app, capture.bounds.width, capture.bounds.height)?;
+    let label = overlay_label(capture);
+    if app.get_webview_window(&label).is_none() {
+        build_overlay_window(
+            app,
+            &label,
+            capture.bounds.x,
+            capture.bounds.y,
+            capture.bounds.width,
+            capture.bounds.height,
+        )?;
+        #[cfg(target_os = "windows")]
+        if let Some(window) = app.get_webview_window(&label) {
+            window
+                .set_position(tauri::PhysicalPosition::new(
+                    capture.physical_origin_x,
+                    capture.physical_origin_y,
+                ))
+                .map_err(|error| error.to_string())?;
+            window
+                .set_size(tauri::PhysicalSize::new(
+                    capture.physical_width,
+                    capture.physical_height,
+                ))
+                .map_err(|error| error.to_string())?;
+        }
     }
-    let window = app
-        .get_webview_window("overlay")
-        .ok_or_else(|| "Capture overlay is unavailable".to_string())?;
-    window.hide().map_err(|error| error.to_string())?;
-    #[cfg(target_os = "windows")]
-    {
-        // The builder accepts logical dimensions and may initially create the
-        // hidden WebView using the primary monitor's DPI. After moving it to
-        // the cursor's monitor, force its exact physical bounds so Windows
-        // cannot bitmap-scale the overlay (the visible zoom/blur symptom).
-        window
-            .set_position(tauri::PhysicalPosition::new(
-                capture.physical_origin_x,
-                capture.physical_origin_y,
-            ))
-            .map_err(|error| error.to_string())?;
-        window
-            .set_size(tauri::PhysicalSize::new(
-                capture.physical_width,
-                capture.physical_height,
-            ))
-            .map_err(|error| error.to_string())?;
+    *app.state::<AppState>().active_overlay.lock().unwrap() = Some(label.clone());
+    if app.get_webview_window(&label).is_none() {
+        return Err("Capture overlay is unavailable".into());
     }
-    #[cfg(not(target_os = "windows"))]
-    {
-        window
-            .set_position(tauri::LogicalPosition::new(
-                capture.bounds.x,
-                capture.bounds.y,
-            ))
-            .map_err(|error| error.to_string())?;
-        window
-            .set_size(tauri::LogicalSize::new(
-                capture.bounds.width,
-                capture.bounds.height,
-            ))
-            .map_err(|error| error.to_string())?;
-    }
+    // `handle_start_capture` already hides the prewarmed overlay before the
+    // native frame is captured. Hiding it again here introduces an extra DWM
+    // composition cycle on every screenshot and is the main source of the
+    // visible desktop flash on Windows.
     if app.state::<AppState>().overlay_ready.load(Ordering::SeqCst) {
-        let _ = app.emit_to("overlay", "capture-ready", ());
+        let _ = app.emit_to(label.as_str(), "capture-ready", &label);
     }
     // The renderer shows the window only after the captured image has decoded
     // and painted. Showing a transparent WebView earlier causes a brief desktop
@@ -1961,43 +1980,73 @@ fn record_capture_timing(
 }
 
 fn prewarm_overlay(app: &AppHandle) {
-    if app.get_webview_window("overlay").is_none() {
-        if let Err(error) = build_overlay_window(app, 1.0, 1.0) {
-            eprintln!("Unable to prewarm capture overlay: {error}");
+    if let Ok(screens) = Screen::all() {
+        for screen in screens {
+            let info = screen.display_info;
+            let label = format!("overlay-{}", info.id);
+            if app.get_webview_window(&label).is_some() {
+                continue;
+            }
+            let result = build_overlay_window(
+                app,
+                &label,
+                info.x as f64,
+                info.y as f64,
+                info.width as f64,
+                info.height as f64,
+            );
+            if let Err(error) = result {
+                eprintln!("Unable to prewarm capture overlay {label}: {error}");
+                continue;
+            }
+            #[cfg(target_os = "windows")]
+            if let Some(window) = app.get_webview_window(&label) {
+                if let Ok(monitors) = app.available_monitors() {
+                    if let Some(monitor) = monitors.into_iter().min_by(|left, right| {
+                        monitor_screen_score(&screen, left)
+                            .total_cmp(&monitor_screen_score(&screen, right))
+                    }) {
+                        let _ = window.set_position(tauri::PhysicalPosition::new(
+                            monitor.position().x,
+                            monitor.position().y,
+                        ));
+                        let _ = window.set_size(tauri::PhysicalSize::new(
+                            monitor.size().width,
+                            monitor.size().height,
+                        ));
+                    }
+                }
+            }
         }
     }
 }
 
 fn build_pin_window(
     app: &AppHandle,
+    id: &str,
     x: f64,
     y: f64,
     width: f64,
     height: f64,
 ) -> Result<(), String> {
-    WebviewWindowBuilder::new(app, "pin", WebviewUrl::App("index.html?view=pin".into()))
-        .title("LiteSnap")
-        .position(x, y)
-        .inner_size(width, height)
-        .min_inner_size(60.0, 60.0)
-        .decorations(false)
-        .transparent(true)
-        .shadow(true)
-        .resizable(true)
-        .always_on_top(true)
-        .visible(false)
-        .build()
-        .map(|_| ())
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(target_os = "windows")]
-fn prewarm_pin_window(app: &AppHandle) {
-    if app.get_webview_window("pin").is_none() {
-        if let Err(error) = build_pin_window(app, 0.0, 0.0, 60.0, 60.0) {
-            eprintln!("Unable to prewarm pin window: {error}");
-        }
-    }
+    WebviewWindowBuilder::new(
+        app,
+        id,
+        WebviewUrl::App(format!("litesnap.html?view=pin&id={id}").into()),
+    )
+    .title("LiteSnap")
+    .position(x, y)
+    .inner_size(width, height)
+    .min_inner_size(60.0, 60.0)
+    .decorations(false)
+    .transparent(true)
+    .shadow(true)
+    .resizable(true)
+    .always_on_top(true)
+    .visible(false)
+    .build()
+    .map(|_| ())
+    .map_err(|error| error.to_string())
 }
 
 #[cfg(target_os = "macos")]
@@ -2133,7 +2182,7 @@ fn handle_start_capture(app: &AppHandle) {
     // (most visible on the first Windows launch). Hide it before the native
     // capture so LiteSnap never captures its own transparent surface together
     // with the desktop.
-    if let Some(window) = app.get_webview_window("overlay") {
+    if let Some(window) = active_overlay_window(app) {
         let _ = window.hide();
     }
     *URI_CAPTURE.lock().unwrap() = None;
@@ -2177,7 +2226,7 @@ fn handle_start_capture(app: &AppHandle) {
 
 fn hide_overlay_for_commit(app: &AppHandle) {
     cancel_scroll_impl(app);
-    if let Some(window) = app.get_webview_window("overlay") {
+    if let Some(window) = active_overlay_window(app) {
         let _ = window.hide();
     }
     // Commit actions can spend tens of milliseconds decoding a PNG and talking
@@ -2195,7 +2244,7 @@ fn finish_overlay_commit(app: &AppHandle) {
 
 fn restore_overlay_after_commit_failure(app: &AppHandle) {
     if app.state::<AppState>().capture.lock().unwrap().is_some() {
-        if let Some(window) = app.get_webview_window("overlay") {
+        if let Some(window) = active_overlay_window(app) {
             let _ = window.show();
             let _ = window.set_focus();
         }
@@ -2246,7 +2295,7 @@ fn confirmed_image(state: &AppState) -> Result<Vec<u8>, String> {
 
 fn pin_confirmed_image(app: &AppHandle) -> Result<bool, String> {
     let data = confirmed_image(&app.state::<AppState>())?;
-    pin_image_impl(app.clone(), data)
+    pin_image_impl(app.clone(), data).map(|_| true)
 }
 
 fn open_shortcut_window(app: &AppHandle) -> Result<(), String> {
@@ -2351,7 +2400,7 @@ fn prewarm_scroll_control(app: &AppHandle) {
     let result = WebviewWindowBuilder::new(
         app,
         "scroll-control",
-        WebviewUrl::App("index.html?view=scroll-capture".into()),
+        WebviewUrl::App("litesnap.html?view=scroll-capture".into()),
     )
     .title("LiteSnap")
     .inner_size(300.0, 420.0)
@@ -2452,7 +2501,7 @@ fn open_scroll_control(app: &AppHandle, selection: Rect) -> Result<(), String> {
     let builder = WebviewWindowBuilder::new(
         app,
         "scroll-control",
-        WebviewUrl::App("index.html?view=scroll-capture".into()),
+        WebviewUrl::App("litesnap.html?view=scroll-capture".into()),
     )
     .title("LiteSnap")
     .position(x, y)
@@ -2526,8 +2575,10 @@ fn cancel_scroll_impl(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("scroll-control") {
         let _ = window.hide();
     }
-    let _ = app.emit_to("overlay", "scroll-capture-cancelled", ());
-    if let Some(window) = app.get_webview_window("overlay") {
+    if let Some(window) = active_overlay_window(app) {
+        let _ = window.emit("scroll-capture-cancelled", ());
+    }
+    if let Some(window) = active_overlay_window(app) {
         let _ = window.show();
     }
 }
@@ -2563,10 +2614,14 @@ fn finish_scroll_impl(app: &AppHandle) {
                     image_width: image.width(),
                     image_height: image.height(),
                 };
-                let _ = worker_app.emit_to("overlay", "scroll-capture-result", result);
+                if let Some(window) = active_overlay_window(&worker_app) {
+                    let _ = window.emit("scroll-capture-result", result);
+                }
             }
         }
-        let _ = worker_app.emit_to("overlay", "scroll-capture-finished", ());
+        if let Some(window) = active_overlay_window(&worker_app) {
+            let _ = window.emit("scroll-capture-finished", ());
+        }
     });
 }
 
@@ -2778,12 +2833,32 @@ pub fn close_overlay(app: AppHandle) {
 }
 
 #[tauri::command]
-pub fn show_capture_overlay(app: AppHandle) -> Result<bool, String> {
-    if app.state::<AppState>().capture.lock().unwrap().is_none() {
+pub fn show_capture_overlay(
+    app: AppHandle,
+    generation: Option<u64>,
+    label: Option<String>,
+) -> Result<bool, String> {
+    let capture = app.state::<AppState>().capture.lock().unwrap().clone();
+    let Some(capture) = capture else {
         return Err("No screenshot is available".into());
+    };
+    if let Some(generation) = generation {
+        if capture.generation != generation {
+            return Err("Capture frame has been superseded".into());
+        }
+    }
+    let active_label = app
+        .state::<AppState>()
+        .active_overlay
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "Capture overlay is unavailable".to_string())?;
+    if label.is_some_and(|candidate| candidate != active_label) {
+        return Err("Capture overlay has been superseded".into());
     }
     let window = app
-        .get_webview_window("overlay")
+        .get_webview_window(&active_label)
         .ok_or_else(|| "Capture overlay is unavailable".to_string())?;
     window.show().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())?;
@@ -2791,11 +2866,13 @@ pub fn show_capture_overlay(app: AppHandle) -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub fn overlay_ready(app: AppHandle) {
+pub fn overlay_ready(app: AppHandle, label: String) {
     let state = app.state::<AppState>();
     state.overlay_ready.store(true, Ordering::SeqCst);
-    if state.capture.lock().unwrap().is_some() {
-        let _ = app.emit_to("overlay", "capture-ready", ());
+    if state.capture.lock().unwrap().is_some()
+        && state.active_overlay.lock().unwrap().as_deref() == Some(label.as_str())
+    {
+        let _ = app.emit_to(label.as_str(), "capture-ready", &label);
     }
 }
 
@@ -2809,13 +2886,19 @@ pub fn scroll_control_ready(state: State<AppState>) {
 }
 
 #[tauri::command]
-pub fn get_full_screenshot(state: State<AppState>) -> Result<FullScreenshot, String> {
+pub fn get_full_screenshot(
+    state: State<AppState>,
+    label: String,
+) -> Result<FullScreenshot, String> {
     let capture = state
         .capture
         .lock()
         .unwrap()
         .clone()
         .ok_or_else(|| "No screenshot is available".to_string())?;
+    if state.active_overlay.lock().unwrap().as_deref() != Some(label.as_str()) {
+        return Err("Capture overlay has been superseded".into());
+    }
     Ok(FullScreenshot {
         url: format!(
             "http://dockmapper-shot.localhost/capture/{}.bmp",
@@ -2826,12 +2909,26 @@ pub fn get_full_screenshot(state: State<AppState>) -> Result<FullScreenshot, Str
         display_height: capture.bounds.height,
         image_width: capture.image_width,
         image_height: capture.image_height,
+        overlay_label: label,
     })
 }
 
 #[tauri::command]
-pub fn report_capture_rendered(app: AppHandle, generation: u64) {
+pub fn report_capture_rendered(
+    app: AppHandle,
+    generation: u64,
+    label: String,
+) -> Result<bool, String> {
     let state = app.state::<AppState>();
+    let is_current = state
+        .capture
+        .lock()
+        .map_err(|_| "截图状态已损坏".to_string())?
+        .as_ref()
+        .is_some_and(|capture| capture.generation == generation);
+    if !is_current {
+        return Err("Capture frame has been superseded".into());
+    }
     let mut timings = state.capture_timings.lock().unwrap();
     if let Some(timing) = timings
         .iter_mut()
@@ -2846,6 +2943,8 @@ pub fn report_capture_rendered(app: AppHandle, generation: u64) {
             timing.webview_ready_ms.unwrap_or_default()
         );
     }
+    drop(timings);
+    show_capture_overlay(app, Some(generation), Some(label))
 }
 
 #[tauri::command]
@@ -2859,7 +2958,7 @@ pub fn begin_scroll_capture(
     }
     *state.scroll_rect.lock().unwrap() = Some(rect);
     let generation = state.scroll_generation.fetch_add(1, Ordering::SeqCst) + 1;
-    if let Some(window) = app.get_webview_window("overlay") {
+    if let Some(window) = active_overlay_window(&app) {
         window.hide().map_err(|error| error.to_string())?;
     }
     // Capture the baseline immediately after hiding the selection overlay.
@@ -3138,7 +3237,7 @@ pub fn save_image(
     Ok(true)
 }
 
-fn pin_image_impl(app: AppHandle, data: Vec<u8>) -> Result<bool, String> {
+fn pin_image_impl(app: AppHandle, data: Vec<u8>) -> Result<String, String> {
     // Reading the PNG header is enough to size the native window. Fully
     // decoding a large/long screenshot on Tauri's IPC thread can starve the
     // Windows event loop, which also prevents Cancel and the global shortcut
@@ -3187,30 +3286,25 @@ fn pin_image_impl(app: AppHandle, data: Vec<u8>) -> Result<bool, String> {
         )
     });
     remember_confirmed_image(&app, &data);
-    *app.state::<AppState>().pin_data.lock().unwrap() = Some(data);
-
-    #[cfg(target_os = "windows")]
-    if app.get_webview_window("pin").is_none() {
-        build_pin_window(&app, window_x, window_y, window_width, window_height)?;
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        if let Some(window) = app.get_webview_window("pin") {
-            let _ = window.close();
-        }
-        build_pin_window(&app, window_x, window_y, window_width, window_height)?;
-    }
+    let id = format!(
+        "pin-{}",
+        app.state::<AppState>()
+            .pin_generation
+            .fetch_add(1, Ordering::SeqCst)
+            + 1
+    );
+    app.state::<AppState>()
+        .pin_data
+        .lock()
+        .unwrap()
+        .insert(id.clone(), data);
+    build_pin_window(&app, &id, window_x, window_y, window_width, window_height)?;
 
     let window = app
-        .get_webview_window("pin")
+        .get_webview_window(&id)
         .ok_or_else(|| "Pin window is unavailable".to_string())?;
     #[cfg(target_os = "windows")]
     {
-        // Reuse the renderer created during startup. Destroying a WebView2 and
-        // immediately rebuilding another with the same label can deadlock the
-        // Windows UI thread and leave the capture session permanently busy.
-        window.hide().map_err(|error| error.to_string())?;
         if let Some((x, y, width, height)) = physical_geometry {
             // A physical window pixel now maps to one captured image pixel.
             // This also avoids sizing the reused WebView with the DPI of the
@@ -3229,16 +3323,16 @@ fn pin_image_impl(app: AppHandle, data: Vec<u8>) -> Result<bool, String> {
                 .set_size(tauri::LogicalSize::new(window_width, window_height))
                 .map_err(|error| error.to_string())?;
         }
-        let _ = window.emit("pin-image-updated", ());
+        let _ = window.emit("pin-image-updated", &id);
     }
     window.show().map_err(|error| error.to_string())?;
     close_overlay_impl(&app);
-    Ok(true)
+    Ok(id)
 }
 
 #[cfg(target_os = "windows")]
 #[tauri::command]
-pub async fn pin_image(app: AppHandle, data_base64: String) -> Result<bool, String> {
+pub async fn pin_image(app: AppHandle, data_base64: String) -> Result<String, String> {
     // Decode away from the WebView2/UI thread. Large screenshots must not hold
     // up Cancel, window events, or the global screenshot shortcut.
     let data = tauri::async_runtime::spawn_blocking(move || {
@@ -3253,30 +3347,68 @@ pub async fn pin_image(app: AppHandle, data_base64: String) -> Result<bool, Stri
 
 #[cfg(not(target_os = "windows"))]
 #[tauri::command]
-pub fn pin_image(app: AppHandle, data: Vec<u8>) -> Result<bool, String> {
+pub fn pin_image(app: AppHandle, data: Vec<u8>) -> Result<String, String> {
     pin_image_impl(app, data)
 }
 
 #[tauri::command]
-pub fn get_pin_image(state: State<AppState>) -> Result<String, String> {
+pub fn get_pin_image(state: State<AppState>, id: String) -> Result<String, String> {
     state
         .pin_data
         .lock()
         .unwrap()
-        .as_ref()
+        .get(&id)
         .map(|data| BASE64.encode(data))
         .ok_or_else(|| "No pinned image is available".into())
 }
 
 #[tauri::command]
-pub fn close_pin_window(app: AppHandle) {
-    if let Some(window) = app.get_webview_window("pin") {
-        #[cfg(target_os = "windows")]
-        let _ = window.hide();
-        #[cfg(not(target_os = "windows"))]
+pub fn close_pin_window(app: AppHandle, id: String) {
+    if let Some(window) = app.get_webview_window(&id) {
         let _ = window.destroy();
     }
-    *app.state::<AppState>().pin_data.lock().unwrap() = None;
+    app.state::<AppState>().pin_data.lock().unwrap().remove(&id);
+}
+
+#[tauri::command]
+pub fn scale_pin_window(
+    app: AppHandle,
+    id: String,
+    anchor_x: f64,
+    anchor_y: f64,
+    factor: f64,
+) -> Result<bool, String> {
+    let window = app
+        .get_webview_window(&id)
+        .ok_or_else(|| "贴图窗口不存在".to_string())?;
+    let size = window.inner_size().map_err(|error| error.to_string())?;
+    let position = window.outer_position().map_err(|error| error.to_string())?;
+    let monitor = window
+        .current_monitor()
+        .map_err(|error| error.to_string())?;
+    let (max_width, max_height) = monitor
+        .map(|item| {
+            (
+                item.size().width.saturating_sub(40),
+                item.size().height.saturating_sub(40),
+            )
+        })
+        .unwrap_or((3840, 2160));
+    let next_width = ((size.width as f64 * factor).round() as u32).clamp(60, max_width.max(60));
+    let next_height = ((size.height as f64 * factor).round() as u32).clamp(60, max_height.max(60));
+    let x = position.x
+        + ((size.width as i64 - next_width as i64) as f64 * anchor_x.clamp(0.0, 1.0)).round()
+            as i32;
+    let y = position.y
+        + ((size.height as i64 - next_height as i64) as f64 * anchor_y.clamp(0.0, 1.0)).round()
+            as i32;
+    window
+        .set_position(tauri::PhysicalPosition::new(x, y))
+        .map_err(|error| error.to_string())?;
+    window
+        .set_size(tauri::PhysicalSize::new(next_width, next_height))
+        .map_err(|error| error.to_string())?;
+    Ok(true)
 }
 
 #[tauri::command]
@@ -3448,7 +3580,6 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             {
                 prewarm_scroll_control(app.handle());
-                prewarm_pin_window(app.handle());
             }
 
             let shortcut = app.state::<AppState>().settings.lock().unwrap().capture_shortcut.clone();

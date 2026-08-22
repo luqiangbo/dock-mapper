@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { ScreenshotConfig } from "../../types";
 
 export interface SelectionRect {
   x: number;
@@ -29,6 +30,7 @@ export interface FullScreenshot {
   displayHeight: number;
   imageWidth: number;
   imageHeight: number;
+  overlayLabel: string;
 }
 
 export interface ScrollCaptureResult {
@@ -42,13 +44,17 @@ export interface OcrResult {
   engine: "onnx" | "rusto";
 }
 
+export interface QrDecodeResult {
+  contents: string[];
+}
+
 export interface Api {
   closeOverlay: () => void;
-  showCaptureOverlay: () => Promise<boolean>;
-  overlayReady: () => Promise<void>;
-  getFullScreenshot: () => Promise<FullScreenshot>;
-  reportCaptureRendered: (generation: number) => Promise<void>;
-  onCaptureReady: (callback: () => void) => () => void;
+  showCaptureOverlay: (generation?: number) => Promise<boolean>;
+  overlayReady: (label: string) => Promise<void>;
+  getFullScreenshot: (label: string) => Promise<FullScreenshot>;
+  reportCaptureRendered: (generation: number, label: string) => Promise<boolean>;
+  onCaptureReady: (callback: (label: string) => void) => () => void;
   beginScrollCapture: (rect: SelectionRect) => Promise<boolean>;
   scrollControlReady: () => Promise<void>;
   finishScrollCapture: () => Promise<boolean>;
@@ -62,10 +68,12 @@ export interface Api {
   copyImage: (png: Uint8Array) => Promise<boolean>;
   copyText: (value: string) => Promise<boolean>;
   saveImage: (png: Uint8Array) => Promise<boolean>;
-  pinImage: (png: Uint8Array) => Promise<boolean>;
-  recognizeSelectionOnnx: (png: Uint8Array) => Promise<OcrResult>;
-  recognizeSelectionRusto: (png: Uint8Array) => Promise<OcrResult>;
+  pinImage: (png: Uint8Array) => Promise<string>;
+  recognizeSelection: (png: Uint8Array) => Promise<OcrResult>;
+  decodeQrSelection: (png: Uint8Array) => Promise<QrDecodeResult>;
   openUrl: (url: string) => Promise<boolean>;
+  getScreenshotConfig: () => Promise<ScreenshotConfig>;
+  updateScreenshotConfig: (config: ScreenshotConfig) => Promise<ScreenshotConfig>;
   getSettings: () => Promise<AppSettings>;
   setLanguage: (language: Language) => Promise<AppSettings>;
   setCaptureShortcut: (shortcut: string) => Promise<SetShortcutResult>;
@@ -118,10 +126,11 @@ function pngBase64(png: Uint8Array): Promise<string> {
 
 export const api: Api = {
   closeOverlay: () => void invoke("close_overlay"),
-  showCaptureOverlay: () => invoke("show_capture_overlay"),
-  overlayReady: () => invoke("overlay_ready"),
-  getFullScreenshot: () => invoke("get_full_screenshot"),
-  reportCaptureRendered: (generation) => invoke("report_capture_rendered", { generation }),
+  showCaptureOverlay: (generation) => invoke("show_capture_overlay", { generation }),
+  overlayReady: (label) => invoke("overlay_ready", { label }),
+  getFullScreenshot: (label) => invoke("get_full_screenshot", { label }),
+  reportCaptureRendered: (generation, label) =>
+    invoke("report_capture_rendered", { generation, label }),
   onCaptureReady: (callback) => subscribe("capture-ready", callback),
   beginScrollCapture: (rect) => invoke("begin_scroll_capture", { rect }),
   scrollControlReady: () => invoke("scroll_control_ready"),
@@ -143,11 +152,14 @@ export const api: Api = {
     isWindows
       ? invoke("pin_image", { dataBase64: await pngBase64(png) })
       : invoke("pin_image", { data: bytes(png) }),
-  recognizeSelectionOnnx: async (png) =>
-    invoke("recognize_selection_onnx", { imageBase64: await pngBase64(png) }),
-  recognizeSelectionRusto: async (png) =>
-    invoke("recognize_selection_rusto", { imageBase64: await pngBase64(png) }),
+  recognizeSelection: async (png) =>
+    invoke("recognize_selection", { imageBase64: await pngBase64(png) }),
+  decodeQrSelection: async (png) =>
+    invoke("decode_qr_selection", { imageBase64: await pngBase64(png) }),
   openUrl: (url) => invoke("open_url", { url }),
+  getScreenshotConfig: () => invoke("get_screenshot_config"),
+  updateScreenshotConfig: (config) =>
+    invoke("update_screenshot_config", { screenshotConfig: config }),
   getSettings: () => invoke("get_settings"),
   setLanguage: (language) => invoke("set_language", { language }),
   setCaptureShortcut: (shortcut) => invoke("set_capture_shortcut", { shortcut }),

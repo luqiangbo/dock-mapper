@@ -1,21 +1,23 @@
 import {
-  AimOutlined,
-  ArrowUpOutlined,
-  BgColorsOutlined,
-  BlockOutlined,
-  BorderOutlined,
-  CheckOutlined,
-  CloseOutlined,
-  DownloadOutlined,
-  EditOutlined,
-  FontSizeOutlined,
-  FileSearchOutlined,
-  HighlightOutlined,
-  PushpinOutlined,
-  RollbackOutlined,
-  SmileOutlined,
-  VerticalAlignBottomOutlined,
-} from "@ant-design/icons";
+  ArrowUpRight,
+  Check,
+  Circle,
+  Crop,
+  Grid3X3,
+  Highlighter,
+  ListOrdered,
+  PenLine,
+  Pin,
+  Pipette,
+  QrCode,
+  Save,
+  ScanText,
+  ScrollText,
+  Type,
+  Undo2,
+  X,
+} from "lucide-react";
+import type { ReactNode } from "react";
 import { useI18n } from "../i18n";
 import TooltipButton from "./TooltipButton";
 
@@ -28,7 +30,7 @@ export type AnnotTool =
   | "mosaic"
   | "picker"
   | "text"
-  | "emoji"
+  | "number"
   | null;
 
 export const STROKE_COLORS = [
@@ -41,10 +43,6 @@ export const STROKE_COLORS = [
   "#15161d",
 ] as const;
 
-export function toolUsesColor(tool: AnnotTool): boolean {
-  return ["rect", "ellipse", "arrow", "pen", "highlight", "text"].includes(tool ?? "");
-}
-
 interface AnnotationToolbarProps {
   tool: AnnotTool;
   canUndo: boolean;
@@ -53,7 +51,6 @@ interface AnnotationToolbarProps {
   confirmDisabled?: boolean;
   ocrDisabled?: boolean;
   ocrRunning?: boolean;
-  showEmojiPicker?: boolean;
   pickerColor?: string;
   onToolChange: (tool: AnnotTool) => void;
   onUndo: () => void;
@@ -61,8 +58,10 @@ interface AnnotationToolbarProps {
   onSave: () => void;
   onPin: () => void;
   onOcr: () => void;
+  onQr: () => void;
   onCancel: () => void;
   onConfirm: () => void;
+  options?: ReactNode;
   style?: React.CSSProperties;
 }
 
@@ -74,7 +73,6 @@ function AnnotationToolbar({
   confirmDisabled,
   ocrDisabled,
   ocrRunning,
-  showEmojiPicker,
   pickerColor,
   onToolChange,
   onUndo,
@@ -82,137 +80,150 @@ function AnnotationToolbar({
   onSave,
   onPin,
   onOcr,
+  onQr,
   onCancel,
   onConfirm,
+  options,
   style,
 }: AnnotationToolbarProps): React.JSX.Element {
   const { t } = useI18n();
   const locked = Boolean(toolsDisabled);
   const toggle = (next: Exclude<AnnotTool, null>) => onToolChange(tool === next ? null : next);
+  const iconProps = { size: 18, strokeWidth: 2.6, "aria-hidden": true };
 
   return (
     <div className="wx-toolbar" style={style} onMouseDown={(event) => event.stopPropagation()}>
-      <div className="wx-toolbar__group">
-        <TooltipButton
-          label={t.toolbar.rectangle}
-          active={tool === "rect"}
-          disabled={locked}
-          onClick={() => toggle("rect")}
-        >
-          <BorderOutlined />
-        </TooltipButton>
-        <TooltipButton
-          label={t.toolbar.ellipse}
-          active={tool === "ellipse"}
-          disabled={locked}
-          onClick={() => toggle("ellipse")}
-        >
-          <AimOutlined />
-        </TooltipButton>
-        <TooltipButton
-          label={t.toolbar.emojiSticker}
-          active={tool === "emoji" || showEmojiPicker}
-          disabled={locked}
-          onClick={() => toggle("emoji")}
-        >
-          <SmileOutlined />
-        </TooltipButton>
-        <TooltipButton
-          label={t.toolbar.arrow}
-          active={tool === "arrow"}
-          disabled={locked}
-          onClick={() => toggle("arrow")}
-        >
-          <ArrowUpOutlined className="toolbar-arrow-icon" />
-        </TooltipButton>
-        <TooltipButton
-          label={t.toolbar.pen}
-          active={tool === "pen"}
-          disabled={locked}
-          onClick={() => toggle("pen")}
-        >
-          <EditOutlined />
-        </TooltipButton>
-        <TooltipButton
-          label={t.toolbar.highlight}
-          active={tool === "highlight"}
-          disabled={locked}
-          onClick={() => toggle("highlight")}
-        >
-          <HighlightOutlined />
-        </TooltipButton>
-        <TooltipButton
-          label={t.toolbar.mosaic}
-          active={tool === "mosaic"}
-          disabled={locked}
-          onClick={() => toggle("mosaic")}
-        >
-          <BlockOutlined />
-        </TooltipButton>
-        <TooltipButton
-          label={t.toolbar.text}
-          active={tool === "text"}
-          disabled={locked}
-          onClick={() => toggle("text")}
-        >
-          <FontSizeOutlined />
-        </TooltipButton>
-        <TooltipButton
-          label={t.toolbar.picker}
-          active={tool === "picker"}
-          disabled={locked}
-          onClick={() => toggle("picker")}
-        >
-          <BgColorsOutlined />
-        </TooltipButton>
-        {pickerColor && (
-          <span className="picker-color-chip" style={{ backgroundColor: pickerColor }} />
-        )}
-        <TooltipButton
-          label={ocrRunning ? "正在并行识别文字" : "对比识别文字（双离线 OCR）"}
-          disabled={locked || ocrDisabled}
-          onClick={onOcr}
-        >
-          <FileSearchOutlined spin={ocrRunning} />
-        </TooltipButton>
-      </div>
+      <div className="wx-toolbar__row">
+        <div className="wx-toolbar__group">
+          <TooltipButton
+            label={t.toolbar.rectangle}
+            active={tool === "rect"}
+            disabled={locked}
+            onClick={() => toggle("rect")}
+          >
+            <Crop {...iconProps} />
+          </TooltipButton>
+          <TooltipButton
+            label={t.toolbar.ellipse}
+            active={tool === "ellipse"}
+            disabled={locked}
+            onClick={() => toggle("ellipse")}
+          >
+            <Circle {...iconProps} />
+          </TooltipButton>
+          <TooltipButton
+            label={t.toolbar.arrow}
+            active={tool === "arrow"}
+            disabled={locked}
+            onClick={() => toggle("arrow")}
+          >
+            <ArrowUpRight {...iconProps} />
+          </TooltipButton>
+          <TooltipButton
+            label={t.toolbar.pen}
+            active={tool === "pen"}
+            disabled={locked}
+            onClick={() => toggle("pen")}
+          >
+            <PenLine {...iconProps} />
+          </TooltipButton>
+          <TooltipButton
+            label={t.toolbar.highlight}
+            active={tool === "highlight"}
+            disabled={locked}
+            onClick={() => toggle("highlight")}
+          >
+            <Highlighter {...iconProps} />
+          </TooltipButton>
+          <TooltipButton
+            label={t.toolbar.mosaic}
+            active={tool === "mosaic"}
+            disabled={locked}
+            onClick={() => toggle("mosaic")}
+          >
+            <Grid3X3 {...iconProps} />
+          </TooltipButton>
+          <TooltipButton
+            label={t.toolbar.text}
+            active={tool === "text"}
+            disabled={locked}
+            onClick={() => toggle("text")}
+          >
+            <Type {...iconProps} />
+          </TooltipButton>
+          <TooltipButton
+            label={t.toolbar.picker}
+            active={tool === "picker"}
+            disabled={locked}
+            onClick={() => toggle("picker")}
+          >
+            <Pipette {...iconProps} />
+          </TooltipButton>
+          <TooltipButton
+            label="顺序标号"
+            active={tool === "number"}
+            disabled={locked}
+            onClick={() => toggle("number")}
+          >
+            <ListOrdered {...iconProps} />
+          </TooltipButton>
+          {pickerColor && (
+            <span className="picker-color-chip" style={{ backgroundColor: pickerColor }} />
+          )}
+          <TooltipButton
+            label={ocrRunning ? "正在识别文字" : "识别文字（当前 OCR 引擎）"}
+            disabled={locked || ocrDisabled}
+            onClick={onOcr}
+          >
+            <ScanText {...iconProps} className={ocrRunning ? "toolbar-icon--spin" : undefined} />
+          </TooltipButton>
+          <TooltipButton label="识别二维码" disabled={locked || ocrDisabled} onClick={onQr}>
+            <QrCode {...iconProps} />
+          </TooltipButton>
+        </div>
 
-      <div className="wx-toolbar__divider" />
-      <div className="wx-toolbar__group">
-        <TooltipButton
-          label={t.toolbar.scrollCapture}
-          disabled={locked || scrollCaptureDisabled}
-          onClick={onScrollCapture}
-        >
-          <VerticalAlignBottomOutlined />
-        </TooltipButton>
+        <div className="wx-toolbar__divider" />
+        <div className="wx-toolbar__group">
+          <TooltipButton
+            label={t.toolbar.scrollCapture}
+            disabled={locked || scrollCaptureDisabled}
+            onClick={onScrollCapture}
+          >
+            <ScrollText {...iconProps} />
+          </TooltipButton>
+        </div>
+        <div className="wx-toolbar__divider" />
+        <div className="wx-toolbar__group">
+          <TooltipButton label={t.toolbar.undo} disabled={locked || !canUndo} onClick={onUndo}>
+            <Undo2 {...iconProps} />
+          </TooltipButton>
+          <TooltipButton
+            label={t.toolbar.save}
+            disabled={locked || confirmDisabled}
+            onClick={onSave}
+          >
+            <Save {...iconProps} />
+          </TooltipButton>
+          <TooltipButton label={t.toolbar.pin} disabled={locked || confirmDisabled} onClick={onPin}>
+            <Pin {...iconProps} />
+          </TooltipButton>
+        </div>
+        <div className="wx-toolbar__divider" />
+        <div className="wx-toolbar__group">
+          <TooltipButton label={t.toolbar.cancel} danger onClick={onCancel}>
+            <X {...iconProps} />
+          </TooltipButton>
+          <TooltipButton
+            label={t.toolbar.done}
+            success
+            disabled={confirmDisabled}
+            onClick={onConfirm}
+          >
+            <Check {...iconProps} />
+          </TooltipButton>
+        </div>
       </div>
-      <div className="wx-toolbar__divider" />
-      <div className="wx-toolbar__group">
-        <TooltipButton label={t.toolbar.undo} disabled={locked || !canUndo} onClick={onUndo}>
-          <RollbackOutlined />
-        </TooltipButton>
-        <TooltipButton label={t.toolbar.save} disabled={locked || confirmDisabled} onClick={onSave}>
-          <DownloadOutlined />
-        </TooltipButton>
-        <TooltipButton label={t.toolbar.pin} disabled={locked || confirmDisabled} onClick={onPin}>
-          <PushpinOutlined />
-        </TooltipButton>
-      </div>
-      <div className="wx-toolbar__divider" />
-      <div className="wx-toolbar__group">
-        <TooltipButton label={t.toolbar.cancel} danger onClick={onCancel}>
-          <CloseOutlined />
-        </TooltipButton>
-        <TooltipButton
-          label={t.toolbar.done}
-          success
-          disabled={confirmDisabled}
-          onClick={onConfirm}
-        >
-          <CheckOutlined />
-        </TooltipButton>
-      </div>
+      {options && <div className="wx-toolbar__options-row">{options}</div>}
     </div>
   );
 }

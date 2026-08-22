@@ -4,7 +4,6 @@ export const zhTW: Messages = {
   toolbar: {
     rectangle: "矩形",
     ellipse: "橢圓",
-    emojiSticker: "表情貼圖",
     arrow: "箭頭",
     pen: "畫筆",
     highlight: "螢光筆",
@@ -79,6 +78,5 @@ export const zhTW: Messages = {
     done: "完成",
     cancel: "取消",
     moveHint: "拖曳文字可移動 · 連按兩下可再編輯",
-    emojiMoveHint: "拖曳可移動 · 拖曳右下角可調整大小 · Backspace 可刪除",
   },
 };

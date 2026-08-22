@@ -6,7 +6,36 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 6;
+pub const CURRENT_SCHEMA_VERSION: u32 = 8;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum OcrEngine {
+    Onnx,
+    Rusto,
+}
+
+impl Default for OcrEngine {
+    fn default() -> Self {
+        Self::Onnx
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ColorCopyFormat {
+    Hex,
+    Rgb,
+    Hsl,
+    Hsv,
+    Css,
+}
+
+impl Default for ColorCopyFormat {
+    fn default() -> Self {
+        Self::Hex
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -28,6 +57,8 @@ pub struct ScreenshotConfig {
     pub shortcut: String,
     pub save_directory: Option<String>,
     pub filename_prefix: String,
+    pub ocr_engine: OcrEngine,
+    pub color_copy_format: ColorCopyFormat,
 }
 
 impl Default for ScreenshotConfig {
@@ -36,6 +67,8 @@ impl Default for ScreenshotConfig {
             shortcut: "Control+1".into(),
             save_directory: None,
             filename_prefix: "DockMapper".into(),
+            ocr_engine: OcrEngine::Onnx,
+            color_copy_format: ColorCopyFormat::Hex,
         }
     }
 }
@@ -215,5 +248,23 @@ mod tests {
         migrate(&mut config);
         assert_eq!(config.screenshot_config.filename_prefix, "DockMapper");
         assert_eq!(config.screenshot_config.save_directory, None);
+    }
+
+    #[test]
+    fn migrates_new_screenshot_defaults() {
+        let mut config = AppConfig {
+            schema_version: 7,
+            screenshot_config: ScreenshotConfig::default(),
+            ..AppConfig::default()
+        };
+
+        migrate(&mut config);
+
+        assert_eq!(config.screenshot_config.ocr_engine, OcrEngine::Onnx);
+        assert_eq!(
+            config.screenshot_config.color_copy_format,
+            ColorCopyFormat::Hex
+        );
+        assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
     }
 }

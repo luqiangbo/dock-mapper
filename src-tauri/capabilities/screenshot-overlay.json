@@ -2,10 +2,11 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "screenshot-overlay",
   "description": "冻结截图编辑器与滚动控制窗口：仅拥有编辑所需的核心窗口和事件权限",
-  "windows": ["overlay", "scroll-control"],
+  "windows": ["overlay-*", "scroll-control"],
   "permissions": [
     "core:default",
     "core:event:allow-listen",
-    "core:window:allow-close"
+    "core:window:allow-close",
+    "core:window:allow-set-theme"
   ]
 }
