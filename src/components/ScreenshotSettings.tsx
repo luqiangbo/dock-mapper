@@ -56,7 +56,7 @@ export default function ScreenshotSettings() {
             <div className={styles.settingCopy}>
               <Text strong>立即截图</Text>
               <span className={styles.description}>
-                截取鼠标所在显示器，支持选区、标注、滚动长截图、复制、保存和置顶。
+                截取鼠标所在显示器，支持选区、标注、OCR、复制、保存和置顶。
               </span>
             </div>
             <Button type="primary" onClick={() => void start()}>
@@ -90,24 +90,6 @@ export default function ScreenshotSettings() {
                     </Button>
                   )}
                 </div>
-              </div>
-              <div className={styles.settingRow}>
-                <div className={styles.settingCopy}>
-                  <Text strong>OCR 引擎</Text>
-                  <span className={styles.description}>
-                    默认 ONNX；切换后只会加载并运行当前选择的离线引擎。
-                  </span>
-                </div>
-                <Select
-                  value={config.ocr_engine}
-                  disabled={saving}
-                  style={{ width: 190 }}
-                  options={[
-                    { value: "onnx", label: "ONNX · PP-OCRv6 small" },
-                    { value: "rusto", label: "RustO MNN · PP-OCRv6 small" },
-                  ]}
-                  onChange={(ocr_engine) => void save({ ...config, ocr_engine })}
-                />
               </div>
               <div className={styles.settingRow}>
                 <div className={styles.settingCopy}>
@@ -151,7 +133,7 @@ export default function ScreenshotSettings() {
         type="info"
         showIcon
         message="截图交互"
-        description="区域选择后可使用形状、画笔、高亮、马赛克、文字、取色笔、二维码识别和像素标尺。取色笔按 C 复制不带 # 的 HEX 颜色值；长截图开始后再次按 Ctrl+1 完成拼接。"
+        description="区域选择后可使用形状、画笔、高亮、马赛克、文字、取色笔、二维码识别和像素标尺。取色笔按 C 复制不带 # 的 HEX 颜色值。"
       />
     </div>
   );

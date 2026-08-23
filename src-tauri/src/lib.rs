@@ -1,7 +1,8 @@
 mod admin;
 mod config;
-#[cfg(target_os = "windows")]
+mod diagnostics;
 mod dxgi_capture;
+mod image_store;
 mod litesnap;
 mod ocr;
 mod scancode_mapper;
@@ -379,9 +380,26 @@ impl Default for WidgetConfig {
 
 pub struct AppState {
     pub config: Mutex<config::AppConfig>,
+    pub images: image_store::ImageStore,
     config_path: PathBuf,
     widget_width: Mutex<f64>,
     mutation_lock: Mutex<()>,
+}
+
+#[tauri::command]
+fn upload_image(
+    state: State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("图片上传必须使用原始二进制请求".into());
+    };
+    state.images.insert(bytes.clone())
+}
+
+#[tauri::command]
+fn release_image(state: State<'_, AppState>, image_id: String) {
+    state.images.remove(&image_id);
 }
 
 fn persist(state: &AppState) -> Result<(), String> {
@@ -391,6 +409,67 @@ fn persist(state: &AppState) -> Result<(), String> {
         .map_err(|_| "配置状态已损坏".to_string())?
         .clone();
     config::save(&state.config_path, &config)
+}
+
+fn commit_scancode_change_with<W, S>(
+    registry_before: Option<&[u8]>,
+    registry_after: Option<&[u8]>,
+    next_config: &config::AppConfig,
+    mut write_registry: W,
+    save_config: S,
+) -> Result<(), String>
+where
+    W: FnMut(Option<&[u8]>) -> Result<(), String>,
+    S: FnOnce(&config::AppConfig) -> Result<(), String>,
+{
+    write_registry(registry_after)?;
+    if let Err(save_error) = save_config(next_config) {
+        return match write_registry(registry_before) {
+            Ok(()) => Err(save_error),
+            Err(rollback_error) => Err(format!(
+                "{save_error}；同时回滚系统键盘映射失败：{rollback_error}"
+            )),
+        };
+    }
+    Ok(())
+}
+
+fn commit_scancode_change(
+    state: &AppState,
+    registry_before: Option<&[u8]>,
+    registry_after: Option<&[u8]>,
+    next_config: &config::AppConfig,
+) -> Result<(), String> {
+    commit_scancode_change_with(
+        registry_before,
+        registry_after,
+        next_config,
+        scancode_mapper::write,
+        |config| config::save(&state.config_path, config),
+    )
+}
+
+fn commit_shortcut_change_with<R, S>(
+    previous_shortcut: &str,
+    next_shortcut: &str,
+    next_config: &config::AppConfig,
+    mut register: R,
+    save: S,
+) -> Result<(), String>
+where
+    R: FnMut(&str) -> Result<(), String>,
+    S: FnOnce(&config::AppConfig) -> Result<(), String>,
+{
+    register(next_shortcut)?;
+    if let Err(save_error) = save(next_config) {
+        return match register(previous_shortcut) {
+            Ok(()) => Err(save_error),
+            Err(rollback_error) => Err(format!(
+                "{save_error}；同时恢复截图快捷键失败：{rollback_error}"
+            )),
+        };
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -555,24 +634,26 @@ fn get_engine_status(state: State<'_, AppState>) -> EngineStatus {
     }
 }
 
-#[tauri::command]
-fn set_engine_enabled(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    enabled: bool,
-) -> Result<EngineStatus, String> {
-    let _ = app;
-    let _ = state;
-    let _ = enabled;
-    Err("按键映射已改为系统扫描码模式，请使用“应用到系统”按钮".into())
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct ScancodeMapStatus {
     pub applied: bool,
     pub has_external_map: bool,
     pub requires_restart: bool,
     pub backup_available: bool,
+}
+
+fn requires_scancode_takeover(
+    current: Option<&[u8]>,
+    desired: &[u8],
+    previously_applied: bool,
+) -> bool {
+    current.is_some() && current != Some(desired) && !previously_applied
+}
+
+fn required_scancode_backup(value: Option<&str>) -> Result<Option<Vec<u8>>, String> {
+    value
+        .ok_or_else(|| "没有可恢复的应用前映射".to_string())
+        .and_then(|backup| scancode_mapper::backup_decode(Some(backup)))
 }
 
 #[tauri::command]
@@ -599,6 +680,8 @@ fn apply_scancode_map(
     state: State<'_, AppState>,
     confirm_takeover: bool,
 ) -> Result<ScancodeMapStatus, String> {
+    let span = tracing::info_span!(target: "dock_mapper::scancode", "apply_scancode_map");
+    let _entered = span.enter();
     if !admin::is_elevated() {
         return Err("写入系统键盘映射需要管理员权限".into());
     }
@@ -606,29 +689,32 @@ fn apply_scancode_map(
         .mutation_lock
         .lock()
         .map_err(|_| "配置写入锁已损坏".to_string())?;
-    let mut config = state
+    let config = state
         .config
         .lock()
         .map_err(|_| "配置状态已损坏".to_string())?;
     let desired = scancode_mapper::encode(&config.key_mappings)?;
     let current = scancode_mapper::read()?;
-    if current.as_deref() != Some(desired.as_slice())
-        && current.is_some()
-        && !config.scancode_map_applied
+    if requires_scancode_takeover(current.as_deref(), &desired, config.scancode_map_applied)
         && !confirm_takeover
     {
         return Err("系统已存在其他工具写入的 Scancode Map；请确认备份后接管".into());
     }
-    if config.scancode_map_backup.is_none() {
-        config.scancode_map_backup =
+    let mut next_config = config.clone();
+    if next_config.scancode_map_backup.is_none() {
+        next_config.scancode_map_backup =
             Some(scancode_mapper::backup_encode(current.as_deref()).unwrap_or_default());
     }
-    scancode_mapper::write(Some(&desired))?;
-    config.scancode_map_applied = true;
-    persist(&state)?;
+    next_config.scancode_map_applied = true;
     drop(config);
-    app.emit("scancode-map-changed", ())
-        .map_err(|error| error.to_string())?;
+    commit_scancode_change(&state, current.as_deref(), Some(&desired), &next_config)?;
+    let mapping_count = next_config.key_mappings.len();
+    *state
+        .config
+        .lock()
+        .map_err(|_| "配置状态已损坏".to_string())? = next_config;
+    tracing::info!(target: "dock_mapper::scancode", mapping_count, "Scancode Map applied");
+    let _ = app.emit("scancode-map-changed", ());
     Ok(ScancodeMapStatus {
         applied: true,
         has_external_map: false,
@@ -642,6 +728,8 @@ fn restore_scancode_map(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ScancodeMapStatus, String> {
+    let span = tracing::info_span!(target: "dock_mapper::scancode", "restore_scancode_map");
+    let _entered = span.enter();
     if !admin::is_elevated() {
         return Err("恢复系统键盘映射需要管理员权限".into());
     }
@@ -649,20 +737,22 @@ fn restore_scancode_map(
         .mutation_lock
         .lock()
         .map_err(|_| "配置写入锁已损坏".to_string())?;
-    let mut config = state
+    let config = state
         .config
         .lock()
         .map_err(|_| "配置状态已损坏".to_string())?;
-    let backup = scancode_mapper::backup_decode(config.scancode_map_backup.as_deref())?;
-    if config.scancode_map_backup.is_none() {
-        return Err("没有可恢复的应用前映射".into());
-    }
-    scancode_mapper::write(backup.as_deref())?;
-    config.scancode_map_applied = false;
-    persist(&state)?;
+    let backup = required_scancode_backup(config.scancode_map_backup.as_deref())?;
+    let current = scancode_mapper::read()?;
+    let mut next_config = config.clone();
+    next_config.scancode_map_applied = false;
     drop(config);
-    app.emit("scancode-map-changed", ())
-        .map_err(|error| error.to_string())?;
+    commit_scancode_change(&state, current.as_deref(), backup.as_deref(), &next_config)?;
+    *state
+        .config
+        .lock()
+        .map_err(|_| "配置状态已损坏".to_string())? = next_config;
+    tracing::info!(target: "dock_mapper::scancode", "Scancode Map restored");
+    let _ = app.emit("scancode-map-changed", ());
     Ok(ScancodeMapStatus {
         applied: false,
         has_external_map: false,
@@ -729,6 +819,15 @@ fn update_widget_config(
             .map_err(|_| "配置状态已损坏".to_string())? = previous_config;
         return Err(error);
     }
+    if let Some(control) = app.try_state::<sys_monitor::SysMonitorControl>() {
+        control.set_interval(config.refresh_interval_secs);
+    }
+    let width = state
+        .widget_width
+        .lock()
+        .map(|value| *value)
+        .unwrap_or(DEFAULT_WIDGET_WIDTH);
+    taskbar::refresh_widget_position(&app, width);
     app.emit("widget-config-changed", &config)
         .map_err(|error| error.to_string())?;
     Ok(config)
@@ -745,6 +844,7 @@ fn get_screenshot_config(state: State<'_, AppState>) -> Result<config::Screensho
 
 #[tauri::command]
 fn update_screenshot_config(
+    app: AppHandle,
     state: State<'_, AppState>,
     mut screenshot_config: config::ScreenshotConfig,
 ) -> Result<config::ScreenshotConfig, String> {
@@ -753,48 +853,47 @@ fn update_screenshot_config(
         .lock()
         .map_err(|_| "配置写入锁已损坏".to_string())?;
     config::normalize_screenshot_config(&mut screenshot_config);
-    let previous_config = {
-        let mut current = state
-            .config
-            .lock()
-            .map_err(|_| "配置状态已损坏".to_string())?;
-        let previous = current.clone();
-        current.screenshot_config = screenshot_config.clone();
-        previous
-    };
-    if let Err(error) = persist(&state) {
-        *state
-            .config
-            .lock()
-            .map_err(|_| "配置状态已损坏".to_string())? = previous_config;
-        return Err(error);
-    }
+    let previous_config = state
+        .config
+        .lock()
+        .map_err(|_| "配置状态已损坏".to_string())?
+        .clone();
+    let previous_shortcut = previous_config.screenshot_config.shortcut.clone();
+    let mut next_config = previous_config.clone();
+    next_config.screenshot_config = screenshot_config.clone();
+    commit_shortcut_change_with(
+        &previous_shortcut,
+        &screenshot_config.shortcut,
+        &next_config,
+        |shortcut| litesnap::update_shortcut(&app, shortcut),
+        |config| config::save(&state.config_path, config),
+    )?;
+    *state
+        .config
+        .lock()
+        .map_err(|_| "配置状态已损坏".to_string())? = next_config;
     Ok(screenshot_config)
 }
 
 #[tauri::command]
 async fn recognize_selection(
-    app: AppHandle,
     state: State<'_, AppState>,
-    image_base64: String,
+    service: State<'_, ocr::OcrService>,
+    image_id: String,
 ) -> Result<ocr::OcrTextResult, String> {
-    let engine = state
-        .config
-        .lock()
-        .map_err(|_| "配置状态已损坏".to_string())?
-        .screenshot_config
-        .ocr_engine;
-    tokio::task::spawn_blocking(move || ocr::recognize(&app, &image_base64, engine))
-        .await
-        .map_err(|error| format!("OCR 后台任务异常：{error}"))?
+    let png = state.images.get(&image_id)?;
+    state.images.remove(&image_id);
+    service.recognize(png).await
 }
 
 #[tauri::command]
 async fn decode_qr_selection(
-    _app: AppHandle,
-    image_base64: String,
+    state: State<'_, AppState>,
+    image_id: String,
 ) -> Result<ocr::QrDecodeResult, String> {
-    tokio::task::spawn_blocking(move || ocr::decode_qr(&image_base64))
+    let png = state.images.get(&image_id)?;
+    state.images.remove(&image_id);
+    tokio::task::spawn_blocking(move || ocr::decode_qr(png))
         .await
         .map_err(|error| format!("二维码解码后台任务异常：{error}"))?
 }
@@ -805,6 +904,15 @@ fn choose_screenshot_save_directory() -> Option<String> {
         .set_title("选择截图默认保存目录")
         .pick_folder()
         .map(|path| path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn export_diagnostics(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    diagnostics: State<'_, diagnostics::DiagnosticsState>,
+) -> Result<Option<String>, String> {
+    diagnostics::export(&app, state, diagnostics)
 }
 
 #[tauri::command]
@@ -927,20 +1035,25 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(litesnap::create_state())
         .setup(|app| {
+            app.manage(diagnostics::initialize(app.handle())?);
             #[cfg(desktop)]
             setup_tray(app)?;
 
             let config_path = app.path().app_data_dir()?.join("config.json");
             let loaded_config = config::load(&config_path);
+            let monitor_interval = loaded_config.widget_config.refresh_interval_secs;
             let state = AppState {
                 config: Mutex::new(loaded_config),
+                images: image_store::ImageStore::default(),
                 config_path,
                 widget_width: Mutex::new(DEFAULT_WIDGET_WIDTH),
                 mutation_lock: Mutex::new(()),
             };
             app.manage(state);
+            app.manage(sys_monitor::SysMonitorControl::new(monitor_interval));
+            app.manage(ocr::OcrService::new(app.handle())?);
             if let Err(error) = litesnap::initialize(app.handle()) {
-                eprintln!("注册截图快捷键失败：{error}");
+                tracing::error!(target: "dock_mapper::shortcut", %error, "注册截图快捷键失败");
             }
 
             if let Some(window) = app.get_webview_window("main") {
@@ -968,6 +1081,22 @@ pub fn run() {
                 .ok_or("缺少 taskbar_widget 窗口")?;
             #[cfg(target_os = "windows")]
             taskbar::embed_widget_to_taskbar(&widget);
+            let widget_app = app.handle().clone();
+            widget.on_window_event(move |event| {
+                if matches!(
+                    event,
+                    tauri::WindowEvent::ScaleFactorChanged { .. }
+                        | tauri::WindowEvent::Focused(true)
+                ) {
+                    let width = widget_app
+                        .state::<AppState>()
+                        .widget_width
+                        .lock()
+                        .map(|value| *value)
+                        .unwrap_or(DEFAULT_WIDGET_WIDTH);
+                    taskbar::refresh_widget_position(&widget_app, width);
+                }
+            });
 
             sys_monitor::start_sys_monitor(app.handle().clone());
             Ok(())
@@ -977,20 +1106,18 @@ pub fn run() {
             get_key_mappings,
             sync_key_mappings,
             get_engine_status,
-            set_engine_enabled,
             get_scancode_map_status,
             apply_scancode_map,
             restore_scancode_map,
+            upload_image,
+            release_image,
             litesnap::start_screenshot,
             litesnap::close_overlay,
             litesnap::show_capture_overlay,
             litesnap::overlay_ready,
-            litesnap::scroll_control_ready,
             litesnap::get_full_screenshot,
             litesnap::report_capture_rendered,
-            litesnap::begin_scroll_capture,
-            litesnap::finish_scroll_capture,
-            litesnap::cancel_scroll_capture,
+            litesnap::check_screen_permission,
             litesnap::copy_image,
             litesnap::copy_text,
             litesnap::save_image,
@@ -998,9 +1125,11 @@ pub fn run() {
             litesnap::get_pin_image,
             litesnap::close_pin_window,
             litesnap::scale_pin_window,
+            litesnap::open_url,
             get_screenshot_config,
             update_screenshot_config,
             choose_screenshot_save_directory,
+            export_diagnostics,
             recognize_selection,
             decode_qr_selection,
             refresh_widget_position,
@@ -1015,5 +1144,145 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("构建 DockMapper 失败");
 
-    app.run(|_, _| {});
+    app.run(|app, event| {
+        if matches!(
+            event,
+            tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
+        ) {
+            if let Some(control) = app.try_state::<sys_monitor::SysMonitorControl>() {
+                control.shutdown();
+            }
+        }
+    });
+}
+
+#[cfg(test)]
+mod transaction_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    #[test]
+    fn scancode_restore_requires_a_backup() {
+        assert_eq!(
+            required_scancode_backup(None).unwrap_err(),
+            "没有可恢复的应用前映射"
+        );
+    }
+
+    #[test]
+    fn external_scancode_map_requires_explicit_takeover() {
+        assert!(requires_scancode_takeover(Some(&[1, 2]), &[3, 4], false));
+        assert!(!requires_scancode_takeover(Some(&[3, 4]), &[3, 4], false));
+        assert!(!requires_scancode_takeover(Some(&[1, 2]), &[3, 4], true));
+    }
+
+    #[test]
+    fn shortcut_transaction_restores_previous_registration_when_save_fails() {
+        let registrations = Mutex::new(Vec::new());
+        let config = config::AppConfig::default();
+        let result = commit_shortcut_change_with(
+            "Ctrl+1",
+            "Ctrl+Shift+1",
+            &config,
+            |value| {
+                registrations.lock().unwrap().push(value.to_string());
+                Ok(())
+            },
+            |_| Err("保存失败".into()),
+        );
+        assert_eq!(result.unwrap_err(), "保存失败");
+        assert_eq!(
+            *registrations.lock().unwrap(),
+            vec!["Ctrl+Shift+1", "Ctrl+1"]
+        );
+    }
+
+    #[test]
+    fn scancode_transaction_commits_registry_and_config_once() {
+        let writes = Mutex::new(Vec::<Option<Vec<u8>>>::new());
+        let saved = Mutex::new(0_u8);
+        let config = config::AppConfig::default();
+        commit_scancode_change_with(
+            None,
+            Some(&[3, 4]),
+            &config,
+            |value| {
+                writes.lock().unwrap().push(value.map(<[u8]>::to_vec));
+                Ok(())
+            },
+            |_| {
+                *saved.lock().unwrap() += 1;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(*writes.lock().unwrap(), vec![Some(vec![3, 4])]);
+        assert_eq!(*saved.lock().unwrap(), 1);
+    }
+
+    #[test]
+    fn scancode_transaction_does_not_save_after_registry_write_failure() {
+        let saved = Mutex::new(false);
+        let config = config::AppConfig::default();
+        let result = commit_scancode_change_with(
+            None,
+            Some(&[3, 4]),
+            &config,
+            |_| Err("注册表拒绝访问".into()),
+            |_| {
+                *saved.lock().unwrap() = true;
+                Ok(())
+            },
+        );
+        assert_eq!(result.unwrap_err(), "注册表拒绝访问");
+        assert!(!*saved.lock().unwrap());
+    }
+
+    #[test]
+    fn scancode_transaction_rolls_registry_back_when_config_save_fails() {
+        let writes = Mutex::new(Vec::<Option<Vec<u8>>>::new());
+        let config = config::AppConfig::default();
+        let result = commit_scancode_change_with(
+            Some(&[1, 2]),
+            Some(&[3, 4]),
+            &config,
+            |value| {
+                writes.lock().unwrap().push(value.map(<[u8]>::to_vec));
+                Ok(())
+            },
+            |_| Err("磁盘已满".into()),
+        );
+
+        assert_eq!(result.unwrap_err(), "磁盘已满");
+        assert_eq!(
+            *writes.lock().unwrap(),
+            vec![Some(vec![3, 4]), Some(vec![1, 2])]
+        );
+    }
+
+    #[test]
+    fn scancode_transaction_reports_a_failed_rollback() {
+        let calls = Mutex::new(0_u8);
+        let config = config::AppConfig::default();
+        let result = commit_scancode_change_with(
+            None,
+            Some(&[3, 4]),
+            &config,
+            |_| {
+                let mut calls = calls.lock().unwrap();
+                *calls += 1;
+                if *calls == 2 {
+                    Err("注册表拒绝访问".into())
+                } else {
+                    Ok(())
+                }
+            },
+            |_| Err("磁盘已满".into()),
+        );
+
+        assert_eq!(
+            result.unwrap_err(),
+            "磁盘已满；同时回滚系统键盘映射失败：注册表拒绝访问"
+        );
+    }
 }

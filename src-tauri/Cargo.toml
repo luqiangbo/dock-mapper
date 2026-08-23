@@ -42,6 +42,9 @@ windows = { version = "0.61", features = [
 ] }
 sysinfo = "0.30"
 tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 arboard = "3.6"
 base64 = "0.22"
 directories = "6"
@@ -55,7 +58,6 @@ rfd = "0.15"
 screenshots = "0.8.10"
 tauri-plugin-global-shortcut = "2.3"
 paddleocr_rs_onnx = "=0.2.7"
-rusto-rs = "=0.2.5"
 
 [patch.crates-io]
 # 0.2.7 在未启用加速器时仍引用对应类型；此处仅补足 cfg 回退，默认仍是 CPU。

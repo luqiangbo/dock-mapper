@@ -12,6 +12,7 @@ export interface TextEditorState extends TextStyle {
   width: number;
   height: number;
   scale: number;
+  transformScale: number;
 }
 
 export interface TextObject extends TextStyle {
@@ -22,6 +23,7 @@ export interface TextObject extends TextStyle {
   width: number;
   height: number;
   scale: number;
+  transformScale: number;
 }
 
 const FONT_FAMILIES: Record<TextStyle["font"], string> = {

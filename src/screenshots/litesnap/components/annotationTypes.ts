@@ -1,6 +1,11 @@
 import type { ScreenshotConfig } from "../../../types";
 
-export type ArrowStyle = "filled" | "outline" | "line" | "double";
+export type ArrowStyle = "filled" | "outline" | "double";
+export const ARROW_STYLE_OPTIONS: ReadonlyArray<{ value: ArrowStyle; label: string }> = [
+  { value: "filled", label: "实心箭头" },
+  { value: "outline", label: "线框箭头" },
+  { value: "double", label: "双向箭头" },
+];
 export type TextFont = "sans" | "serif" | "mono";
 
 export interface TextStyle {
@@ -10,8 +15,6 @@ export interface TextStyle {
   bold: boolean;
   strokeColor: string;
   strokeWidth: number;
-  backgroundColor: string;
-  backgroundOpacity: number;
 }
 
 export interface NumberStyle {
@@ -42,8 +45,6 @@ export const DEFAULT_TEXT_STYLE: TextStyle = {
   bold: false,
   strokeColor: "#000000",
   strokeWidth: 0,
-  backgroundColor: "#000000",
-  backgroundOpacity: 0.72,
 };
 export const DEFAULT_NUMBER_STYLE: NumberStyle = {
   backgroundColor: "#ef4444",

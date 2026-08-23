@@ -1,5 +1,4 @@
-import { useCallback, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { Button, Tooltip } from "antd";
 import type { ReactNode } from "react";
 
 interface TooltipButtonProps {
@@ -8,6 +7,7 @@ interface TooltipButtonProps {
   disabled?: boolean;
   danger?: boolean;
   success?: boolean;
+  loading?: boolean;
   onClick?: () => void;
   children: ReactNode;
 }
@@ -18,59 +18,24 @@ function TooltipButton({
   disabled,
   danger,
   success,
+  loading,
   onClick,
   children,
 }: TooltipButtonProps): React.JSX.Element {
-  const wrapRef = useRef<HTMLSpanElement>(null);
-  const [tip, setTip] = useState<{ x: number; y: number } | null>(null);
-
-  const showTip = useCallback(() => {
-    const rect = wrapRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setTip({ x: rect.left + rect.width / 2, y: rect.top - 6 });
-  }, []);
-
-  const hideTip = useCallback(() => setTip(null), []);
-
   return (
-    <>
-      <span
-        ref={wrapRef}
-        className="tb-tooltip-wrap"
-        onMouseEnter={showTip}
-        onMouseLeave={hideTip}
-        onFocus={showTip}
-        onBlur={hideTip}
-      >
-        <button
-          type="button"
-          className={[
-            "tb-btn",
-            active ? "is-active" : "",
-            danger ? "is-danger" : "",
-            success ? "is-success" : "",
-          ]
-            .filter(Boolean)
-            .join(" ")}
-          aria-label={label}
-          disabled={disabled}
-          onClick={onClick}
-        >
-          {children}
-        </button>
-      </span>
-      {tip &&
-        createPortal(
-          <span
-            className="tb-tooltip tb-tooltip--portal"
-            style={{ left: tip.x, top: tip.y }}
-            role="tooltip"
-          >
-            {label}
-          </span>,
-          document.body,
-        )}
-    </>
+    <Tooltip title={label} placement="top" mouseEnterDelay={0.35}>
+      <Button
+        type="text"
+        size="small"
+        danger={danger}
+        loading={loading}
+        className={`tb-btn${active ? " is-active" : ""}${success ? " is-confirm" : ""}`}
+        aria-label={label}
+        disabled={disabled}
+        onClick={onClick}
+        icon={children}
+      />
+    </Tooltip>
   );
 }
 

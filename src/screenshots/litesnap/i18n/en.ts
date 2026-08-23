@@ -12,7 +12,6 @@ export interface Messages {
     translate: string;
     ocr: string;
     search: string;
-    scrollCapture: string;
     undo: string;
     save: string;
     pin: string;
@@ -26,16 +25,6 @@ export interface Messages {
     working: string;
     adjustRegion: string;
   };
-  scrollCapture: {
-    capture: string;
-    cancel: string;
-    done: string;
-    capturing: string;
-    failed: string;
-    preview: string;
-    previewEmpty: string;
-    scrollPreviewHint: string;
-  };
   ocr: {
     title: string;
     copy: string;
@@ -44,7 +33,6 @@ export interface Messages {
     noTextDetected: string;
     compareHint: string;
     onnxEngine: string;
-    rustoEngine: string;
     recognizing: string;
     completedIn: (milliseconds: number) => string;
     engineFailed: string;
@@ -93,7 +81,6 @@ export const en: Messages = {
     translate: "Translate",
     ocr: "Extract text (OCR)",
     search: "Search",
-    scrollCapture: "Scroll capture",
     undo: "Undo",
     save: "Save",
     pin: "Pin on screen",
@@ -107,16 +94,6 @@ export const en: Messages = {
     working: "Working…",
     adjustRegion: "Drag the handles to resize · Drag inside to move · Pick a tool to annotate",
   },
-  scrollCapture: {
-    capture: "Capture next frame",
-    cancel: "Cancel",
-    done: "Done",
-    capturing: "Capturing…",
-    failed: "Scroll capture failed",
-    preview: "Live preview",
-    previewEmpty: "Scroll to build the long screenshot…",
-    scrollPreviewHint: "Scroll here to preview the full image",
-  },
   ocr: {
     title: "OCR comparison",
     copy: "Copy",
@@ -125,7 +102,6 @@ export const en: Messages = {
     noTextDetected: "(no text detected)",
     compareHint: "Same selection, parallel offline OCR",
     onnxEngine: "ONNX · PP-OCRv6 small",
-    rustoEngine: "RustO MNN · PP-OCRv6 small",
     recognizing: "Recognizing…",
     completedIn: (milliseconds) => `${milliseconds} ms`,
     engineFailed: "This OCR engine failed.",

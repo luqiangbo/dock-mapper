@@ -13,7 +13,7 @@ pub fn is_elevated() -> bool {
         let mut token_handle = HANDLE::default();
 
         if OpenProcessToken(process, TOKEN_QUERY, &mut token_handle).is_err() {
-            eprintln!("[admin] OpenProcessToken failed");
+            tracing::error!(target: "dock_mapper::admin", "OpenProcessToken failed");
             return false;
         }
 
@@ -30,7 +30,7 @@ pub fn is_elevated() -> bool {
         let _ = CloseHandle(token_handle);
 
         if result.is_err() {
-            eprintln!("[admin] GetTokenInformation failed");
+            tracing::error!(target: "dock_mapper::admin", "GetTokenInformation failed");
             return false;
         }
 
@@ -44,7 +44,7 @@ pub fn relaunch_as_admin() -> Result<(), String> {
     let exe_path = match std::env::current_exe() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("[admin] Cannot get exe path: {e}");
+            tracing::error!(target: "dock_mapper::admin", error = %e, "Cannot get executable path");
             return Err(format!("无法获取程序路径：{e}"));
         }
     };

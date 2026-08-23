@@ -1,25 +1,24 @@
-//! DockMapper 内置的双离线 OCR 引擎。
-//!
-//! 同一张选区 PNG 可分别交给 ONNX Runtime 与 RustO/MNN。两种模型都作为
-//! Tauri 资源随应用发布，不下载模型、不依赖 Windows OCR 语言包或网络服务。
+//! DockMapper 内置的 ONNX 离线 OCR 服务。
 
-use crate::config::OcrEngine as SelectedOcrEngine;
-use base64::{engine::general_purpose::STANDARD, Engine};
 use paddleocr_rs_onnx::{OcrBlock, OcrEngine, OrderBy};
-use rusto::{DetectTextResult, ImageSource, InitializeConfig, OcrRunOptions, RustO};
 use serde::Serialize;
 use std::{
     path::{Path, PathBuf},
-    sync::{Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+        mpsc::{self, RecvTimeoutError, SyncSender},
+        Arc,
+    },
+    thread,
+    time::{Duration, Instant},
 };
 use tauri::{AppHandle, Manager};
+use tokio::sync::oneshot;
 
 const MAX_IMAGE_EDGE: u32 = 2_048;
-const ONNX_ENGINE_ID: &str = "onnx";
-const RUSTO_ENGINE_ID: &str = "rusto";
-
-static ONNX_ENGINE: OnceLock<Mutex<Option<OcrEngine>>> = OnceLock::new();
-static RUSTO_ENGINE: OnceLock<Mutex<Option<RustO>>> = OnceLock::new();
+const MIN_RESIZED_EDGE: u32 = 96;
+const ENGINE_ID: &str = "onnx";
+const OCR_QUEUE_CAPACITY: usize = 4;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,13 +34,6 @@ pub struct QrDecodeResult {
 
 #[derive(Debug, Clone)]
 struct OnnxModelPaths {
-    detection: PathBuf,
-    recognition: PathBuf,
-    charset: PathBuf,
-}
-
-#[derive(Debug, Clone)]
-struct RustoModelPaths {
     detection: PathBuf,
     recognition: PathBuf,
     charset: PathBuf,
@@ -74,65 +66,7 @@ fn onnx_model_paths(root: &Path) -> Result<OnnxModelPaths, String> {
     }
 }
 
-fn rusto_model_paths(root: &Path) -> Result<RustoModelPaths, String> {
-    let paths = RustoModelPaths {
-        detection: root.join("PP-OCRv6_small_det.mnn"),
-        recognition: root.join("PP-OCRv6_small_rec.mnn"),
-        charset: root.join("ppocr_keys_v6_small.txt"),
-    };
-    if paths.detection.is_file() && paths.recognition.is_file() && paths.charset.is_file() {
-        Ok(paths)
-    } else {
-        Err("RustO MNN OCR 模型缺失，请重新安装 DockMapper。".into())
-    }
-}
-
-fn onnx_engine(
-    app: &AppHandle,
-) -> Result<std::sync::MutexGuard<'static, Option<OcrEngine>>, String> {
-    let mutex = ONNX_ENGINE.get_or_init(|| Mutex::new(None));
-    let mut guard = mutex
-        .lock()
-        .map_err(|_| "ONNX OCR 引擎状态已损坏".to_string())?;
-    if guard.is_none() {
-        let paths = onnx_model_paths(&resource_dir(app)?)?;
-        let detection = std::fs::read(paths.detection)
-            .map_err(|error| format!("读取 ONNX OCR 检测模型失败：{error}"))?;
-        let recognition = std::fs::read(paths.recognition)
-            .map_err(|error| format!("读取 ONNX OCR 识别模型失败：{error}"))?;
-        let charset = std::fs::read(paths.charset)
-            .map_err(|error| format!("读取 ONNX OCR 字典失败：{error}"))?;
-        *guard = Some(
-            OcrEngine::new(&detection, &recognition, &charset)
-                .map_err(|error| format!("初始化 ONNX OCR 失败：{error}"))?,
-        );
-    }
-    Ok(guard)
-}
-
-fn rusto_engine(app: &AppHandle) -> Result<std::sync::MutexGuard<'static, Option<RustO>>, String> {
-    let mutex = RUSTO_ENGINE.get_or_init(|| Mutex::new(None));
-    let mut guard = mutex
-        .lock()
-        .map_err(|_| "RustO OCR 引擎状态已损坏".to_string())?;
-    if guard.is_none() {
-        let paths = rusto_model_paths(&resource_dir(app)?)?;
-        *guard = Some(
-            RustO::initialize(InitializeConfig::ppv6(
-                paths.detection,
-                paths.recognition,
-                paths.charset,
-            ))
-            .map_err(|error| format!("初始化 RustO MNN OCR 失败：{error}"))?,
-        );
-    }
-    Ok(guard)
-}
-
-fn decode_png(image_base64: &str) -> Result<Vec<u8>, String> {
-    let png = STANDARD
-        .decode(image_base64)
-        .map_err(|_| "OCR 图片数据无效".to_string())?;
+fn validate_png(png: Vec<u8>) -> Result<Vec<u8>, String> {
     if png.is_empty() {
         return Err("OCR 图片为空".into());
     }
@@ -145,6 +79,9 @@ fn resize_for_onnx(image: ocr_image::DynamicImage) -> ocr_image::DynamicImage {
         return image;
     }
     let scale = MAX_IMAGE_EDGE as f64 / longest as f64;
+    if (image.width().min(image.height()) as f64 * scale).round() < MIN_RESIZED_EDGE as f64 {
+        return image;
+    }
     image.resize(
         (image.width() as f64 * scale).round().max(1.0) as u32,
         (image.height() as f64 * scale).round().max(1.0) as u32,
@@ -152,6 +89,7 @@ fn resize_for_onnx(image: ocr_image::DynamicImage) -> ocr_image::DynamicImage {
     )
 }
 
+#[cfg(test)]
 fn normalize_lines(lines: impl IntoIterator<Item = String>) -> String {
     lines
         .into_iter()
@@ -175,6 +113,14 @@ struct TextBlock {
 }
 
 fn normalize_positioned_blocks(blocks: Vec<TextBlock>) -> String {
+    let mut blocks = blocks;
+    blocks.sort_by(|left, right| {
+        let left_center = left.y + left.height / 2.0;
+        let right_center = right.y + right.height / 2.0;
+        left_center
+            .total_cmp(&right_center)
+            .then_with(|| left.x.total_cmp(&right.x))
+    });
     let mut lines: Vec<Vec<TextBlock>> = Vec::new();
     for block in blocks
         .into_iter()
@@ -236,65 +182,169 @@ fn normalize_onnx_blocks(blocks: Vec<OcrBlock>) -> String {
     )
 }
 
-pub fn recognize_onnx(app: &AppHandle, image_base64: &str) -> Result<OcrTextResult, String> {
-    let png = decode_png(image_base64)?;
+fn load_engine(root: &Path) -> Result<OcrEngine, String> {
+    let paths = onnx_model_paths(root)?;
+    let detection = std::fs::read(paths.detection)
+        .map_err(|error| format!("读取 ONNX OCR 检测模型失败：{error}"))?;
+    let recognition = std::fs::read(paths.recognition)
+        .map_err(|error| format!("读取 ONNX OCR 识别模型失败：{error}"))?;
+    let charset =
+        std::fs::read(paths.charset).map_err(|error| format!("读取 ONNX OCR 字典失败：{error}"))?;
+    OcrEngine::new(&detection, &recognition, &charset)
+        .map_err(|error| format!("初始化 ONNX OCR 失败：{error}"))
+}
+
+fn recognize_with_engine(engine: &mut OcrEngine, png: Vec<u8>) -> Result<OcrTextResult, String> {
+    let png = validate_png(png)?;
+    let started = Instant::now();
+    let decode_started = Instant::now();
     let image = ocr_image::load_from_memory(&png)
         .map_err(|error| format!("读取 ONNX OCR 图片失败：{error}"))?;
+    let decode_ms = decode_started.elapsed().as_millis();
+    let resize_started = Instant::now();
     let image = resize_for_onnx(image);
-    let guard = onnx_engine(app)?;
-    let results = guard
-        .as_ref()
-        .expect("ONNX OCR engine initialized")
+    let resize_ms = resize_started.elapsed().as_millis();
+    let inference_started = Instant::now();
+    let results = engine
         .recognize_all(&image, OrderBy::Horizontal)
         .map_err(|error| format!("ONNX OCR 识别失败：{error}"))?;
-    Ok(OcrTextResult {
-        text: normalize_onnx_blocks(results),
-        engine: ONNX_ENGINE_ID.into(),
-    })
-}
-
-pub fn recognize_rusto(app: &AppHandle, image_base64: &str) -> Result<OcrTextResult, String> {
-    let png = decode_png(image_base64)?;
-    let mut guard = rusto_engine(app)?;
-    let result = guard
-        .as_mut()
-        .expect("RustO OCR engine initialized")
-        .detect_text(&ImageSource::Bytes(png), &OcrRunOptions::default())
-        .map_err(|error| format!("RustO MNN OCR 识别失败：{error}"))?;
-    let text = match result {
-        DetectTextResult::Structured(results) => normalize_positioned_blocks(
-            results
-                .into_iter()
-                .map(|item| TextBlock {
-                    text: item.text,
-                    x: item.frame.left,
-                    y: item.frame.top,
-                    width: item.frame.width,
-                    height: item.frame.height,
-                })
-                .collect(),
-        ),
-        DetectTextResult::Spatial(text) => normalize_lines(text.lines().map(normalized_block_text)),
-    };
+    let inference_ms = inference_started.elapsed().as_millis();
+    let postprocess_started = Instant::now();
+    let text = normalize_onnx_blocks(results);
+    let postprocess_ms = postprocess_started.elapsed().as_millis();
+    tracing::info!(
+        target: "dock_mapper::ocr",
+        decode_ms,
+        resize_ms,
+        inference_ms,
+        postprocess_ms,
+        total_ms = started.elapsed().as_millis(),
+        width = image.width(),
+        height = image.height(),
+        "OCR recognition completed"
+    );
     Ok(OcrTextResult {
         text,
-        engine: RUSTO_ENGINE_ID.into(),
+        engine: ENGINE_ID.into(),
     })
 }
 
-pub fn recognize(
-    app: &AppHandle,
-    image_base64: &str,
-    engine: SelectedOcrEngine,
-) -> Result<OcrTextResult, String> {
-    match engine {
-        SelectedOcrEngine::Onnx => recognize_onnx(app, image_base64),
-        SelectedOcrEngine::Rusto => recognize_rusto(app, image_base64),
+struct OcrJob {
+    generation: u64,
+    png: Vec<u8>,
+    reply: oneshot::Sender<Result<OcrTextResult, String>>,
+}
+
+pub struct OcrService {
+    sender: SyncSender<OcrJob>,
+    generation: Arc<AtomicU64>,
+    queued: Arc<AtomicUsize>,
+}
+
+impl OcrService {
+    pub fn new(app: &AppHandle) -> Result<Self, String> {
+        let root = resource_dir(app)?;
+        let (sender, receiver) = mpsc::sync_channel::<OcrJob>(OCR_QUEUE_CAPACITY);
+        let generation = Arc::new(AtomicU64::new(0));
+        let worker_generation = generation.clone();
+        let queued = Arc::new(AtomicUsize::new(0));
+        let worker_queued = queued.clone();
+        thread::Builder::new()
+            .name("dockmapper-ocr".into())
+            .spawn(move || {
+                let mut engine: Option<Result<OcrEngine, String>> = None;
+                loop {
+                    let job = match receiver.recv_timeout(Duration::from_secs(2)) {
+                        Ok(job) => job,
+                        Err(RecvTimeoutError::Timeout) => {
+                            if engine.is_none() {
+                                let initialized = Instant::now();
+                                engine = Some(load_engine(&root));
+                                tracing::info!(
+                                    target: "dock_mapper::ocr",
+                                    elapsed_ms = initialized.elapsed().as_millis(),
+                                    success = engine.as_ref().is_some_and(Result::is_ok),
+                                    "OCR engine idle prewarm finished"
+                                );
+                            }
+                            continue;
+                        }
+                        Err(RecvTimeoutError::Disconnected) => break,
+                    };
+                    worker_queued.fetch_sub(1, Ordering::AcqRel);
+                    let span = tracing::info_span!(
+                        target: "dock_mapper::ocr",
+                        "ocr_job",
+                        generation = job.generation
+                    );
+                    let _entered = span.enter();
+                    if worker_generation.load(Ordering::Acquire) != job.generation {
+                        let _ = job.reply.send(Err("OCR 请求已取消".into()));
+                        continue;
+                    }
+                    if engine.is_none() {
+                        let initialized = Instant::now();
+                        engine = Some(load_engine(&root));
+                        tracing::info!(
+                            target: "dock_mapper::ocr",
+                            elapsed_ms = initialized.elapsed().as_millis(),
+                            success = engine.as_ref().is_some_and(Result::is_ok),
+                            "OCR engine initialized on demand"
+                        );
+                    }
+                    let result = match engine.as_mut() {
+                        Some(Ok(engine)) => recognize_with_engine(engine, job.png),
+                        Some(Err(error)) => Err(error.clone()),
+                        None => Err("OCR 引擎状态异常".into()),
+                    };
+                    if worker_generation.load(Ordering::Acquire) == job.generation {
+                        let _ = job.reply.send(result);
+                    } else {
+                        let _ = job.reply.send(Err("OCR 请求已取消".into()));
+                    }
+                }
+            })
+            .map_err(|error| format!("创建 OCR 工作线程失败：{error}"))?;
+        Ok(Self {
+            sender,
+            generation,
+            queued,
+        })
+    }
+
+    pub async fn recognize(&self, png: Vec<u8>) -> Result<OcrTextResult, String> {
+        let generation = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
+        let (reply, response) = oneshot::channel();
+        self.queued.fetch_add(1, Ordering::AcqRel);
+        if let Err(error) = self.sender.try_send(OcrJob {
+            generation,
+            png,
+            reply,
+        }) {
+            self.queued.fetch_sub(1, Ordering::AcqRel);
+            return Err(match error {
+                mpsc::TrySendError::Full(_) => "OCR 队列繁忙，请稍后重试".to_string(),
+                mpsc::TrySendError::Disconnected(_) => "OCR 工作线程已停止".to_string(),
+            });
+        }
+        tracing::debug!(
+            target: "dock_mapper::ocr",
+            generation,
+            queue_length = self.queued.load(Ordering::Acquire),
+            "OCR request queued"
+        );
+        response
+            .await
+            .map_err(|_| "OCR 工作线程已停止".to_string())?
+    }
+
+    pub fn cancel(&self) {
+        self.generation.fetch_add(1, Ordering::AcqRel);
     }
 }
 
-pub fn decode_qr(image_base64: &str) -> Result<QrDecodeResult, String> {
-    let png = decode_png(image_base64)?;
+pub fn decode_qr(png: Vec<u8>) -> Result<QrDecodeResult, String> {
+    let png = validate_png(png)?;
     let image = ocr_image::load_from_memory(&png)
         .map_err(|error| format!("读取二维码图片失败：{error}"))?
         .to_luma8();
@@ -341,11 +391,11 @@ mod tests {
     fn reports_missing_models_per_engine() {
         let root = Path::new("this-directory-does-not-exist");
         assert!(onnx_model_paths(root).is_err());
-        assert!(rusto_model_paths(root).is_err());
     }
 
     #[test]
-    fn bundled_onnx_models_initialize() {
+    #[ignore = "model initialization is intentionally excluded from daily tests"]
+    fn model_bundled_onnx_models_initialize() {
         let engine = OcrEngine::new(
             include_bytes!("../resources/ocr/PP-OCRv6_small_det.onnx"),
             include_bytes!("../resources/ocr/PP-OCRv6_small_rec.onnx"),
@@ -355,14 +405,52 @@ mod tests {
     }
 
     #[test]
-    fn bundled_rusto_models_initialize() {
+    #[ignore = "model benchmark is intentionally excluded from daily tests"]
+    fn model_benchmark_reports_warm_inference_time() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/ocr");
-        let paths = rusto_model_paths(&root).expect("bundled RustO models should exist");
-        let engine = RustO::initialize(InitializeConfig::ppv6(
-            paths.detection,
-            paths.recognition,
-            paths.charset,
-        ));
-        assert!(engine.is_ok(), "bundled RustO MNN model must load");
+        let mut engine = load_engine(&root).expect("bundled ONNX model");
+        let image = ocr_image::DynamicImage::new_rgb8(640, 240);
+        let mut png = std::io::Cursor::new(Vec::new());
+        image
+            .write_to(&mut png, ocr_image::ImageFormat::Png)
+            .expect("encode fixture");
+        let started = Instant::now();
+        let _ = recognize_with_engine(&mut engine, png.into_inner()).expect("benchmark OCR");
+        eprintln!("warm OCR benchmark: {} ms", started.elapsed().as_millis());
+    }
+
+    #[test]
+    fn sorts_positioned_blocks_before_line_clustering() {
+        let text = normalize_positioned_blocks(vec![
+            TextBlock {
+                text: "second".into(),
+                x: 0.0,
+                y: 30.0,
+                width: 30.0,
+                height: 10.0,
+            },
+            TextBlock {
+                text: "world".into(),
+                x: 35.0,
+                y: 0.0,
+                width: 30.0,
+                height: 10.0,
+            },
+            TextBlock {
+                text: "hello".into(),
+                x: 0.0,
+                y: 0.0,
+                width: 30.0,
+                height: 10.0,
+            },
+        ]);
+        assert_eq!(text, "hello world\nsecond");
+    }
+
+    #[test]
+    fn keeps_thin_high_dpi_selections_at_their_original_scale() {
+        let image = ocr_image::DynamicImage::new_rgb8(4_096, 120);
+        let resized = resize_for_onnx(image);
+        assert_eq!((resized.width(), resized.height()), (4_096, 120));
     }
 }

@@ -6,20 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 8;
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum OcrEngine {
-    Onnx,
-    Rusto,
-}
-
-impl Default for OcrEngine {
-    fn default() -> Self {
-        Self::Onnx
-    }
-}
+pub const CURRENT_SCHEMA_VERSION: u32 = 9;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -57,7 +44,6 @@ pub struct ScreenshotConfig {
     pub shortcut: String,
     pub save_directory: Option<String>,
     pub filename_prefix: String,
-    pub ocr_engine: OcrEngine,
     pub color_copy_format: ColorCopyFormat,
 }
 
@@ -67,7 +53,6 @@ impl Default for ScreenshotConfig {
             shortcut: "Control+1".into(),
             save_directory: None,
             filename_prefix: "DockMapper".into(),
-            ocr_engine: OcrEngine::Onnx,
             color_copy_format: ColorCopyFormat::Hex,
         }
     }
@@ -107,6 +92,13 @@ pub fn load(path: &Path) -> AppConfig {
 }
 
 pub fn save(path: &Path, config: &AppConfig) -> Result<(), String> {
+    let span = tracing::info_span!(
+        target: "dock_mapper::config",
+        "save_config",
+        schema_version = config.schema_version
+    );
+    let _entered = span.enter();
+    let started = std::time::Instant::now();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| format!("创建配置目录失败：{error}"))?;
     }
@@ -139,6 +131,12 @@ pub fn save(path: &Path, config: &AppConfig) -> Result<(), String> {
     }
 
     let _ = fs::remove_file(backup_path);
+    tracing::debug!(
+        target: "dock_mapper::config",
+        elapsed_ms = started.elapsed().as_millis(),
+        schema_version = config.schema_version,
+        "Configuration saved"
+    );
     Ok(())
 }
 
@@ -260,11 +258,22 @@ mod tests {
 
         migrate(&mut config);
 
-        assert_eq!(config.screenshot_config.ocr_engine, OcrEngine::Onnx);
         assert_eq!(
             config.screenshot_config.color_copy_format,
             ColorCopyFormat::Hex
         );
         assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn ignores_the_removed_legacy_ocr_engine() {
+        let json = r#"{
+            "schema_version": 8,
+            "screenshot_config": { "ocr_engine": "rusto" }
+        }"#;
+        let mut config: AppConfig = serde_json::from_str(json).expect("legacy config");
+        migrate(&mut config);
+        assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
+        assert_eq!(config.screenshot_config.shortcut, "Control+1");
     }
 }

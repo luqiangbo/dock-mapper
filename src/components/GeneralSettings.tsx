@@ -23,6 +23,7 @@ export default function GeneralSettings() {
   const [minimizeToTray, setMinimizeToTray] = useState(true);
   const [minimizeLoading, setMinimizeLoading] = useState(true);
   const [checking, setChecking] = useState(false);
+  const [exportingDiagnostics, setExportingDiagnostics] = useState(false);
   const [version, setVersion] = useState("—");
   const { accentColor, setAccentColor } = useTheme();
   const { modal, notification } = AntApp.useApp();
@@ -92,6 +93,18 @@ export default function GeneralSettings() {
     }
   };
 
+  const exportDiagnostics = async () => {
+    setExportingDiagnostics(true);
+    try {
+      const path = await invoke<string | null>("export_diagnostics");
+      if (path) notification.success({ message: "诊断信息已导出", description: path });
+    } catch (error) {
+      notification.error({ message: "导出诊断信息失败", description: String(error) });
+    } finally {
+      setExportingDiagnostics(false);
+    }
+  };
+
   return (
     <div className={styles.page}>
       <Card className={styles.surfaceCard} title="通用">
@@ -117,6 +130,17 @@ export default function GeneralSettings() {
             ) : (
               <Switch checked={minimizeToTray} onChange={(value) => void changeMinimize(value)} />
             )}
+          </div>
+          <div className={styles.settingRow}>
+            <div className={styles.settingCopy}>
+              <Text strong>诊断信息</Text>
+              <span className={styles.description}>
+                导出脱敏配置和最近日志，不包含截图、OCR 文本或完整文件路径。
+              </span>
+            </div>
+            <Button loading={exportingDiagnostics} onClick={() => void exportDiagnostics()}>
+              导出诊断信息
+            </Button>
           </div>
         </div>
       </Card>

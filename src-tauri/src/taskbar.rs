@@ -17,16 +17,18 @@ const DEFAULT_WIDTH_LOGICAL: f64 = 180.0;
 
 /// Embeds the widget webview window into the Windows taskbar.
 pub fn embed_widget_to_taskbar(window: &WebviewWindow) {
+    let span = tracing::info_span!(target: "dock_mapper::taskbar", "embed_widget");
+    let _entered = span.enter();
     let window_hwnd = match window.hwnd() {
         Ok(h) => h,
         Err(e) => {
-            eprintln!("[taskbar] Could not get widget HWND: {e:?}");
+            tracing::error!(target: "dock_mapper::taskbar", error = ?e, "Could not get widget HWND");
             return;
         }
     };
 
     if window_hwnd.0.is_null() {
-        eprintln!("[taskbar] Widget HWND is null");
+        tracing::error!(target: "dock_mapper::taskbar", "Widget HWND is null");
         return;
     }
 
@@ -34,7 +36,7 @@ pub fn embed_widget_to_taskbar(window: &WebviewWindow) {
         let class_name = match CString::new("Shell_TrayWnd") {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("[taskbar] CString error: {e}");
+                tracing::error!(target: "dock_mapper::taskbar", %e, "CString error");
                 return;
             }
         };
@@ -43,13 +45,13 @@ pub fn embed_widget_to_taskbar(window: &WebviewWindow) {
         {
             Ok(h) => h,
             Err(_) => {
-                eprintln!("[taskbar] Could not find Shell_TrayWnd");
+                tracing::warn!(target: "dock_mapper::taskbar", "Could not find Shell_TrayWnd");
                 return;
             }
         };
 
         if taskbar_hwnd.0.is_null() {
-            eprintln!("[taskbar] Shell_TrayWnd handle is null");
+            tracing::warn!(target: "dock_mapper::taskbar", "Shell_TrayWnd handle is null");
             return;
         }
 
@@ -73,7 +75,7 @@ pub fn embed_widget_to_taskbar(window: &WebviewWindow) {
         )));
         position_widget_dpi_aware(window, taskbar_hwnd, DEFAULT_WIDTH_LOGICAL);
 
-        println!("[taskbar] Widget embedded successfully");
+        tracing::info!(target: "dock_mapper::taskbar", "Widget embedded successfully");
     }
 }
 
@@ -98,6 +100,10 @@ unsafe fn get_window_rect(hwnd: HWND) -> Option<RECT> {
     };
     GetWindowRect(hwnd, &mut rect).ok()?;
     Some(rect)
+}
+
+fn needs_reembed(current_parent: Option<HWND>, taskbar_hwnd: HWND) -> bool {
+    current_parent != Some(taskbar_hwnd)
 }
 
 // ─── DPI-aware position (uses dynamic width from global store) ──────────
@@ -137,8 +143,13 @@ unsafe fn position_widget_dpi_aware(
         x_logical, y_logical,
     )));
 
-    println!(
-        "[taskbar] DPI position: logical({x_logical:.1}, {y_logical:.1}), width={width_logical:.0}, scale={scale_factor}"
+    tracing::debug!(
+        target: "dock_mapper::taskbar",
+        x_logical,
+        y_logical,
+        width_logical,
+        scale_factor,
+        "Widget position refreshed"
     );
 }
 
@@ -179,8 +190,10 @@ pub fn sync_dynamic_width(app: &tauri::AppHandle, width: f64) -> f64 {
     clamped
 }
 
-/// Periodic refresh (used by the 3-second timer).
+/// Low-frequency recovery refresh, including Explorer/taskbar restarts.
 pub fn refresh_widget_position(app: &tauri::AppHandle, width: f64) {
+    let span = tracing::debug_span!(target: "dock_mapper::taskbar", "refresh_widget", width);
+    let _entered = span.enter();
     if let Some(widget) = app.get_webview_window("taskbar_widget") {
         unsafe {
             let class_name = match CString::new("Shell_TrayWnd") {
@@ -193,7 +206,7 @@ pub fn refresh_widget_position(app: &tauri::AppHandle, width: f64) {
                 if !taskbar_hwnd.0.is_null() {
                     if let Ok(widget_hwnd) = widget.hwnd() {
                         let current_parent = GetParent(widget_hwnd).ok();
-                        if current_parent != Some(taskbar_hwnd) {
+                        if needs_reembed(current_parent, taskbar_hwnd) {
                             let style = GetWindowLongPtrW(widget_hwnd, GWL_STYLE);
                             let _ = SetWindowLongPtrW(
                                 widget_hwnd,
@@ -215,5 +228,19 @@ pub fn refresh_widget_position(app: &tauri::AppHandle, width: f64) {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explorer_parent_change_requires_widget_reembed() {
+        let taskbar = HWND(1_usize as *mut _);
+        let previous_taskbar = HWND(2_usize as *mut _);
+        assert!(!needs_reembed(Some(taskbar), taskbar));
+        assert!(needs_reembed(Some(previous_taskbar), taskbar));
+        assert!(needs_reembed(None, taskbar));
     }
 }

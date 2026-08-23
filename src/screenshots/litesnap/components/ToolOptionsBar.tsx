@@ -1,387 +1,356 @@
-import type { CSSProperties } from "react";
+import { ColorPicker, Select } from "antd";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useRef,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import type { ScreenshotConfig } from "../../../types";
 import { STROKE_COLORS, type AnnotTool } from "./AnnotationToolbar";
-import type { ArrowStyle, NumberStyle, TextStyle, ToolSettings } from "./annotationTypes";
+import {
+  ARROW_STYLE_OPTIONS,
+  type ArrowStyle,
+  type TextStyle,
+  type ToolSettings,
+} from "./annotationTypes";
+import { normalizeHexColor, selectNumber } from "./toolOptionValues";
 
-interface ToolOptionsBarProps {
+interface Props {
   tool: Exclude<AnnotTool, null>;
   settings: ToolSettings;
   onChange: (changes: Partial<ToolSettings>) => void;
+  onPopupOpenChange: (open: boolean) => void;
   style?: CSSProperties;
 }
+const WIDTHS = [2, 3, 4, 6, 8].map((value) => ({ value, label: `${value}px` }));
+const PRESETS = [{ label: "快捷色", colors: [...STROKE_COLORS] }];
+const FORMATS: Array<{ value: ScreenshotConfig["color_copy_format"]; label: string }> = [
+  "hex",
+  "rgb",
+  "hsl",
+  "hsv",
+  "css",
+].map((value) => ({
+  value: value as ScreenshotConfig["color_copy_format"],
+  label: value.toUpperCase(),
+}));
 
-const WIDTHS = [2, 4, 6, 8];
-const PICKER_FORMATS: Array<{ value: ScreenshotConfig["color_copy_format"]; label: string }> = [
-  { value: "hex", label: "HEX" },
-  { value: "rgb", label: "RGB" },
-  { value: "hsl", label: "HSL" },
-  { value: "hsv", label: "HSV" },
-  { value: "css", label: "CSS" },
-];
-
-function Swatches({ color, onChange }: { color: string; onChange: (color: string) => void }) {
+function Group({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <span className="tool-options__colors" aria-label="颜色">
-      {STROKE_COLORS.map((item) => (
-        <button
-          key={item}
-          type="button"
-          className={`tool-options__swatch${item === color ? " is-active" : ""}`}
-          style={{ backgroundColor: item }}
-          aria-label={item}
-          onClick={() => onChange(item)}
-        />
-      ))}
-      <input
-        type="color"
-        value={color}
-        aria-label="自定义颜色"
-        onChange={(event) => onChange(event.target.value)}
-      />
+    <span className="tool-options__group">
+      <span className="tool-options__label">{label}</span>
+      {children}
     </span>
   );
 }
-
-function Segmented<T extends string | number>({
-  value,
-  values,
-  onChange,
+function Color({
   label,
+  value,
+  name,
+  change,
+  popup,
 }: {
-  value: T;
-  values: Array<{ value: T; label: string }>;
-  onChange: (value: T) => void;
   label: string;
+  value: string;
+  name: string;
+  change: (value: string) => void;
+  popup: (key: string, open: boolean) => void;
 }) {
   return (
-    <span className="tool-options__segment" aria-label={label}>
-      {values.map((item) => (
-        <button
-          key={String(item.value)}
-          type="button"
-          className={item.value === value ? "is-active" : ""}
-          onClick={() => onChange(item.value)}
-        >
-          {item.label}
-        </button>
-      ))}
-    </span>
+    <Group label={label}>
+      <ColorPicker
+        size="small"
+        value={value}
+        disabledAlpha
+        disabledFormat
+        presets={PRESETS}
+        placement="bottom"
+        onOpenChange={(open) => popup(name, open)}
+        onChange={(color) => change(normalizeHexColor(color.toHexString()))}
+      />
+    </Group>
   );
 }
-
-function ArrowPreview({ style }: { style: ArrowStyle }) {
-  if (style === "filled")
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.4"
-        strokeLinecap="round"
-      >
-        <path d="M3 12h13" />
-        <path d="M21 12l-7-5v10z" fill="currentColor" stroke="none" />
-      </svg>
-    );
-  if (style === "line")
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.4"
-        strokeLinecap="round"
-      >
-        <path d="M3 12h18" />
-      </svg>
-    );
-  if (style === "double")
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor" stroke="none">
-        <path d="M3 12l6-5v10zM21 12l-6-5v10zM7 10.8h10v2.4H7z" />
-      </svg>
-    );
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M3 12h17M20 12l-6-5M20 12l-6 5" />
-    </svg>
-  );
-}
-
-function ArrowChoices({
+function Choice({
+  label,
   value,
-  onChange,
+  options,
+  name,
+  change,
+  popup,
 }: {
-  value: ArrowStyle;
-  onChange: (style: ArrowStyle) => void;
-}) {
-  const values: ArrowStyle[] = ["filled", "outline", "line", "double"];
-  return (
-    <span className="tool-options__arrow-choices" aria-label="箭头样式">
-      {values.map((item) => (
-        <button
-          key={item}
-          type="button"
-          className={value === item ? "is-active" : ""}
-          aria-label={item}
-          onClick={() => onChange(item)}
-        >
-          <ArrowPreview style={item} />
-        </button>
-      ))}
-    </span>
-  );
-}
-
-function TextOptions({
-  value,
-  onChange,
-}: {
-  value: TextStyle;
-  onChange: (changes: Partial<TextStyle>) => void;
+  label: string;
+  value: string | number;
+  options: Array<{ value: string | number; label: ReactNode }>;
+  name: string;
+  change: (value: string | number) => void;
+  popup: (key: string, open: boolean) => void;
 }) {
   return (
-    <>
-      <label>
-        字体
-        <select
-          value={value.font}
-          onChange={(event) => onChange({ font: event.target.value as TextStyle["font"] })}
-        >
-          <option value="sans">无衬线</option>
-          <option value="serif">衬线</option>
-          <option value="mono">等宽</option>
-        </select>
-      </label>
-      <label>
-        字号
-        <select
-          value={value.fontSize}
-          onChange={(event) =>
-            onChange({ fontSize: Number(event.target.value) as TextStyle["fontSize"] })
-          }
-        >
-          {[14, 16, 20, 24, 32, 40, 48].map((size) => (
-            <option key={size} value={size}>
-              {size}px
-            </option>
-          ))}
-        </select>
-      </label>
-      <button
-        type="button"
-        className={value.bold ? "is-active" : ""}
-        onClick={() => onChange({ bold: !value.bold })}
-      >
-        粗体
-      </button>
-      <label>
-        文字
-        <input
-          type="color"
-          value={value.color}
-          onChange={(event) => onChange({ color: event.target.value })}
-        />
-      </label>
-      <label>
-        描边
-        <input
-          type="color"
-          value={value.strokeColor}
-          onChange={(event) => onChange({ strokeColor: event.target.value })}
-        />
-      </label>
-      <label>
-        宽
-        <select
-          value={value.strokeWidth}
-          onChange={(event) => onChange({ strokeWidth: Number(event.target.value) })}
-        >
-          {[0, 1, 2, 3, 4].map((size) => (
-            <option key={size} value={size}>
-              {size}px
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        背景
-        <input
-          type="color"
-          value={value.backgroundColor}
-          onChange={(event) => onChange({ backgroundColor: event.target.value })}
-        />
-      </label>
-      <label>
-        透明
-        <input
-          type="range"
-          min="0"
-          max="100"
-          value={Math.round(value.backgroundOpacity * 100)}
-          onChange={(event) => onChange({ backgroundOpacity: Number(event.target.value) / 100 })}
-        />
-      </label>
-    </>
+    <Group label={label}>
+      <Select
+        size="small"
+        value={value}
+        options={options}
+        popupMatchSelectWidth={false}
+        onOpenChange={(open) => popup(name, open)}
+        onChange={change}
+      />
+    </Group>
   );
 }
-
-function ToolOptionsBar({
-  tool,
-  settings,
-  onChange,
-  style,
-}: ToolOptionsBarProps): React.JSX.Element {
+const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar(
+  { tool, settings, onChange, onPopupOpenChange, style },
+  ref,
+) {
+  const opened = useRef(new Set<string>());
+  useEffect(() => () => onPopupOpenChange(false), [onPopupOpenChange]);
+  const popup = useCallback(
+    (key: string, open: boolean) => {
+      if (open) opened.current.add(key);
+      else opened.current.delete(key);
+      onPopupOpenChange(opened.current.size > 0);
+    },
+    [onPopupOpenChange],
+  );
   const color = (
-    <Swatches color={settings.strokeColor} onChange={(strokeColor) => onChange({ strokeColor })} />
-  );
-  const widths = (
-    <Segmented
-      label="线宽"
-      value={settings.strokeWidth}
-      values={WIDTHS.map((value) => ({ value, label: `${value}` }))}
-      onChange={(strokeWidth) => onChange({ strokeWidth })}
+    <Color
+      label="颜色"
+      value={settings.strokeColor}
+      name={`${tool}-color`}
+      change={(strokeColor) => onChange({ strokeColor })}
+      popup={popup}
     />
   );
+  const width = (
+    <Choice
+      label="线宽"
+      value={settings.strokeWidth}
+      options={WIDTHS}
+      name={`${tool}-width`}
+      change={(value) => onChange({ strokeWidth: selectNumber(value) })}
+      popup={popup}
+    />
+  );
+  const fillOptions = [
+    { value: 0, label: "无" },
+    ...[20, 40, 60, 80].map((n) => ({ value: n / 100, label: `${n}%` })),
+  ];
   return (
-    <div className="tool-options" style={style} onMouseDown={(event) => event.stopPropagation()}>
-      {tool === "rect" || tool === "ellipse" ? (
+    <div
+      ref={ref}
+      className="tool-options"
+      style={style}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      {(tool === "rect" || tool === "ellipse") && (
         <>
           {color}
-          {widths}
-          <Segmented
-            label="填充透明度"
+          {width}
+          <Choice
+            label="填充"
             value={settings.fillOpacity}
-            values={[
-              { value: 0, label: "无填充" },
-              { value: 0.2, label: "20%" },
-              { value: 0.4, label: "40%" },
-            ]}
-            onChange={(fillOpacity) => onChange({ fillOpacity })}
+            options={fillOptions}
+            name="fill"
+            change={(value) => onChange({ fillOpacity: selectNumber(value) })}
+            popup={popup}
           />
         </>
-      ) : null}
-      {tool === "arrow" ? (
+      )}
+      {tool === "arrow" && (
         <>
           {color}
-          {widths}
-          <ArrowChoices
+          {width}
+          <Choice
+            label="样式"
             value={settings.arrowStyle}
-            onChange={(arrowStyle) => onChange({ arrowStyle })}
+            options={[...ARROW_STYLE_OPTIONS]}
+            name="arrow-style"
+            change={(value) => onChange({ arrowStyle: value as ArrowStyle })}
+            popup={popup}
           />
-          <Segmented
-            label="箭头大小"
+          <Choice
+            label="箭头"
             value={settings.arrowHeadSize}
-            values={[
+            options={[
               { value: 0.8, label: "小" },
               { value: 1, label: "中" },
               { value: 1.25, label: "大" },
             ]}
-            onChange={(arrowHeadSize) => onChange({ arrowHeadSize })}
+            name="arrow-size"
+            change={(value) => onChange({ arrowHeadSize: selectNumber(value) })}
+            popup={popup}
           />
         </>
-      ) : null}
-      {tool === "pen" ? (
+      )}
+      {tool === "pen" && (
         <>
           {color}
-          <Segmented
-            label="画笔宽度"
+          <Choice
+            label="宽度"
             value={settings.penWidth}
-            values={WIDTHS.map((value) => ({ value, label: `${value}` }))}
-            onChange={(penWidth) => onChange({ penWidth })}
+            options={WIDTHS}
+            name="pen-width"
+            change={(value) => onChange({ penWidth: selectNumber(value) })}
+            popup={popup}
           />
-          <span className="tool-options__hint">圆头笔触</span>
         </>
-      ) : null}
-      {tool === "highlight" ? (
+      )}
+      {tool === "highlight" && (
         <>
           {color}
-          <Segmented
-            label="高亮宽度"
+          <Choice
+            label="宽度"
             value={settings.highlightWidth}
-            values={[12, 20, 28, 36].map((value) => ({ value, label: `${value}` }))}
-            onChange={(highlightWidth) => onChange({ highlightWidth })}
+            options={[12, 20, 28, 36].map((value) => ({ value, label: `${value}px` }))}
+            name="highlight-width"
+            change={(value) => onChange({ highlightWidth: selectNumber(value) })}
+            popup={popup}
           />
-          <Segmented
-            label="高亮透明度"
+          <Choice
+            label="透明度"
             value={settings.highlightOpacity}
-            values={[
-              { value: 0.2, label: "20%" },
-              { value: 0.32, label: "32%" },
-              { value: 0.5, label: "50%" },
-            ]}
-            onChange={(highlightOpacity) => onChange({ highlightOpacity })}
+            options={[20, 32, 50, 70].map((n) => ({ value: n / 100, label: `${n}%` }))}
+            name="highlight-opacity"
+            change={(value) => onChange({ highlightOpacity: selectNumber(value) })}
+            popup={popup}
           />
         </>
-      ) : null}
-      {tool === "mosaic" ? (
-        <Segmented
-          label="像素块大小"
+      )}
+      {tool === "mosaic" && (
+        <Choice
+          label="像素块"
           value={settings.mosaicBlock}
-          values={[8, 12, 20, 32].map((value) => ({ value, label: `${value}px` }))}
-          onChange={(mosaicBlock) => onChange({ mosaicBlock })}
+          options={[8, 12, 20, 32].map((value) => ({ value, label: `${value}px` }))}
+          name="mosaic-size"
+          change={(value) => onChange({ mosaicBlock: selectNumber(value) })}
+          popup={popup}
         />
-      ) : null}
-      {tool === "text" ? (
-        <TextOptions
-          value={settings.textStyle}
-          onChange={(changes) => onChange({ textStyle: { ...settings.textStyle, ...changes } })}
-        />
-      ) : null}
-      {tool === "picker" ? (
-        <Segmented
+      )}
+      {tool === "text" && (
+        <>
+          <Choice
+            label="字体"
+            value={settings.textStyle.font}
+            options={[
+              { value: "sans", label: "无衬线" },
+              { value: "serif", label: "衬线" },
+              { value: "mono", label: "等宽" },
+            ]}
+            name="text-font"
+            change={(value) =>
+              onChange({ textStyle: { ...settings.textStyle, font: value as TextStyle["font"] } })
+            }
+            popup={popup}
+          />
+          <Choice
+            label="字号"
+            value={settings.textStyle.fontSize}
+            options={[14, 16, 20, 24, 32, 40, 48].map((value) => ({ value, label: `${value}px` }))}
+            name="text-size"
+            change={(value) =>
+              onChange({
+                textStyle: {
+                  ...settings.textStyle,
+                  fontSize: selectNumber(value) as TextStyle["fontSize"],
+                },
+              })
+            }
+            popup={popup}
+          />
+          <Choice
+            label="字重"
+            value={settings.textStyle.bold ? "bold" : "normal"}
+            options={[
+              { value: "normal", label: "常规" },
+              { value: "bold", label: "粗体" },
+            ]}
+            name="text-weight"
+            change={(value) =>
+              onChange({ textStyle: { ...settings.textStyle, bold: value === "bold" } })
+            }
+            popup={popup}
+          />
+          <Color
+            label="文字"
+            value={settings.textStyle.color}
+            name="text-color"
+            change={(color) => onChange({ textStyle: { ...settings.textStyle, color } })}
+            popup={popup}
+          />
+          <Choice
+            label="描边"
+            value={settings.textStyle.strokeWidth}
+            options={[0, 1, 2, 3, 4].map((value) => ({
+              value,
+              label: value ? `${value}px` : "无",
+            }))}
+            name="text-stroke"
+            change={(value) =>
+              onChange({ textStyle: { ...settings.textStyle, strokeWidth: selectNumber(value) } })
+            }
+            popup={popup}
+          />
+          {settings.textStyle.strokeWidth > 0 && (
+            <Color
+              label="描边色"
+              value={settings.textStyle.strokeColor}
+              name="text-stroke-color"
+              change={(strokeColor) =>
+                onChange({ textStyle: { ...settings.textStyle, strokeColor } })
+              }
+              popup={popup}
+            />
+          )}
+        </>
+      )}
+      {tool === "picker" && (
+        <Choice
           label="复制格式"
           value={settings.pickerFormat}
-          values={PICKER_FORMATS}
-          onChange={(pickerFormat) => onChange({ pickerFormat })}
+          options={FORMATS}
+          name="picker-format"
+          change={(value) =>
+            onChange({ pickerFormat: value as ScreenshotConfig["color_copy_format"] })
+          }
+          popup={popup}
         />
-      ) : null}
-      {tool === "number" ? (
+      )}
+      {tool === "number" && (
         <>
-          <label>
-            底色
-            <input
-              type="color"
-              value={settings.numberStyle.backgroundColor}
-              onChange={(event) =>
-                onChange({
-                  numberStyle: { ...settings.numberStyle, backgroundColor: event.target.value },
-                })
-              }
-            />
-          </label>
-          <label>
-            文字
-            <input
-              type="color"
-              value={settings.numberStyle.textColor}
-              onChange={(event) =>
-                onChange({
-                  numberStyle: { ...settings.numberStyle, textColor: event.target.value },
-                })
-              }
-            />
-          </label>
-          <Segmented
-            label="编号尺寸"
+          <Color
+            label="底色"
+            value={settings.numberStyle.backgroundColor}
+            name="number-background"
+            change={(backgroundColor) =>
+              onChange({ numberStyle: { ...settings.numberStyle, backgroundColor } })
+            }
+            popup={popup}
+          />
+          <Color
+            label="文字"
+            value={settings.numberStyle.textColor}
+            name="number-text"
+            change={(textColor) =>
+              onChange({ numberStyle: { ...settings.numberStyle, textColor } })
+            }
+            popup={popup}
+          />
+          <Choice
+            label="尺寸"
             value={settings.numberStyle.size}
-            values={[24, 32, 40].map((value) => ({ value, label: `${value}px` }))}
-            onChange={(size) => onChange({ numberStyle: { ...settings.numberStyle, size } })}
+            options={[24, 32, 40].map((value) => ({ value, label: `${value}px` }))}
+            name="number-size"
+            change={(value) =>
+              onChange({ numberStyle: { ...settings.numberStyle, size: selectNumber(value) } })
+            }
+            popup={popup}
           />
         </>
-      ) : null}
+      )}
     </div>
   );
-}
-
+});
 export default ToolOptionsBar;

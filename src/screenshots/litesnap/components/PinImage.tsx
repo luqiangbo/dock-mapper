@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, PhysicalSize } from "@tauri-apps/api/window";
+import { copyBinaryPayload } from "../utils/binaryPayload";
 
 export default function PinImage(): React.JSX.Element {
   const pinId = new URLSearchParams(window.location.search).get("id") ?? getCurrentWindow().label;
   const [imageUrl, setImageUrl] = useState("");
+  const [loadError, setLoadError] = useState("");
   const imageUrlRef = useRef("");
   const aspectRatio = useRef(1);
   const correctingSize = useRef(false);
@@ -18,14 +20,21 @@ export default function PinImage(): React.JSX.Element {
 
     const refreshImage = async (): Promise<void> => {
       try {
-        const png = await invoke<string>("get_pin_image", { id: pinId });
+        // `tauri::ipc::Response` is delivered to JavaScript as an ArrayBuffer.
+        // Normalize it instead of relying on the invoke generic, which only
+        // affects TypeScript and does not convert the runtime value.
+        const png = await invoke<unknown>("get_pin_image", { id: pinId });
+        const pngBuffer = copyBinaryPayload(png);
         if (disposed) return;
-        const nextUrl = `data:image/png;base64,${png}`;
+        const nextUrl = URL.createObjectURL(new Blob([pngBuffer], { type: "image/png" }));
+        if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current);
         imageUrlRef.current = nextUrl;
+        setLoadError("");
         setImageUrl(nextUrl);
-      } catch {
-        // The Windows pin renderer is prewarmed before an image exists. The
-        // update event below supplies the first image when the user pins one.
+      } catch (error) {
+        if (disposed) return;
+        const detail = error instanceof Error ? error.message : String(error);
+        setLoadError(`贴图加载失败：${detail}`);
       }
     };
 
@@ -45,6 +54,7 @@ export default function PinImage(): React.JSX.Element {
     return () => {
       disposed = true;
       unlisten?.();
+      if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current);
       imageUrlRef.current = "";
     };
   }, [pinId]);
@@ -119,7 +129,11 @@ export default function PinImage(): React.JSX.Element {
   };
 
   return (
-    <div className="pin-wrap" onPointerDown={startDragging} onWheel={scaleAtPointer}>
+    <div
+      className={`pin-wrap${loadError ? " pin-wrap-error" : ""}`}
+      onPointerDown={startDragging}
+      onWheel={scaleAtPointer}
+    >
       {imageUrl ? (
         <img
           src={imageUrl}
@@ -127,8 +141,15 @@ export default function PinImage(): React.JSX.Element {
           onLoad={(event) => {
             const image = event.currentTarget;
             aspectRatio.current = image.naturalWidth / Math.max(1, image.naturalHeight);
+            setLoadError("");
           }}
+          onError={() => setLoadError("贴图加载失败：无法解码 PNG 图片")}
         />
+      ) : null}
+      {loadError ? (
+        <div className="pin-load-error" role="alert">
+          {loadError}
+        </div>
       ) : null}
       <button
         type="button"

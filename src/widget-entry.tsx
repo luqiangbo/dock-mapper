@@ -108,7 +108,9 @@ function TaskbarWidget() {
     if (containerRef.current) observer.observe(containerRef.current);
     syncWidth();
     void invoke("refresh_widget_position");
-    const positionTimer = window.setInterval(() => void invoke("refresh_widget_position"), 3000);
+    // Native code refreshes immediately on width/config changes; this timer is
+    // only a recovery fallback for Explorer restarts and display changes.
+    const positionTimer = window.setInterval(() => void invoke("refresh_widget_position"), 15000);
 
     return () => {
       void statusListener.then((unlisten) => unlisten());

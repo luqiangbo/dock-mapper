@@ -1,36 +1,101 @@
 # DockMapper
 
-Windows 11 任务栏信息条、系统级按键映射与截图工具。
+面向 Windows 11 的任务栏信息条、系统级按键映射与截图标注工具。
 
 基于 Tauri 2 + Rsbuild + React 19 + Ant Design 构建，仅支持 Windows 11 x64。
 
-## 概览
+## 界面预览
 
-双窗口架构：
+| 浅色主题 | 深色主题 |
+| --- | --- |
+| ![DockMapper 浅色主题](theme-light.png) | ![DockMapper 深色主题](theme-dark.png) |
+
+## 主要功能
+
+### 系统级按键映射
+
+- 使用 Windows `Scancode Map` 注册表实现，不依赖常驻键盘钩子。
+- 支持添加、启用和停用多条映射规则。
+- 写入前识别并备份已有映射，恢复时保留事务一致性。
+- 映射应用后需要重新登录或重启 Windows 才会生效。
+- `AltGr`、`Fn` 和组合键不属于扫描码映射能力范围。
+
+### 任务栏信息条
+
+- 嵌入 Windows 11 主任务栏，显示实时上传速度、下载速度和内存占用。
+- 支持内存胶囊、圆环和刻度三种展示方式。
+- 可配置 1～5 秒采样间隔；Explorer 重启后会自动恢复挂件。
+
+### LiteSnap 截图
+
+- 截取鼠标所在显示器，支持高 DPI、多显示器和负坐标布局。
+- 支持矩形、椭圆、箭头、画笔、高亮、马赛克、文字和顺序编号标注。
+- 支持取色、二维码识别和基于 ONNX PP-OCRv6 small 的离线 OCR。
+- 支持撤销、复制、保存以及可拖动、缩放的屏幕贴图。
+- 工具栏会相对选区居中，并在窄窗口下自动收纳次要操作。
+- 图片通过原始二进制 IPC 和有界内存仓库传输，不经过 Base64 JSON。
+
+默认快捷键：
+
+| 快捷键 | 操作 |
+| --- | --- |
+| `Ctrl+1` | 打开冻结截图并框选 |
+| `Ctrl+2` | 将最近一次已确认的选区截图贴到屏幕 |
+| `Enter` | 完成截图并复制 |
+| `Esc` | 关闭当前浮层；再次按下取消截图 |
+| `Delete` | 删除当前选中的文字或编号 |
+| `C` | 取色时复制不带 `#` 的 HEX 值 |
+
+### 应用设置与诊断
+
+- 支持开机启动、关闭时最小化到托盘、主题色和签名更新检查。
+- 可配置截图保存目录、文件名前缀和取色复制格式。
+- 支持导出最近日志、应用版本、基础系统信息和脱敏配置。
+- 诊断信息不包含截图、OCR 文本、剪贴板内容、用户名目录或完整文件路径。
+
+## 应用架构
+
+DockMapper 使用多个职责独立的 Tauri WebView：
 
 - **主配置窗口** (`main`) — 管理按键映射规则、挂件、截图和系统设置；使用 Windows 11 Mica 材质。
 - **任务栏信息条** (`taskbar_widget`) — 嵌入主任务栏，实时显示网速和内存占用。
-- **按键映射** — 使用 Windows `Scancode Map` 系统扫描码映射；管理员写入后在下次登录或重启生效，不依赖常驻键盘钩子。
-- **截图** — 基于 LiteSnap 的 Tauri 工作流，支持全局快捷键、区域选择、标注、滚动长截图、复制、保存与屏幕置顶。
+- **截图窗口** (`litesnap_overlay_*`) — 显示冻结画面并处理选区、标注和识别。
+- **贴图窗口** (`pin_*`) — 展示置顶截图，支持拖动、滚轮缩放和关闭。
 
-## 开发
+OCR、二维码识别、图片编解码和截图均在本机完成，不需要上传图片到远程服务。
 
-```bash
-# 安装依赖
+## 开发环境
+
+- Windows 11 x64
+- Node.js 与 pnpm
+- Rust stable 与 Cargo
+- WebView2 Runtime
+
+安装依赖并启动 Tauri 开发模式：
+
+```powershell
 pnpm install
-
-# 启动开发模式（前端 + Tauri）
 pnpm tauri dev
 ```
 
-## 构建
+## 验证与构建
 
-```bash
+日常修改使用快速验证：
+
+```powershell
 pnpm typecheck
-pnpm lint
+cd src-tauri
+cargo test -- --skip model
+```
+
+需要运行前端测试或生成安装包时：
+
+```powershell
 pnpm test
 pnpm tauri build
 ```
+
+OCR 模型初始化和性能测试默认忽略，避免日常测试加载约 30 MiB 的模型资源。
 
 ## 发布
 
@@ -54,5 +119,8 @@ Winget 更新。完整流程见 [发布与 Winget 指南](docs/winget-publish-gu
 | 包管理 | pnpm |
 | 系统 API | windows crate (Win32) |
 | 按键映射 | Windows `Scancode Map` 注册表 |
-| 截图 | `screenshots` + `arboard` + 全局快捷键 |
+| 截图 | DXGI / `screenshots` + `arboard` + 全局快捷键 |
+| OCR | ONNX + PP-OCRv6 small |
+| 二维码 | quircs |
 | 系统监控 | sysinfo |
+| 日志 | tracing + tracing-subscriber |

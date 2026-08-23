@@ -2,27 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ScreenshotConfig } from "../../types";
 
-export interface SelectionRect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-export type Language = "en" | "zh" | "zh-TW";
-
-export interface AppSettings {
-  language: Language;
-  captureShortcut: string;
-  launchAtStartup: boolean;
-}
-
-export interface SetShortcutResult {
-  ok: boolean;
-  settings: AppSettings;
-  error?: string;
-}
-
 export interface FullScreenshot {
   url: string;
   generation: number;
@@ -33,15 +12,9 @@ export interface FullScreenshot {
   overlayLabel: string;
 }
 
-export interface ScrollCaptureResult {
-  base64: string;
-  imageWidth: number;
-  imageHeight: number;
-}
-
 export interface OcrResult {
   text: string;
-  engine: "onnx" | "rusto";
+  engine: "onnx";
 }
 
 export interface QrDecodeResult {
@@ -55,38 +28,18 @@ export interface Api {
   getFullScreenshot: (label: string) => Promise<FullScreenshot>;
   reportCaptureRendered: (generation: number, label: string) => Promise<boolean>;
   onCaptureReady: (callback: (label: string) => void) => () => void;
-  beginScrollCapture: (rect: SelectionRect) => Promise<boolean>;
-  scrollControlReady: () => Promise<void>;
-  finishScrollCapture: () => Promise<boolean>;
-  cancelScrollCapture: () => Promise<boolean>;
-  onScrollCaptureFinished: (callback: () => void) => () => void;
-  onScrollCaptureResult: (callback: (payload: ScrollCaptureResult) => void) => () => void;
-  onScrollCaptureCancelled: (callback: () => void) => () => void;
-  onScrollCaptureStarted: (callback: () => void) => () => void;
-  onScrollCapturePreview: (callback: (payload: ScrollPreview) => void) => () => void;
   checkScreenPermission: () => Promise<{ granted: boolean; status: string }>;
-  copyImage: (png: Uint8Array) => Promise<boolean>;
+  uploadImage: (png: Uint8Array) => Promise<string>;
+  releaseImage: (imageId: string) => Promise<void>;
+  copyImage: (imageId: string) => Promise<boolean>;
   copyText: (value: string) => Promise<boolean>;
-  saveImage: (png: Uint8Array) => Promise<boolean>;
-  pinImage: (png: Uint8Array) => Promise<string>;
-  recognizeSelection: (png: Uint8Array) => Promise<OcrResult>;
-  decodeQrSelection: (png: Uint8Array) => Promise<QrDecodeResult>;
+  saveImage: (imageId: string) => Promise<boolean>;
+  pinImage: (imageId: string) => Promise<string>;
+  recognizeSelection: (imageId: string) => Promise<OcrResult>;
+  decodeQrSelection: (imageId: string) => Promise<QrDecodeResult>;
   openUrl: (url: string) => Promise<boolean>;
   getScreenshotConfig: () => Promise<ScreenshotConfig>;
   updateScreenshotConfig: (config: ScreenshotConfig) => Promise<ScreenshotConfig>;
-  getSettings: () => Promise<AppSettings>;
-  setLanguage: (language: Language) => Promise<AppSettings>;
-  setCaptureShortcut: (shortcut: string) => Promise<SetShortcutResult>;
-  beginShortcutRecording: () => Promise<void>;
-  endShortcutRecording: () => Promise<void>;
-  closeShortcutWindow: () => void;
-  onSettingsChanged: (callback: (settings: AppSettings) => void) => () => void;
-}
-
-interface ScrollPreview {
-  base64: string;
-  width: number;
-  height: number;
 }
 
 function subscribe<T>(event: string, callback: (payload: T) => void): () => void {
@@ -102,28 +55,6 @@ function subscribe<T>(event: string, callback: (payload: T) => void): () => void
   };
 }
 
-const bytes = (png: Uint8Array): number[] => Array.from(png);
-const isWindows = navigator.userAgent.toLowerCase().includes("windows");
-
-function pngBase64(png: Uint8Array): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const copy = new Uint8Array(png.byteLength);
-    copy.set(png);
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error ?? new Error("Failed to encode screenshot"));
-    reader.onload = () => {
-      const result = reader.result;
-      if (typeof result !== "string") {
-        reject(new Error("Failed to encode screenshot"));
-        return;
-      }
-      const separator = result.indexOf(",");
-      resolve(separator >= 0 ? result.slice(separator + 1) : result);
-    };
-    reader.readAsDataURL(new Blob([copy.buffer], { type: "image/png" }));
-  });
-}
-
 export const api: Api = {
   closeOverlay: () => void invoke("close_overlay"),
   showCaptureOverlay: (generation) => invoke("show_capture_overlay", { generation }),
@@ -132,41 +63,19 @@ export const api: Api = {
   reportCaptureRendered: (generation, label) =>
     invoke("report_capture_rendered", { generation, label }),
   onCaptureReady: (callback) => subscribe("capture-ready", callback),
-  beginScrollCapture: (rect) => invoke("begin_scroll_capture", { rect }),
-  scrollControlReady: () => invoke("scroll_control_ready"),
-  finishScrollCapture: () => invoke("finish_scroll_capture"),
-  cancelScrollCapture: () => invoke("cancel_scroll_capture"),
-  onScrollCaptureFinished: (callback) => subscribe("scroll-capture-finished", callback),
-  onScrollCaptureResult: (callback) => subscribe("scroll-capture-result", callback),
-  onScrollCaptureCancelled: (callback) => subscribe("scroll-capture-cancelled", callback),
-  onScrollCaptureStarted: (callback) => subscribe("scroll-capture-started", callback),
-  onScrollCapturePreview: (callback) => subscribe("scroll-capture-preview", callback),
   checkScreenPermission: () => invoke("check_screen_permission"),
-  copyImage: (png) => invoke("copy_image", { data: bytes(png) }),
+  uploadImage: (png) => invoke("upload_image", png),
+  releaseImage: (imageId) => invoke("release_image", { imageId }),
+  copyImage: (imageId) => invoke("copy_image", { imageId }),
   copyText: (value) => invoke("copy_text", { value }),
-  saveImage: (png) => invoke("save_image", { data: bytes(png) }),
-  // A base64 string avoids both WebView2's unreliable top-level raw IPC and
-  // the huge JSON number arrays that originally blocked its window thread.
-  // Keep macOS on its already-verified native byte-array command shape.
-  pinImage: async (png) =>
-    isWindows
-      ? invoke("pin_image", { dataBase64: await pngBase64(png) })
-      : invoke("pin_image", { data: bytes(png) }),
-  recognizeSelection: async (png) =>
-    invoke("recognize_selection", { imageBase64: await pngBase64(png) }),
-  decodeQrSelection: async (png) =>
-    invoke("decode_qr_selection", { imageBase64: await pngBase64(png) }),
+  saveImage: (imageId) => invoke("save_image", { imageId }),
+  pinImage: (imageId) => invoke("pin_image", { imageId }),
+  recognizeSelection: (imageId) => invoke("recognize_selection", { imageId }),
+  decodeQrSelection: (imageId) => invoke("decode_qr_selection", { imageId }),
   openUrl: (url) => invoke("open_url", { url }),
   getScreenshotConfig: () => invoke("get_screenshot_config"),
   updateScreenshotConfig: (config) =>
     invoke("update_screenshot_config", { screenshotConfig: config }),
-  getSettings: () => invoke("get_settings"),
-  setLanguage: (language) => invoke("set_language", { language }),
-  setCaptureShortcut: (shortcut) => invoke("set_capture_shortcut", { shortcut }),
-  beginShortcutRecording: () => invoke("begin_shortcut_recording"),
-  endShortcutRecording: () => invoke("end_shortcut_recording"),
-  closeShortcutWindow: () => void invoke("close_shortcut_window"),
-  onSettingsChanged: (callback) => subscribe("settings-changed", callback),
 };
 
 declare global {
