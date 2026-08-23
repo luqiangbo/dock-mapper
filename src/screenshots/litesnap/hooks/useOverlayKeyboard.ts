@@ -6,6 +6,7 @@ interface Options {
   phase: string;
   hasSelectedText: boolean;
   hasSelectedNumber: boolean;
+  hasSelectedRaster: boolean;
   shotReady: boolean;
   busy: boolean;
   copyPickerHex: () => void;
@@ -14,6 +15,7 @@ interface Options {
   deleteSelection: () => void;
   cancel: () => void;
   undo: () => void;
+  redo: () => void;
   confirm: () => void;
 }
 
@@ -34,13 +36,18 @@ export function useOverlayKeyboard(options: Options): void {
       }
       if (event.key === "Escape") {
         if (options.tool === "picker") options.exitPicker();
-        else if (options.hasSelectedText || options.hasSelectedNumber) options.clearSelection();
+        else if (
+          options.hasSelectedText ||
+          options.hasSelectedNumber ||
+          options.hasSelectedRaster
+        )
+          options.clearSelection();
         else options.cancel();
         return;
       }
       if (
         (event.key === "Backspace" || event.key === "Delete") &&
-        (options.hasSelectedText || options.hasSelectedNumber) &&
+        (options.hasSelectedText || options.hasSelectedNumber || options.hasSelectedRaster) &&
         options.phase === "editing"
       ) {
         event.preventDefault();
@@ -53,7 +60,17 @@ export function useOverlayKeyboard(options: Options): void {
         options.phase === "editing"
       ) {
         event.preventDefault();
-        options.undo();
+        if (event.shiftKey) options.redo();
+        else options.undo();
+        return;
+      }
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.key.toLowerCase() === "y" &&
+        options.phase === "editing"
+      ) {
+        event.preventDefault();
+        options.redo();
         return;
       }
       if (

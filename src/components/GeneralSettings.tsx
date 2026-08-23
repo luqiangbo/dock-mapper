@@ -31,16 +31,20 @@ export default function GeneralSettings() {
   useEffect(() => {
     void isAutostartEnabled()
       .then(setAutoStart)
-      .catch((error) => console.error("读取开机启动状态失败", error))
+      .catch((error) =>
+        notification.error({ message: "读取开机启动状态失败", description: String(error) }),
+      )
       .finally(() => setAutoStartLoading(false));
     void invoke<boolean>("get_minimize_to_tray")
       .then(setMinimizeToTray)
-      .catch((error) => console.error("读取托盘设置失败", error))
+      .catch((error) =>
+        notification.error({ message: "读取托盘设置失败", description: String(error) }),
+      )
       .finally(() => setMinimizeLoading(false));
     void getVersion()
       .then(setVersion)
       .catch(() => setVersion("未知"));
-  }, []);
+  }, [notification]);
 
   const changeAutostart = useCallback(async (checked: boolean) => {
     setAutoStartLoading(true);

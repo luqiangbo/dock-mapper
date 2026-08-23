@@ -16,6 +16,7 @@ import {
   Square,
   Type,
   Undo2,
+  Redo2,
   X,
 } from "lucide-react";
 import { forwardRef } from "react";
@@ -47,6 +48,7 @@ export const STROKE_COLORS = [
 interface AnnotationToolbarProps {
   tool: AnnotTool;
   canUndo: boolean;
+  canRedo: boolean;
   compact: boolean;
   toolsDisabled?: boolean;
   confirmDisabled?: boolean;
@@ -55,6 +57,7 @@ interface AnnotationToolbarProps {
   pickerColor?: string;
   onToolChange: (tool: AnnotTool) => void;
   onUndo: () => void;
+  onRedo?: () => void;
   onSave: () => void;
   onPin: () => void;
   onOcr: () => void;
@@ -70,6 +73,7 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
     {
       tool,
       canUndo,
+      canRedo,
       compact,
       toolsDisabled,
       confirmDisabled,
@@ -78,6 +82,7 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
       pickerColor,
       onToolChange,
       onUndo,
+      onRedo,
       onSave,
       onPin,
       onOcr,
@@ -231,6 +236,9 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
           <div className="wx-toolbar__group">
             <TooltipButton label={t.toolbar.undo} disabled={locked || !canUndo} onClick={onUndo}>
               <Undo2 {...iconProps} />
+            </TooltipButton>
+            <TooltipButton label="重做" disabled={locked || !canRedo} onClick={() => onRedo?.()}>
+              <Redo2 {...iconProps} />
             </TooltipButton>
             {compact ? (
               <Dropdown

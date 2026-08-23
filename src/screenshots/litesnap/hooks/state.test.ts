@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   BoundedHistory,
   ObjectMutationTransaction,
-  type EditorHistoryEntry,
 } from "./useCanvasHistory";
 import { RequestGeneration } from "./requestGeneration";
 
@@ -27,12 +26,12 @@ describe("editor state helpers", () => {
     expect(history.canUndo).toBe(false);
   });
 
-  it("keeps raster and object edits in one chronological history", () => {
-    const history = new BoundedHistory<EditorHistoryEntry<string>>(3);
-    history.push({ kind: "raster", pixels: {} as ImageData });
-    history.push({ kind: "objects", objects: "before-number" });
-    expect(history.pop()).toEqual({ kind: "objects", objects: "before-number" });
-    expect(history.pop()?.kind).toBe("raster");
+  it("keeps complete scene snapshots in chronological order", () => {
+    const history = new BoundedHistory<{ raster: string[]; objects: string[] }>(3);
+    history.push({ raster: ["arrow"], objects: [] });
+    history.push({ raster: ["arrow"], objects: ["number"] });
+    expect(history.pop()).toEqual({ raster: ["arrow"], objects: ["number"] });
+    expect(history.pop()).toEqual({ raster: ["arrow"], objects: [] });
   });
 
   it("coalesces a continuous object interaction and ignores empty interactions", () => {

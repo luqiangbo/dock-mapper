@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type RefObject } from "react";
+import { useCallback, useRef, useState } from "react";
 
 export class BoundedHistory<T> {
   private values: T[] = [];
@@ -54,40 +54,47 @@ export class ObjectMutationTransaction<T> {
 }
 
 export function useEditorHistory<TObjects>(
-  canvasRef: RefObject<HTMLCanvasElement | null>,
   restoreObjects: (objects: TObjects) => void,
   limit = 30,
 ) {
-  const snapshots = useRef(new BoundedHistory<EditorHistoryEntry<TObjects>>(limit));
+  const past = useRef(new BoundedHistory<TObjects>(limit));
+  const future = useRef(new BoundedHistory<TObjects>(limit));
   const restoreObjectsRef = useRef(restoreObjects);
   restoreObjectsRef.current = restoreObjects;
   const [canUndo, setCanUndo] = useState(false);
-
-  const pushRaster = useCallback((pixels: ImageData) => {
-    snapshots.current.push({ kind: "raster", pixels });
-    setCanUndo(true);
-  }, []);
+  const [canRedo, setCanRedo] = useState(false);
 
   const pushObjects = useCallback((objects: TObjects) => {
-    snapshots.current.push({ kind: "objects", objects });
+    past.current.push(objects);
+    future.current.clear();
     setCanUndo(true);
+    setCanRedo(false);
   }, []);
 
-  const undo = useCallback(() => {
-    const entry = snapshots.current.pop();
-    if (!entry) return;
-    if (entry.kind === "raster") {
-      canvasRef.current?.getContext("2d")?.putImageData(entry.pixels, 0, 0);
-    } else {
-      restoreObjectsRef.current(entry.objects);
-    }
-    setCanUndo(snapshots.current.canUndo);
-  }, [canvasRef]);
+  const undo = useCallback((current: TObjects) => {
+    const previous = past.current.pop();
+    if (!previous) return;
+    future.current.push(current);
+    restoreObjectsRef.current(previous);
+    setCanUndo(past.current.canUndo);
+    setCanRedo(true);
+  }, []);
+
+  const redo = useCallback((current: TObjects) => {
+    const next = future.current.pop();
+    if (!next) return;
+    past.current.push(current);
+    restoreObjectsRef.current(next);
+    setCanUndo(true);
+    setCanRedo(future.current.canUndo);
+  }, []);
 
   const reset = useCallback(() => {
-    snapshots.current.clear();
+    past.current.clear();
+    future.current.clear();
     setCanUndo(false);
+    setCanRedo(false);
   }, []);
 
-  return { canUndo, pushRaster, pushObjects, undo, reset };
+  return { canUndo, canRedo, pushObjects, undo, redo, reset };
 }

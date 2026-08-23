@@ -95,7 +95,7 @@ function TaskbarWidget() {
   useEffect(() => {
     void invoke<WidgetConfig>("get_widget_config")
       .then((config) => setScheme(config.memory_scheme))
-      .catch((error) => console.error("读取挂件配置失败", error));
+      .catch(() => undefined);
 
     const statusListener = listen<SysStatus>("sys-status-update", (event) => {
       setStatus(event.payload);

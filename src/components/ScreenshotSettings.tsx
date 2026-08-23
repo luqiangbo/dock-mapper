@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Alert, App as AntApp, Button, Card, Input, Select, Typography } from "antd";
 import type { ScreenshotConfig } from "../types";
 import styles from "./components.module.scss";
+import { shortcutFromKeyEvent } from "../utils/shortcut";
 
 const { Text } = Typography;
 
@@ -67,9 +68,39 @@ export default function ScreenshotSettings() {
             <div className={styles.settingCopy}>
               <Text strong>全局快捷键</Text>
               <span className={styles.description}>
-                Ctrl+1 打开冻结截图并框选；Ctrl+2 将最近一次已确认的选区截图贴到屏幕。
+                点击输入框后按下新的组合键；注册或保存失败时会自动恢复旧快捷键。
               </span>
             </div>
+            {config && (
+              <div className={styles.actionRow}>
+                <Input
+                  aria-label="截图快捷键"
+                  value={config.shortcut}
+                  addonBefore="截图"
+                  readOnly
+                  disabled={saving}
+                  style={{ width: 170 }}
+                  onKeyDown={(event) => {
+                    event.preventDefault();
+                    const shortcut = shortcutFromKeyEvent(event.nativeEvent);
+                    if (shortcut) void save({ ...config, shortcut });
+                  }}
+                />
+                <Input
+                  aria-label="贴图快捷键"
+                  value={config.pin_shortcut}
+                  addonBefore="贴图"
+                  readOnly
+                  disabled={saving}
+                  style={{ width: 170 }}
+                  onKeyDown={(event) => {
+                    event.preventDefault();
+                    const pin_shortcut = shortcutFromKeyEvent(event.nativeEvent);
+                    if (pin_shortcut) void save({ ...config, pin_shortcut });
+                  }}
+                />
+              </div>
+            )}
           </div>
           {config && (
             <>

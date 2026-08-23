@@ -15,12 +15,6 @@ export interface SupportedKey {
   group: string;
 }
 
-export interface EngineStatus {
-  running: boolean;
-  enabled: boolean;
-  last_error: string | null;
-}
-
 export interface ScancodeMapStatus {
   applied: boolean;
   has_external_map: boolean;
@@ -30,6 +24,7 @@ export interface ScancodeMapStatus {
 
 export interface ScreenshotConfig {
   shortcut: string;
+  pin_shortcut: string;
   save_directory: string | null;
   filename_prefix: string;
   color_copy_format: "hex" | "rgb" | "hsl" | "hsv" | "css";
@@ -38,6 +33,7 @@ export interface ScreenshotConfig {
 export interface WidgetConfig {
   memory_scheme: MemoryScheme;
   refresh_interval_secs: number;
+  network_interface: string | null;
 }
 
 export interface SysStatus {

@@ -1,6 +1,6 @@
 //! DockMapper 内置的 ONNX 离线 OCR 服务。
 
-use paddleocr_rs_onnx::{OcrBlock, OcrEngine, OrderBy};
+use paddleocr_rs_onnx::{OcrEngine, OrderBy};
 use serde::Serialize;
 use std::{
     path::{Path, PathBuf},
@@ -25,6 +25,34 @@ const OCR_QUEUE_CAPACITY: usize = 4;
 pub struct OcrTextResult {
     pub text: String,
     pub engine: String,
+    pub blocks: Vec<OcrTextBlock>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcrTextBlock {
+    pub text: String,
+    pub confidence: f32,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+fn scaled_text_block(
+    text: String,
+    confidence: f32,
+    bounds: (f32, f32, f32, f32),
+    scale: (f32, f32),
+) -> OcrTextBlock {
+    OcrTextBlock {
+        text,
+        confidence,
+        x: bounds.0 * scale.0,
+        y: bounds.1 * scale.1,
+        width: bounds.2 * scale.0,
+        height: bounds.3 * scale.1,
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -167,21 +195,6 @@ fn normalize_positioned_blocks(blocks: Vec<TextBlock>) -> String {
         .join("\n")
 }
 
-fn normalize_onnx_blocks(blocks: Vec<OcrBlock>) -> String {
-    normalize_positioned_blocks(
-        blocks
-            .into_iter()
-            .map(|block| TextBlock {
-                text: block.text,
-                x: block.x,
-                y: block.y,
-                width: block.width,
-                height: block.height,
-            })
-            .collect(),
-    )
-}
-
 fn load_engine(root: &Path) -> Result<OcrEngine, String> {
     let paths = onnx_model_paths(root)?;
     let detection = std::fs::read(paths.detection)
@@ -200,6 +213,8 @@ fn recognize_with_engine(engine: &mut OcrEngine, png: Vec<u8>) -> Result<OcrText
     let decode_started = Instant::now();
     let image = ocr_image::load_from_memory(&png)
         .map_err(|error| format!("读取 ONNX OCR 图片失败：{error}"))?;
+    let original_width = image.width();
+    let original_height = image.height();
     let decode_ms = decode_started.elapsed().as_millis();
     let resize_started = Instant::now();
     let image = resize_for_onnx(image);
@@ -210,7 +225,32 @@ fn recognize_with_engine(engine: &mut OcrEngine, png: Vec<u8>) -> Result<OcrText
         .map_err(|error| format!("ONNX OCR 识别失败：{error}"))?;
     let inference_ms = inference_started.elapsed().as_millis();
     let postprocess_started = Instant::now();
-    let text = normalize_onnx_blocks(results);
+    let scale_x = original_width as f32 / image.width().max(1) as f32;
+    let scale_y = original_height as f32 / image.height().max(1) as f32;
+    let blocks = results
+        .into_iter()
+        .filter_map(|block| {
+            let text = normalized_block_text(&block.text);
+            (!text.is_empty()).then_some(scaled_text_block(
+                text,
+                block.confidence,
+                (block.x, block.y, block.width, block.height),
+                (scale_x, scale_y),
+            ))
+        })
+        .collect::<Vec<_>>();
+    let text = normalize_positioned_blocks(
+        blocks
+            .iter()
+            .map(|block| TextBlock {
+                text: block.text.clone(),
+                x: block.x,
+                y: block.y,
+                width: block.width,
+                height: block.height,
+            })
+            .collect(),
+    );
     let postprocess_ms = postprocess_started.elapsed().as_millis();
     tracing::info!(
         target: "dock_mapper::ocr",
@@ -226,6 +266,7 @@ fn recognize_with_engine(engine: &mut OcrEngine, png: Vec<u8>) -> Result<OcrText
     Ok(OcrTextResult {
         text,
         engine: ENGINE_ID.into(),
+        blocks,
     })
 }
 
@@ -452,5 +493,12 @@ mod tests {
         let image = ocr_image::DynamicImage::new_rgb8(4_096, 120);
         let resized = resize_for_onnx(image);
         assert_eq!((resized.width(), resized.height()), (4_096, 120));
+    }
+
+    #[test]
+    fn maps_ocr_block_coordinates_back_to_the_original_selection() {
+        let block = scaled_text_block("DockMapper".into(), 0.98, (10.0, 20.0, 30.0, 8.0), (2.0, 1.5));
+        assert_eq!((block.x, block.y, block.width, block.height), (20.0, 30.0, 60.0, 12.0));
+        assert_eq!(block.text, "DockMapper");
     }
 }

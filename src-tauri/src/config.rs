@@ -3,10 +3,15 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, OpenOptions},
     io::Write,
+    os::windows::ffi::OsStrExt,
     path::{Path, PathBuf},
 };
+use windows::{
+    core::PCWSTR,
+    Win32::Storage::FileSystem::{ReplaceFileW, REPLACEFILE_WRITE_THROUGH},
+};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 9;
+pub const CURRENT_SCHEMA_VERSION: u32 = 10;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -29,7 +34,6 @@ impl Default for ColorCopyFormat {
 pub struct AppConfig {
     pub schema_version: u32,
     pub key_mappings: Vec<KeyMapping>,
-    pub engine_enabled: bool,
     pub widget_config: WidgetConfig,
     pub minimize_to_tray: bool,
     pub screenshot_config: ScreenshotConfig,
@@ -42,6 +46,7 @@ pub struct AppConfig {
 #[serde(default)]
 pub struct ScreenshotConfig {
     pub shortcut: String,
+    pub pin_shortcut: String,
     pub save_directory: Option<String>,
     pub filename_prefix: String,
     pub color_copy_format: ColorCopyFormat,
@@ -51,6 +56,7 @@ impl Default for ScreenshotConfig {
     fn default() -> Self {
         Self {
             shortcut: "Control+1".into(),
+            pin_shortcut: "Control+2".into(),
             save_directory: None,
             filename_prefix: "DockMapper".into(),
             color_copy_format: ColorCopyFormat::Hex,
@@ -63,7 +69,6 @@ impl Default for AppConfig {
         Self {
             schema_version: CURRENT_SCHEMA_VERSION,
             key_mappings: Vec::new(),
-            engine_enabled: true,
             widget_config: WidgetConfig::default(),
             minimize_to_tray: true,
             screenshot_config: ScreenshotConfig::default(),
@@ -75,20 +80,36 @@ impl Default for AppConfig {
 
 pub fn load(path: &Path) -> AppConfig {
     let backup_path = backup_path(path);
-    let source = if path.exists() {
-        path
-    } else if backup_path.exists() {
-        &backup_path
+    let primary = read_config(path);
+    let backup = if primary.is_none() {
+        read_config(&backup_path)
     } else {
-        return AppConfig::default();
+        None
     };
-
-    let mut config = fs::read_to_string(source)
-        .ok()
-        .and_then(|content| serde_json::from_str::<AppConfig>(&content).ok())
-        .unwrap_or_default();
+    let mut config = primary.or(backup).unwrap_or_else(|| {
+        if path.exists() || backup_path.exists() {
+            tracing::error!(target: "dock_mapper::config", "主配置与备份均无法读取，使用默认配置");
+        }
+        AppConfig::default()
+    });
     migrate(&mut config);
     config
+}
+
+fn read_config(path: &Path) -> Option<AppConfig> {
+    if !path.exists() {
+        return None;
+    }
+    match fs::read_to_string(path).and_then(|content| {
+        serde_json::from_str::<AppConfig>(&content)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+    }) {
+        Ok(config) => Some(config),
+        Err(error) => {
+            tracing::warn!(target: "dock_mapper::config", %error, "配置文件读取失败");
+            None
+        }
+    }
 }
 
 pub fn save(path: &Path, config: &AppConfig) -> Result<(), String> {
@@ -117,20 +138,10 @@ pub fn save(path: &Path, config: &AppConfig) -> Result<(), String> {
     temp.write_all(&json)
         .and_then(|_| temp.sync_all())
         .map_err(|error| format!("写入临时配置失败：{error}"))?;
+    // Windows ReplaceFileW requires the replacement file handle to be closed.
+    drop(temp);
 
-    if path.exists() {
-        let _ = fs::remove_file(&backup_path);
-        fs::rename(path, &backup_path).map_err(|error| format!("备份旧配置失败：{error}"))?;
-    }
-
-    if let Err(error) = fs::rename(&temp_path, path) {
-        if backup_path.exists() {
-            let _ = fs::rename(&backup_path, path);
-        }
-        return Err(format!("替换配置失败：{error}"));
-    }
-
-    let _ = fs::remove_file(backup_path);
+    replace_config_file(path, &temp_path, &backup_path)?;
     tracing::debug!(
         target: "dock_mapper::config",
         elapsed_ms = started.elapsed().as_millis(),
@@ -138,6 +149,35 @@ pub fn save(path: &Path, config: &AppConfig) -> Result<(), String> {
         "Configuration saved"
     );
     Ok(())
+}
+
+fn wide_path(path: &Path) -> Vec<u16> {
+    path.as_os_str().encode_wide().chain(Some(0)).collect()
+}
+
+fn replace_config_file(path: &Path, temp_path: &Path, backup_path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return fs::rename(temp_path, path).map_err(|error| format!("创建配置失败：{error}"));
+    }
+    // Never overwrite the last known-good backup with a corrupt primary.
+    // This matters when the app recovered from `.bak` and the next atomic
+    // replacement itself fails.
+    if read_config(path).is_some() {
+        fs::copy(path, backup_path).map_err(|error| format!("备份旧配置失败：{error}"))?;
+    }
+    let path_wide = wide_path(path);
+    let temp_wide = wide_path(temp_path);
+    unsafe {
+        ReplaceFileW(
+            PCWSTR(path_wide.as_ptr()),
+            PCWSTR(temp_wide.as_ptr()),
+            PCWSTR::null(),
+            REPLACEFILE_WRITE_THROUGH,
+            None,
+            None,
+        )
+    }
+    .map_err(|error| format!("原子替换配置失败：{error}"))
 }
 
 pub fn normalize_screenshot_config(config: &mut ScreenshotConfig) {
@@ -194,7 +234,6 @@ mod tests {
                 .as_nanos()
         ));
         let config = AppConfig {
-            engine_enabled: false,
             widget_config: WidgetConfig {
                 refresh_interval_secs: 4,
                 ..WidgetConfig::default()
@@ -212,8 +251,67 @@ mod tests {
         let loaded = load(&path);
         assert_eq!(loaded.key_mappings[0].id, "stable-id");
         assert!(!loaded.key_mappings[0].enabled);
-        assert!(!loaded.engine_enabled);
         assert_eq!(loaded.widget_config.refresh_interval_secs, 4);
+        let _ = fs::remove_file(backup_path(&path));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn falls_back_to_last_valid_backup_when_primary_is_corrupt() {
+        let path = std::env::temp_dir().join(format!(
+            "dock-mapper-config-fallback-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        ));
+        let mut first = AppConfig::default();
+        first.screenshot_config.filename_prefix = "backup-value".into();
+        save(&path, &first).expect("initial config");
+        let mut second = first.clone();
+        second.screenshot_config.filename_prefix = "current-value".into();
+        save(&path, &second).expect("replacement config");
+        fs::write(&path, "{not-json").expect("corrupt primary");
+
+        let loaded = load(&path);
+        assert_eq!(loaded.screenshot_config.filename_prefix, "backup-value");
+
+        let _ = fs::remove_file(backup_path(&path));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn saving_after_backup_recovery_does_not_replace_backup_with_corrupt_bytes() {
+        let path = std::env::temp_dir().join(format!(
+            "dock-mapper-config-preserve-backup-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        ));
+        let mut backup = AppConfig::default();
+        backup.screenshot_config.filename_prefix = "last-good".into();
+        save(&path, &backup).expect("initial config");
+        let mut current = backup.clone();
+        current.screenshot_config.filename_prefix = "current".into();
+        save(&path, &current).expect("create backup");
+        fs::write(&path, "{corrupt").expect("corrupt primary");
+
+        let mut replacement = backup.clone();
+        replacement.screenshot_config.filename_prefix = "replacement".into();
+        save(&path, &replacement).expect("replace corrupt primary");
+
+        assert_eq!(
+            read_config(&backup_path(&path))
+                .unwrap()
+                .screenshot_config
+                .filename_prefix,
+            "last-good"
+        );
+        assert_eq!(load(&path).screenshot_config.filename_prefix, "replacement");
+        let _ = fs::remove_file(backup_path(&path));
         let _ = fs::remove_file(path);
     }
 
@@ -266,9 +364,10 @@ mod tests {
     }
 
     #[test]
-    fn ignores_the_removed_legacy_ocr_engine() {
+    fn ignores_removed_legacy_engine_fields() {
         let json = r#"{
             "schema_version": 8,
+            "engine_enabled": true,
             "screenshot_config": { "ocr_engine": "rusto" }
         }"#;
         let mut config: AppConfig = serde_json::from_str(json).expect("legacy config");

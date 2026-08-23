@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Selection } from "../store";
+import type { OcrTextBlock, WindowCandidate } from "../api";
 import { useStore } from "../store";
 import { useI18n } from "../i18n";
 import type { ScreenshotConfig } from "../../../types";
@@ -45,7 +46,16 @@ import { NativeInputGate, type NativeInputOwner } from "./nativeInputGate";
 import { isTextObjectInteractive, wrapTextLines } from "./textLayout";
 import { calculatePickerPosition, resolveScreenPoint } from "./pickerGeometry";
 import { runImageAction } from "../utils/imageActions";
-import { drawArrow } from "./arrowGeometry";
+import {
+  annotationBounds,
+  cloneRasterAnnotations,
+  renderRasterScene,
+  resizeAnnotation,
+  simplifyScenePoints,
+  translateAnnotation,
+  type RasterAnnotation,
+  type SceneBounds,
+} from "./annotationScene";
 import {
   appendNumberObject,
   clampNumberCenter,
@@ -53,9 +63,11 @@ import {
   translateNumberObjects,
   type NumberObject,
 } from "./numberObjects";
+import { findWindowCandidate } from "./windowCandidates";
 
 const MIN_SIZE = 8;
 const EMPTY_TOOLBAR_SIZE: ToolbarSize = { width: 0, height: 0 };
+let lastConfirmedSelection: Selection | null = null;
 
 interface PickerSample {
   hex: string;
@@ -82,7 +94,10 @@ interface RasterGestureSettings {
   mosaicBlock: number;
 }
 
-type ActiveAnnotationGesture = AnnotationGesture<ImageData> & { settings: RasterGestureSettings };
+type ActiveAnnotationGesture = AnnotationGesture<RasterAnnotation[]> & {
+  id: string;
+  settings: RasterGestureSettings;
+};
 interface NativeCanvasPoint {
   clientX: number;
   clientY: number;
@@ -100,15 +115,46 @@ interface NativeCanvasHandlers {
   sample: (event: NativeCanvasPoint) => void;
 }
 
+function rasterFromGesture(
+  gesture: ActiveAnnotationGesture,
+  scale: number,
+): RasterAnnotation {
+  const isFreehand = gesture.tool === "pen" || gesture.tool === "highlight";
+  const last = gesture.points[gesture.points.length - 1] ?? gesture.start;
+  return {
+    id: gesture.id,
+    kind: gesture.tool,
+    points: isFreehand
+      ? simplifyScenePoints(gesture.points, Math.max(0.75, scale * 0.35))
+      : [{ ...gesture.start }, { ...last }],
+    style: {
+      color: gesture.settings.strokeColor,
+      strokeWidth:
+        gesture.tool === "pen"
+          ? gesture.settings.penWidth * scale
+          : gesture.tool === "highlight"
+            ? gesture.settings.highlightWidth * scale
+            : gesture.settings.strokeWidth * scale,
+      fillOpacity: gesture.settings.fillOpacity,
+      arrowStyle: gesture.settings.arrowStyle,
+      arrowHeadSize: gesture.settings.arrowHeadSize,
+      opacity: gesture.tool === "highlight" ? gesture.settings.highlightOpacity : 1,
+      mosaicBlock: Math.max(4, Math.round(gesture.settings.mosaicBlock * scale)),
+    },
+  };
+}
+
 type ColorCopyFormat = ScreenshotConfig["color_copy_format"];
 
 interface ObjectSnapshot {
+  rasterAnnotations: RasterAnnotation[];
   textObjects: TextObject[];
   numberObjects: NumberObject[];
 }
 
 function cloneObjectSnapshot(snapshot: ObjectSnapshot): ObjectSnapshot {
   return {
+    rasterAnnotations: cloneRasterAnnotations(snapshot.rasterAnnotations),
     textObjects: snapshot.textObjects.map((item) => ({ ...item })),
     numberObjects: snapshot.numberObjects.map((item) => ({
       ...item,
@@ -170,35 +216,6 @@ function formatPickerColor(sample: PickerSample, format: ColorCopyFormat): strin
   }
   const [hue, saturation, value] = rgbToHsv(red, green, blue);
   return `hsv(${hue} ${saturation}% ${value}%)`;
-}
-
-function hexToRgba(hex: string, alpha: number): string {
-  const normalized = hex.replace("#", "");
-  const r = parseInt(normalized.slice(0, 2), 16);
-  const g = parseInt(normalized.slice(2, 4), 16);
-  const b = parseInt(normalized.slice(4, 6), 16);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
-function strokeHighlightPath(
-  ctx: CanvasRenderingContext2D,
-  points: Array<{ x: number; y: number }>,
-  color: string,
-  lineWidth: number,
-  opacity: number,
-): void {
-  if (points.length === 0) return;
-  ctx.save();
-  ctx.globalCompositeOperation = "source-over";
-  ctx.globalAlpha = 1;
-  ctx.strokeStyle = hexToRgba(color, opacity);
-  ctx.lineWidth = lineWidth;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.beginPath();
-  points.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
-  ctx.stroke();
-  ctx.restore();
 }
 
 function normalizeRect(x1: number, y1: number, x2: number, y2: number): Selection {
@@ -279,58 +296,11 @@ function selectionToImageCrop(
   return { sx, sy, sw, sh };
 }
 
-function applyMosaic(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  block = 10,
-): void {
-  const sx = Math.max(0, Math.floor(x));
-  const sy = Math.max(0, Math.floor(y));
-  const sw = Math.max(1, Math.floor(w));
-  const sh = Math.max(1, Math.floor(h));
-  if (sw < 2 || sh < 2) return;
-  const imageData = ctx.getImageData(sx, sy, sw, sh);
-  const { data, width, height } = imageData;
-  for (let by = 0; by < height; by += block) {
-    for (let bx = 0; bx < width; bx += block) {
-      let r = 0,
-        g = 0,
-        b = 0,
-        count = 0;
-      const bw = Math.min(block, width - bx);
-      const bh = Math.min(block, height - by);
-      for (let yy = 0; yy < bh; yy++) {
-        for (let xx = 0; xx < bw; xx++) {
-          const i = ((by + yy) * width + (bx + xx)) * 4;
-          r += data[i];
-          g += data[i + 1];
-          b += data[i + 2];
-          count++;
-        }
-      }
-      r = Math.round(r / count);
-      g = Math.round(g / count);
-      b = Math.round(b / count);
-      for (let yy = 0; yy < bh; yy++) {
-        for (let xx = 0; xx < bw; xx++) {
-          const i = ((by + yy) * width + (bx + xx)) * 4;
-          data[i] = r;
-          data[i + 1] = g;
-          data[i + 2] = b;
-        }
-      }
-    }
-  }
-  ctx.putImageData(imageData, sx, sy);
-}
-
 function ScreenshotOverlay(): React.JSX.Element {
   const { t } = useI18n();
   const bgRef = useRef<HTMLCanvasElement>(null);
   const shotRef = useRef<HTMLCanvasElement>(null);
+  const shotBaseRef = useRef<HTMLCanvasElement | null>(null);
   const shotViewportRef = useRef<HTMLDivElement>(null);
   const primaryToolbarRef = useRef<HTMLDivElement>(null);
   const secondaryToolbarRef = useRef<HTMLDivElement>(null);
@@ -340,6 +310,7 @@ function ScreenshotOverlay(): React.JSX.Element {
   const colorSampleCanvas = useRef<HTMLCanvasElement | null>(null);
   const pickerZoomRef = useRef<HTMLCanvasElement>(null);
   const origin = useRef({ x: 0, y: 0 });
+  const pendingWindowSelection = useRef<Selection | null>(null);
   const annotationGestureRef = useRef<ActiveAnnotationGesture | null>(null);
   const nativeInputGateRef = useRef(new NativeInputGate());
   const nativeCanvasHandlersRef = useRef<NativeCanvasHandlers | null>(null);
@@ -383,6 +354,16 @@ function ScreenshotOverlay(): React.JSX.Element {
     radius: number;
     changed: boolean;
   } | null>(null);
+  const rasterTransformRef = useRef<{
+    pointerId: number;
+    id: string;
+    mode: "move" | ResizeHandle;
+    startX: number;
+    startY: number;
+    origin: RasterAnnotation;
+    originBounds: SceneBounds;
+    changed: boolean;
+  } | null>(null);
   const regionDragRef = useRef<{
     handle: ResizeHandle | "move";
     startX: number;
@@ -390,15 +371,17 @@ function ScreenshotOverlay(): React.JSX.Element {
     origin: Selection;
     // Pixels captured when the drag began, so shrinking then re-growing the
     // region restores annotations instead of losing them.
-    baseCanvas: HTMLCanvasElement;
     baseSx: number;
     baseSy: number;
     baseTextObjects: TextObject[];
     baseNumberObjects: NumberObject[];
+    baseRasterAnnotations: RasterAnnotation[];
   } | null>(null);
 
   const [phase, setPhase] = useState<"loading" | "selecting" | "editing">("loading");
   const [dragging, setDragging] = useState(false);
+  const [windowCandidates, setWindowCandidates] = useState<WindowCandidate[]>([]);
+  const [hoveredWindow, setHoveredWindow] = useState<Selection | null>(null);
   const [busy, setBusy] = useState(false);
   const [shotReady, setShotReady] = useState(false);
   const [tool, setTool] = useState<AnnotTool>(null);
@@ -416,6 +399,9 @@ function ScreenshotOverlay(): React.JSX.Element {
   const [textDraft, setTextDraft] = useState("");
   const [textObjects, setTextObjects] = useState<TextObject[]>([]);
   const [numberObjects, setNumberObjects] = useState<NumberObject[]>([]);
+  const [rasterAnnotations, setRasterAnnotations] = useState<RasterAnnotation[]>([]);
+  const [rasterPreview, setRasterPreview] = useState<RasterAnnotation | null>(null);
+  const [selectedRasterId, setSelectedRasterId] = useState<string | null>(null);
   const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
   const [selectedNumberId, setSelectedNumberId] = useState<string | null>(null);
   const [adjustingRegion, setAdjustingRegion] = useState(false);
@@ -424,6 +410,7 @@ function ScreenshotOverlay(): React.JSX.Element {
   const [pickerCopied, setPickerCopied] = useState(false);
   const [pickerFormat, setPickerFormat] = useState<ColorCopyFormat>("hex");
   const [qrContents, setQrContents] = useState<string[] | null>(null);
+  const [activeOcrBlock, setActiveOcrBlock] = useState<OcrTextBlock | null>(null);
   const [arrowStyle, setArrowStyle] = useState<ArrowStyle>("filled");
   const [viewportSize, setViewportSize] = useState<ToolbarSize>(() => ({
     width: window.innerWidth,
@@ -433,8 +420,12 @@ function ScreenshotOverlay(): React.JSX.Element {
   const [secondaryToolbarSize, setSecondaryToolbarSize] = useState<ToolbarSize>(EMPTY_TOOLBAR_SIZE);
   const [compactToolbar, setCompactToolbar] = useState(() => window.innerWidth < 680);
   const [toolbarPopupOpen, setToolbarPopupOpen] = useState(false);
-  const objectStateRef = useRef<ObjectSnapshot>({ textObjects: [], numberObjects: [] });
-  objectStateRef.current = { textObjects, numberObjects };
+  const objectStateRef = useRef<ObjectSnapshot>({
+    rasterAnnotations: [],
+    textObjects: [],
+    numberObjects: [],
+  });
+  objectStateRef.current = { rasterAnnotations, textObjects, numberObjects };
 
   const selection = useStore((s) => s.selection);
   const setSelection = useStore((s) => s.setSelection);
@@ -442,14 +433,17 @@ function ScreenshotOverlay(): React.JSX.Element {
     const restored = cloneObjectSnapshot(snapshot);
     setTextObjects(restored.textObjects);
     setNumberObjects(restored.numberObjects);
+    setRasterAnnotations(restored.rasterAnnotations);
+    setRasterPreview(null);
   }, []);
   const {
     canUndo,
-    pushRaster,
+    canRedo,
     pushObjects,
     undo: undoHistory,
+    redo: redoHistory,
     reset: resetHistory,
-  } = useEditorHistory(shotRef, restoreObjectSnapshot);
+  } = useEditorHistory(restoreObjectSnapshot);
 
   const captureObjectSnapshot = useCallback(
     () => cloneObjectSnapshot(objectStateRef.current),
@@ -473,25 +467,40 @@ function ScreenshotOverlay(): React.JSX.Element {
   const undo = useCallback(() => {
     cancelObjectMutation();
     const gesture = annotationGestureRef.current;
-    if (gesture) shotRef.current?.getContext("2d")?.putImageData(gesture.baseline, 0, 0);
+    if (gesture) setRasterAnnotations(cloneRasterAnnotations(gesture.baseline));
     annotationGestureRef.current = null;
+    setRasterPreview(null);
     nativeInputGateRef.current.reset();
     setTextEditor(null);
     setTextDraft("");
     setSelectedTextId(null);
     setSelectedNumberId(null);
-    undoHistory();
-  }, [cancelObjectMutation, undoHistory]);
+    setSelectedRasterId(null);
+    undoHistory(captureObjectSnapshot());
+  }, [cancelObjectMutation, captureObjectSnapshot, undoHistory]);
+  const redo = useCallback(() => {
+    cancelObjectMutation();
+    annotationGestureRef.current = null;
+    setRasterPreview(null);
+    nativeInputGateRef.current.reset();
+    setTextEditor(null);
+    setTextDraft("");
+    setSelectedTextId(null);
+    setSelectedNumberId(null);
+    setSelectedRasterId(null);
+    redoHistory(captureObjectSnapshot());
+  }, [cancelObjectMutation, captureObjectSnapshot, redoHistory]);
 
   useEffect(() => {
     setQrContents(null);
+    setActiveOcrBlock(null);
   }, [selection?.x, selection?.y, selection?.width, selection?.height]);
 
   useEffect(() => {
     const gesture = annotationGestureRef.current;
     if (gesture) {
-      shotRef.current?.getContext("2d")?.putImageData(gesture.baseline, 0, 0);
       annotationGestureRef.current = null;
+      setRasterPreview(null);
     }
     nativeInputGateRef.current.reset();
   }, [tool, selection?.x, selection?.y, selection?.width, selection?.height]);
@@ -509,7 +518,7 @@ function ScreenshotOverlay(): React.JSX.Element {
   const reportSecondaryPopup = useCallback(
     (open: boolean) => {
       reportToolbarPopup("secondary", open);
-      if (open && (selectedTextId || selectedNumberId)) {
+      if (open && (selectedTextId || selectedNumberId || selectedRasterId)) {
         objectStyleChangedRef.current = false;
         beginObjectMutation();
       } else if (!open && objectMutationRef.current.active) {
@@ -522,6 +531,7 @@ function ScreenshotOverlay(): React.JSX.Element {
       commitObjectMutation,
       reportToolbarPopup,
       selectedNumberId,
+      selectedRasterId,
       selectedTextId,
     ],
   );
@@ -674,7 +684,14 @@ function ScreenshotOverlay(): React.JSX.Element {
     const ctx = exportCanvas.getContext("2d");
     if (!ctx) throw new Error("Canvas unavailable");
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(canvas, 0, 0);
+    const base = shotBaseRef.current;
+    if (!base) throw new Error("Screenshot base is unavailable");
+    renderRasterScene(
+      ctx,
+      base,
+      rasterAnnotations,
+      canvas.width / Math.max(1, selection?.width ?? canvas.width),
+    );
     for (const obj of textObjects) {
       const fontPx = Math.round(obj.fontSize * obj.scale * obj.transformScale);
       const width = Math.max(1, obj.width * obj.transformScale);
@@ -723,7 +740,7 @@ function ScreenshotOverlay(): React.JSX.Element {
       );
     });
     return new Uint8Array(await blob.arrayBuffer());
-  }, [textObjects, numberObjects, selection?.width]);
+  }, [rasterAnnotations, textObjects, numberObjects, selection?.width]);
 
   const exportOcrPng = useCallback(async (): Promise<Uint8Array> => {
     const canvas = shotRef.current;
@@ -789,8 +806,9 @@ function ScreenshotOverlay(): React.JSX.Element {
     // reaches the native pin/save/copy command.
     pendingAction.current += 1;
     const gesture = annotationGestureRef.current;
-    if (gesture) shotRef.current?.getContext("2d")?.putImageData(gesture.baseline, 0, 0);
+    if (gesture) setRasterAnnotations(cloneRasterAnnotations(gesture.baseline));
     annotationGestureRef.current = null;
+    setRasterPreview(null);
     nativeInputGateRef.current.reset();
     cancelObjectMutation();
     dismissOcr();
@@ -925,12 +943,17 @@ function ScreenshotOverlay(): React.JSX.Element {
         if (cancelled || current !== revision) return;
         setPhase("loading");
         setSelection(null);
+        setWindowCandidates(shot.windowCandidates ?? []);
+        setHoveredWindow(null);
         setTool(null);
         setPickerSample(null);
         setShotReady(false);
         setBusy(false);
         setTextObjects([]);
         setNumberObjects([]);
+        setRasterAnnotations([]);
+        setRasterPreview(null);
+        setSelectedRasterId(null);
         cancelObjectMutation();
         setTextEditor(null);
         setTextDraft("");
@@ -989,6 +1012,7 @@ function ScreenshotOverlay(): React.JSX.Element {
       }
 
       const clamped = clampSelection(rect);
+      lastConfirmedSelection = { ...clamped };
       imageScaleRef.current = syncImageScale(image);
 
       setPhase("editing");
@@ -996,12 +1020,16 @@ function ScreenshotOverlay(): React.JSX.Element {
       setShotReady(false);
       setTextObjects([]);
       setNumberObjects([]);
+      setRasterAnnotations([]);
+      setRasterPreview(null);
+      setSelectedRasterId(null);
       cancelObjectMutation();
       setSelectedTextId(null);
       setSelectedNumberId(null);
       setTextEditor(null);
       setTextDraft("");
       setSelection(clamped);
+      setHoveredWindow(null);
       paintBackground(clamped, clamped.height, 0, true);
 
       // Crop synchronously from the already-frozen image — unlock tools immediately after
@@ -1017,8 +1045,16 @@ function ScreenshotOverlay(): React.JSX.Element {
         canvas.height = sh;
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
+        const base = document.createElement("canvas");
+        base.width = sw;
+        base.height = sh;
+        const baseContext = base.getContext("2d");
+        if (!baseContext) return;
+        baseContext.imageSmoothingEnabled = false;
+        baseContext.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
+        shotBaseRef.current = base;
         ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
+        ctx.drawImage(base, 0, 0);
         resetHistory();
         setShotReady(true);
         setError(null);
@@ -1027,8 +1063,23 @@ function ScreenshotOverlay(): React.JSX.Element {
     [paintBackground, setSelection],
   );
 
-  // Re-derives the crop for a new region: fills it from the frozen screenshot,
-  // then stamps the drag's starting pixels back on top so annotations survive.
+  useLayoutEffect(() => {
+    if (phase !== "editing") return;
+    const canvas = shotRef.current;
+    const base = shotBaseRef.current;
+    const context = canvas?.getContext("2d");
+    if (!canvas || !base || !context) return;
+    const scale = canvas.width / Math.max(1, selection?.width ?? canvas.width);
+    renderRasterScene(
+      context,
+      base,
+      rasterPreview ? [...rasterAnnotations, rasterPreview] : rasterAnnotations,
+      scale,
+    );
+  }, [phase, rasterAnnotations, rasterPreview, selection?.width]);
+
+  // Re-derives the crop for a new region from the immutable screenshot and
+  // translates retained annotations into the new crop coordinate system.
   const recropSelection = useCallback(
     (next: Selection) => {
       const image = fullImageRef.current;
@@ -1041,12 +1092,23 @@ function ScreenshotOverlay(): React.JSX.Element {
       const { sx, sy, sw, sh } = selectionToImageCrop(next, image);
       canvas.width = sw;
       canvas.height = sh;
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
-
       const dx = drag.baseSx - sx;
       const dy = drag.baseSy - sy;
-      ctx.drawImage(drag.baseCanvas, dx, dy);
+      const base = document.createElement("canvas");
+      base.width = sw;
+      base.height = sh;
+      const baseContext = base.getContext("2d");
+      if (!baseContext) return;
+      baseContext.imageSmoothingEnabled = false;
+      baseContext.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
+      shotBaseRef.current = base;
+      ctx.imageSmoothingEnabled = false;
+      const translatedRaster = drag.baseRasterAnnotations.map((annotation) => ({
+        ...annotation,
+        points: annotation.points.map((point) => ({ x: point.x + dx, y: point.y + dy })),
+      }));
+      setRasterAnnotations(translatedRaster);
+      renderRasterScene(ctx, base, translatedRaster, sw / Math.max(1, next.width));
 
       setTextObjects(
         drag.baseTextObjects.map((item) => ({
@@ -1069,30 +1131,26 @@ function ScreenshotOverlay(): React.JSX.Element {
       if (!image || !canvas || !selection) return;
       const { sx, sy } = selectionToImageCrop(selection, image);
 
-      const baseCanvas = document.createElement("canvas");
-      baseCanvas.width = canvas.width;
-      baseCanvas.height = canvas.height;
-      baseCanvas.getContext("2d")?.drawImage(canvas, 0, 0);
-
       regionDragRef.current = {
         handle,
         startX: event.clientX,
         startY: event.clientY,
         origin: selection,
-        baseCanvas,
         baseSx: sx,
         baseSy: sy,
         baseTextObjects: textObjects,
         baseNumberObjects: numberObjects,
+        baseRasterAnnotations: cloneRasterAnnotations(rasterAnnotations),
       };
       // The raster changes size, so previous ImageData snapshots no longer fit.
       resetHistory();
       cancelObjectMutation();
       setSelectedTextId(null);
       setSelectedNumberId(null);
+      setSelectedRasterId(null);
       setAdjustingRegion(true);
     },
-    [selection, textObjects, numberObjects, cancelObjectMutation],
+    [selection, textObjects, numberObjects, rasterAnnotations, cancelObjectMutation],
   );
 
   useOverlayKeyboard({
@@ -1101,6 +1159,7 @@ function ScreenshotOverlay(): React.JSX.Element {
     phase,
     hasSelectedText: Boolean(selectedTextId),
     hasSelectedNumber: Boolean(selectedNumberId),
+    hasSelectedRaster: Boolean(selectedRasterId),
     shotReady,
     busy,
     copyPickerHex: () => void copyPickerHex(),
@@ -1111,9 +1170,10 @@ function ScreenshotOverlay(): React.JSX.Element {
     clearSelection: () => {
       setSelectedTextId(null);
       setSelectedNumberId(null);
+      setSelectedRasterId(null);
     },
     deleteSelection: () => {
-      if (selectedTextId || selectedNumberId) pushCurrentObjects();
+      if (selectedTextId || selectedNumberId || selectedRasterId) pushCurrentObjects();
       if (selectedTextId) {
         setTextObjects((previous) => previous.filter((item) => item.id !== selectedTextId));
         setSelectedTextId(null);
@@ -1122,9 +1182,16 @@ function ScreenshotOverlay(): React.JSX.Element {
         setNumberObjects((previous) => previous.filter((item) => item.id !== selectedNumberId));
         setSelectedNumberId(null);
       }
+      if (selectedRasterId) {
+        setRasterAnnotations((previous) =>
+          previous.filter((item) => item.id !== selectedRasterId),
+        );
+        setSelectedRasterId(null);
+      }
     },
     cancel: cancelOverlay,
     undo,
+    redo,
     confirm: () => {
       void runCommittedImageAction(window.api.copyImage, "复制截图失败");
     },
@@ -1144,6 +1211,38 @@ function ScreenshotOverlay(): React.JSX.Element {
           regionDrag.handle === "move"
             ? moveRect(regionDrag.origin, dx, dy)
             : resizeRect(regionDrag.origin, regionDrag.handle, dx, dy),
+        );
+        return;
+      }
+
+      const rasterTransform = rasterTransformRef.current;
+      if (rasterTransform && rasterTransform.pointerId === event.pointerId) {
+        const dx = (event.clientX - rasterTransform.startX) * scale;
+        const dy = (event.clientY - rasterTransform.startY) * scale;
+        const next =
+          rasterTransform.mode === "move"
+            ? translateAnnotation(
+                rasterTransform.origin,
+                dx,
+                dy,
+                canvas.width,
+                canvas.height,
+              )
+            : resizeAnnotation(
+                rasterTransform.origin,
+                resizeRect(
+                  rasterTransform.originBounds,
+                  rasterTransform.mode,
+                  dx,
+                  dy,
+                  canvas.width,
+                  canvas.height,
+                ),
+              );
+        rasterTransform.changed =
+          JSON.stringify(next.points) !== JSON.stringify(rasterTransform.origin.points);
+        setRasterAnnotations((previous) =>
+          previous.map((item) => (item.id === rasterTransform.id ? next : item)),
         );
         return;
       }
@@ -1232,6 +1331,11 @@ function ScreenshotOverlay(): React.JSX.Element {
       }
     };
     const onUp = (event: PointerEvent): void => {
+      if (rasterTransformRef.current?.pointerId === event.pointerId) {
+        const changed = rasterTransformRef.current.changed;
+        rasterTransformRef.current = null;
+        commitObjectMutation(changed);
+      }
       if (textDragRef.current?.pointerId === event.pointerId) {
         const changed = textDragRef.current.changed;
         textDragRef.current = null;
@@ -1269,25 +1373,84 @@ function ScreenshotOverlay(): React.JSX.Element {
       setDragging(true);
       const point = clampPoint(event.clientX, event.clientY);
       origin.current = point;
-      setSelection({ x: point.x, y: point.y, width: 0, height: 0 });
+      pendingWindowSelection.current = hoveredWindow;
+      setSelection(hoveredWindow ?? { x: point.x, y: point.y, width: 0, height: 0 });
     },
-    [phase, busy, setSelection],
+    [phase, busy, hoveredWindow, setSelection],
   );
+
+  useEffect(() => {
+    const repeatLastSelection = (event: KeyboardEvent): void => {
+      if (
+        phase !== "selecting" ||
+        busy ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.metaKey ||
+        event.key.toLowerCase() !== "r" ||
+        !lastConfirmedSelection
+      )
+        return;
+      event.preventDefault();
+      enterEditMode(clampSelection(lastConfirmedSelection));
+    };
+    window.addEventListener("keydown", repeatLastSelection);
+    return () => window.removeEventListener("keydown", repeatLastSelection);
+  }, [busy, enterEditMode, phase]);
+
+  useEffect(() => {
+    const adjustWindowSelection = (event: KeyboardEvent): void => {
+      if (phase !== "selecting" || busy || !hoveredWindow) return;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        enterEditMode(clampSelection(hoveredWindow));
+        return;
+      }
+      const offsets: Record<string, [number, number]> = {
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+        ArrowUp: [0, -1],
+        ArrowDown: [0, 1],
+      };
+      const offset = offsets[event.key];
+      if (!offset) return;
+      event.preventDefault();
+      setHoveredWindow((current) =>
+        current ? moveRect(current, offset[0], offset[1]) : current,
+      );
+    };
+    window.addEventListener("keydown", adjustWindowSelection);
+    return () => window.removeEventListener("keydown", adjustWindowSelection);
+  }, [busy, enterEditMode, hoveredWindow, phase]);
 
   const onBgMouseMove = useCallback(
     (event: React.MouseEvent<HTMLCanvasElement>) => {
-      if (!dragging || phase !== "selecting") return;
       const point = clampPoint(event.clientX, event.clientY);
+      if (!dragging) {
+        if (phase !== "selecting") return;
+        const candidate = findWindowCandidate(windowCandidates, point.x, point.y);
+        setHoveredWindow(
+          candidate
+            ? { x: candidate.x, y: candidate.y, width: candidate.width, height: candidate.height }
+            : null,
+        );
+        return;
+      }
+      if (phase !== "selecting") return;
+      const distance = Math.hypot(point.x - origin.current.x, point.y - origin.current.y);
+      if (distance <= 3 && pendingWindowSelection.current) return;
+      pendingWindowSelection.current = null;
       setSelection(
         clampSelection(normalizeRect(origin.current.x, origin.current.y, point.x, point.y)),
       );
     },
-    [dragging, phase, setSelection],
+    [dragging, phase, setSelection, windowCandidates],
   );
 
   const onBgMouseUp = useCallback(() => {
     if (!dragging || phase !== "selecting") return;
     setDragging(false);
+    pendingWindowSelection.current = null;
     const current = useStore.getState().selection;
     if (current && current.width >= MIN_SIZE && current.height >= MIN_SIZE) {
       enterEditMode(clampSelection(current));
@@ -1438,17 +1601,14 @@ function ScreenshotOverlay(): React.JSX.Element {
 
       if (!["rect", "ellipse", "arrow", "pen", "highlight", "mosaic"].includes(tool)) return false;
       event.preventDefault();
-      let baseline: ImageData;
-      try {
-        baseline = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      } catch (cause) {
-        setError(
-          cause instanceof Error ? `无法读取截图画布：${cause.message}` : "无法读取截图画布",
-        );
-        return false;
-      }
       const gesture: ActiveAnnotationGesture = {
-        ...createAnnotationGesture(owner.id, tool as RasterTool, point, baseline),
+        ...createAnnotationGesture(
+          owner.id,
+          tool as RasterTool,
+          point,
+          cloneRasterAnnotations(objectStateRef.current.rasterAnnotations),
+        ),
+        id: `annotation-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         settings: {
           strokeColor,
           strokeWidth,
@@ -1462,21 +1622,7 @@ function ScreenshotOverlay(): React.JSX.Element {
         },
       };
       annotationGestureRef.current = gesture;
-
-      if (gesture.tool === "pen") {
-        ctx.strokeStyle = gesture.settings.strokeColor;
-        ctx.lineWidth = gesture.settings.penWidth * scale;
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
-        ctx.globalAlpha = 1;
-        ctx.beginPath();
-        ctx.moveTo(point.x, point.y);
-        ctx.lineTo(point.x + 0.01, point.y + 0.01);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(point.x, point.y);
-        return true;
-      }
+      if (gesture.tool === "pen") setRasterPreview(rasterFromGesture(gesture, scale));
       return true;
     },
     [
@@ -1512,8 +1658,7 @@ function ScreenshotOverlay(): React.JSX.Element {
       const gesture = annotationGestureRef.current;
       if (!shouldHandlePointer(gesture, owner.id) || phase !== "editing") return;
       const canvas = shotRef.current;
-      const ctx = canvas?.getContext("2d");
-      if (!canvas || !ctx) {
+      if (!canvas) {
         annotationGestureRef.current = null;
         setError("截图画布在绘制过程中不可用，请重新截图");
         return;
@@ -1523,67 +1668,7 @@ function ScreenshotOverlay(): React.JSX.Element {
       appendGesturePoint(gesture, point);
       if (!gesture.changed) return;
 
-      if (gesture.tool === "pen") {
-        ctx.lineTo(point.x, point.y);
-        ctx.stroke();
-        return;
-      }
-
-      ctx.putImageData(gesture.baseline, 0, 0);
-      if (gesture.tool === "highlight") {
-        strokeHighlightPath(
-          ctx,
-          gesture.points,
-          gesture.settings.strokeColor,
-          gesture.settings.highlightWidth * scale,
-          gesture.settings.highlightOpacity,
-        );
-        return;
-      }
-
-      ctx.globalAlpha = 1;
-      ctx.strokeStyle = gesture.settings.strokeColor;
-      ctx.fillStyle = gesture.settings.strokeColor;
-      ctx.lineWidth = gesture.settings.strokeWidth * scale;
-      const { x: x1, y: y1 } = gesture.start;
-      const w = point.x - x1;
-      const h = point.y - y1;
-
-      if (gesture.tool === "rect") {
-        if (gesture.settings.fillOpacity) {
-          ctx.fillStyle = hexToRgba(gesture.settings.strokeColor, gesture.settings.fillOpacity);
-          ctx.fillRect(x1, y1, w, h);
-          ctx.fillStyle = gesture.settings.strokeColor;
-        }
-        ctx.strokeRect(x1, y1, w, h);
-      } else if (gesture.tool === "ellipse") {
-        ctx.beginPath();
-        ctx.ellipse(x1 + w / 2, y1 + h / 2, Math.abs(w / 2), Math.abs(h / 2), 0, 0, Math.PI * 2);
-        if (gesture.settings.fillOpacity) {
-          ctx.fillStyle = hexToRgba(gesture.settings.strokeColor, gesture.settings.fillOpacity);
-          ctx.fill();
-          ctx.fillStyle = gesture.settings.strokeColor;
-        }
-        ctx.stroke();
-      } else if (gesture.tool === "arrow")
-        drawArrow(
-          ctx,
-          { x: x1, y: y1 },
-          point,
-          gesture.settings.arrowStyle,
-          gesture.settings.arrowHeadSize,
-          scale,
-        );
-      else if (gesture.tool === "mosaic") {
-        applyMosaic(
-          ctx,
-          Math.min(x1, point.x),
-          Math.min(y1, point.y),
-          Math.abs(w),
-          Math.abs(h),
-          Math.max(4, Math.round(gesture.settings.mosaicBlock * scale)),
-        );
-      }
+      setRasterPreview(rasterFromGesture(gesture, scale));
     },
     [phase, selection],
   );
@@ -1594,21 +1679,23 @@ function ScreenshotOverlay(): React.JSX.Element {
       if (!shouldHandlePointer(gesture, owner.id)) return;
       annotationGestureRef.current = null;
       const canvas = shotRef.current;
-      const ctx = canvas?.getContext("2d");
-      if (ctx) ctx.globalAlpha = 1;
-      if (resolveAnnotationGesture(gesture, false).commit) pushRaster(gesture.baseline);
+      const scale = canvas ? canvas.width / Math.max(1, selection?.width ?? canvas.width) : 1;
+      const preview = rasterFromGesture(gesture, scale);
+      setRasterPreview(null);
+      if (resolveAnnotationGesture(gesture, false).commit && preview) {
+        pushCurrentObjects();
+        setRasterAnnotations([...gesture.baseline, preview]);
+        setSelectedRasterId(preview.id);
+      }
     },
-    [pushRaster],
+    [pushCurrentObjects, selection?.width],
   );
 
   const cancelNativeCanvasInput = useCallback((owner: NativeInputOwner) => {
     const gesture = annotationGestureRef.current;
     if (!shouldHandlePointer(gesture, owner.id)) return;
-    if (resolveAnnotationGesture(gesture, true).restore) {
-      const context = shotRef.current?.getContext("2d");
-      context?.putImageData(gesture.baseline, 0, 0);
-      if (context) context.globalAlpha = 1;
-    }
+    resolveAnnotationGesture(gesture, true);
+    setRasterPreview(null);
     annotationGestureRef.current = null;
   }, []);
 
@@ -1744,6 +1831,35 @@ function ScreenshotOverlay(): React.JSX.Element {
     const selectedNumber = objectStateRef.current.numberObjects.find(
       (item) => item.id === selectedNumberId,
     );
+    const selectedRaster = objectStateRef.current.rasterAnnotations.find(
+      (item) => item.id === selectedRasterId,
+    );
+    const canvas = shotRef.current;
+    const annotationScale = canvas
+      ? canvas.width / Math.max(1, selection?.width ?? canvas.width)
+      : 1;
+    const rasterStylePatch: Partial<RasterAnnotation["style"]> = {};
+    if (changes.strokeColor !== undefined) rasterStylePatch.color = changes.strokeColor;
+    if (changes.fillOpacity !== undefined) rasterStylePatch.fillOpacity = changes.fillOpacity;
+    if (changes.arrowStyle !== undefined) rasterStylePatch.arrowStyle = changes.arrowStyle;
+    if (changes.arrowHeadSize !== undefined)
+      rasterStylePatch.arrowHeadSize = changes.arrowHeadSize;
+    if (changes.strokeWidth !== undefined && selectedRaster?.kind !== "pen" && selectedRaster?.kind !== "highlight")
+      rasterStylePatch.strokeWidth = changes.strokeWidth * annotationScale;
+    if (changes.penWidth !== undefined && selectedRaster?.kind === "pen")
+      rasterStylePatch.strokeWidth = changes.penWidth * annotationScale;
+    if (changes.highlightWidth !== undefined && selectedRaster?.kind === "highlight")
+      rasterStylePatch.strokeWidth = changes.highlightWidth * annotationScale;
+    if (changes.highlightOpacity !== undefined && selectedRaster?.kind === "highlight")
+      rasterStylePatch.opacity = changes.highlightOpacity;
+    if (changes.mosaicBlock !== undefined && selectedRaster?.kind === "mosaic")
+      rasterStylePatch.mosaicBlock = changes.mosaicBlock * annotationScale;
+    const changesRaster = Boolean(
+      selectedRaster &&
+        (Object.keys(rasterStylePatch) as Array<keyof RasterAnnotation["style"]>).some(
+          (key) => rasterStylePatch[key] !== selectedRaster.style[key],
+        ),
+    );
     const changesSelectedObject = Boolean(
       (changes.textStyle !== undefined &&
         selectedText &&
@@ -1752,7 +1868,8 @@ function ScreenshotOverlay(): React.JSX.Element {
         )) ||
         (changes.numberStyle !== undefined &&
           selectedNumber &&
-          JSON.stringify(changes.numberStyle) !== JSON.stringify(selectedNumber.style)),
+          JSON.stringify(changes.numberStyle) !== JSON.stringify(selectedNumber.style)) ||
+        changesRaster,
     );
     const immediateObjectMutation = changesSelectedObject && !objectMutationRef.current.active;
     if (immediateObjectMutation) beginObjectMutation();
@@ -1765,11 +1882,20 @@ function ScreenshotOverlay(): React.JSX.Element {
     if (changes.highlightWidth !== undefined) setHighlightWidth(changes.highlightWidth);
     if (changes.highlightOpacity !== undefined) setHighlightOpacity(changes.highlightOpacity);
     if (changes.mosaicBlock !== undefined) setMosaicBlock(changes.mosaicBlock);
+    if (selectedRaster && changesRaster) {
+      objectStyleChangedRef.current = true;
+      setRasterAnnotations((previous) =>
+        previous.map((item) =>
+          item.id === selectedRaster.id
+            ? { ...item, style: { ...item.style, ...rasterStylePatch } }
+            : item,
+        ),
+      );
+    }
     if (changes.numberStyle !== undefined) {
       setNumberStyle(changes.numberStyle);
       if (selectedNumberId) {
         if (changesSelectedObject) objectStyleChangedRef.current = true;
-        const canvas = shotRef.current;
         const scale = canvas ? canvas.width / Math.max(1, selection?.width ?? canvas.width) : 1;
         setNumberObjects((previous) =>
           previous.map((item) =>
@@ -1878,6 +2004,85 @@ function ScreenshotOverlay(): React.JSX.Element {
               height: displayHeight,
             }}
           />
+          {rasterAnnotations.map((annotation) => {
+            const canvas = shotRef.current;
+            const scaleX = canvas ? canvas.width / Math.max(1, selection.width) : 1;
+            const scaleY = canvas ? canvas.height / Math.max(1, displayHeight) : scaleX;
+            const bounds = annotationBounds(annotation);
+            const interactive = tool === annotation.kind;
+            const selected = interactive && selectedRasterId === annotation.id;
+            return (
+              <div
+                key={annotation.id}
+                className={`raster-object${interactive ? " is-interactive" : ""}${selected ? " is-selected" : ""}`}
+                style={{
+                  left: bounds.x / scaleX,
+                  top: bounds.y / scaleY,
+                  width: bounds.width / scaleX,
+                  height: bounds.height / scaleY,
+                  pointerEvents: interactive ? "auto" : "none",
+                }}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  setSelectedRasterId(annotation.id);
+                  setSelectedTextId(null);
+                  setSelectedNumberId(null);
+                  setStrokeColor(annotation.style.color);
+                  setStrokeWidth(Math.max(1, Math.round(annotation.style.strokeWidth / scaleX)));
+                  setFillOpacity(annotation.style.fillOpacity);
+                  setArrowStyle(annotation.style.arrowStyle);
+                  setArrowHeadSize(annotation.style.arrowHeadSize);
+                  if (annotation.kind === "pen")
+                    setPenWidth(Math.max(1, Math.round(annotation.style.strokeWidth / scaleX)));
+                  if (annotation.kind === "highlight") {
+                    setHighlightWidth(
+                      Math.max(1, Math.round(annotation.style.strokeWidth / scaleX)),
+                    );
+                    setHighlightOpacity(annotation.style.opacity);
+                  }
+                  if (annotation.kind === "mosaic")
+                    setMosaicBlock(Math.max(2, Math.round(annotation.style.mosaicBlock / scaleX)));
+                  rasterTransformRef.current = {
+                    pointerId: event.pointerId,
+                    id: annotation.id,
+                    mode: "move",
+                    startX: event.clientX,
+                    startY: event.clientY,
+                    origin: cloneRasterAnnotations([annotation])[0],
+                    originBounds: bounds,
+                    changed: false,
+                  };
+                  beginObjectMutation();
+                }}
+              >
+                {selected &&
+                  (["nw", "ne", "sw", "se"] as ResizeHandle[]).map((handle) => (
+                    <span
+                      key={handle}
+                      className={`raster-object__resize raster-object__resize--${handle}`}
+                      onPointerDown={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                        rasterTransformRef.current = {
+                          pointerId: event.pointerId,
+                          id: annotation.id,
+                          mode: handle,
+                          startX: event.clientX,
+                          startY: event.clientY,
+                          origin: cloneRasterAnnotations([annotation])[0],
+                          originBounds: bounds,
+                          changed: false,
+                        };
+                        beginObjectMutation();
+                      }}
+                    />
+                  ))}
+              </div>
+            );
+          })}
           {textObjects.map((obj) => {
             if (textEditor?.id === obj.id) return null;
             const canvas = shotRef.current;
@@ -2133,6 +2338,18 @@ function ScreenshotOverlay(): React.JSX.Element {
         <div className="overlay-hint-bar">{t.hints.dragToSelect}</div>
       )}
 
+      {phase === "selecting" && !dragging && hoveredWindow && (
+        <div
+          className="window-candidate-highlight"
+          style={{
+            left: hoveredWindow.x,
+            top: hoveredWindow.y,
+            width: hoveredWindow.width,
+            height: hoveredWindow.height,
+          }}
+        />
+      )}
+
       {error && <div className="overlay-hint-bar overlay-hint-bar--error">{error}</div>}
 
       {phase === "editing" && (ocrRunning || ocrPanel.result || ocrPanel.error) && (
@@ -2168,9 +2385,37 @@ function ScreenshotOverlay(): React.JSX.Element {
                 ocrPanel.pending ? t.ocr.recognizing : (ocrPanel.error ?? t.ocr.noTextFound)
               }
             />
+            {ocrPanel.result?.blocks.length ? (
+              <div className="ocr-result-panel__blocks">
+                {ocrPanel.result.blocks.map((block, index) => (
+                  <button
+                    type="button"
+                    key={`${block.x}-${block.y}-${index}`}
+                    onMouseEnter={() => setActiveOcrBlock(block)}
+                    onMouseLeave={() => setActiveOcrBlock(null)}
+                    onClick={() => void window.api.copyText(block.text)}
+                  >
+                    <span>{block.text}</span>
+                    <small>{Math.round(block.confidence * 100)}%</small>
+                  </button>
+                ))}
+              </div>
+            ) : null}
             {ocrPanel.error && <p className="ocr-result-panel__hint">{ocrPanel.error}</p>}
           </section>
         </div>
+      )}
+
+      {phase === "editing" && selection && activeOcrBlock && (
+        <div
+          className="ocr-block-highlight"
+          style={{
+            left: selection.x + activeOcrBlock.x / imageScaleRef.current.scaleX,
+            top: selection.y + activeOcrBlock.y / imageScaleRef.current.scaleY,
+            width: activeOcrBlock.width / imageScaleRef.current.scaleX,
+            height: activeOcrBlock.height / imageScaleRef.current.scaleY,
+          }}
+        />
       )}
 
       {phase === "editing" && qrContents && (
@@ -2234,6 +2479,7 @@ function ScreenshotOverlay(): React.JSX.Element {
             ref={primaryToolbarRef}
             tool={tool}
             canUndo={canUndo}
+            canRedo={canRedo}
             compact={compactToolbar}
             toolsDisabled={toolsLocked}
             confirmDisabled={toolsLocked}
@@ -2256,11 +2502,16 @@ function ScreenshotOverlay(): React.JSX.Element {
               setToolbarPopupOpen(false);
               setSecondaryToolbarSize(EMPTY_TOOLBAR_SIZE);
               setTool(next);
+              const selectedRaster = objectStateRef.current.rasterAnnotations.find(
+                (item) => item.id === selectedRasterId,
+              );
+              if (!selectedRaster || next !== selectedRaster.kind) setSelectedRasterId(null);
               if (next !== "text") setSelectedTextId(null);
               if (next !== "picker") setPickerSample(null);
               if (next !== "number") setSelectedNumberId(null);
             }}
             onUndo={undo}
+            onRedo={redo}
             onSave={() => {
               void runCommittedImageAction(window.api.saveImage, "保存截图失败");
             }}

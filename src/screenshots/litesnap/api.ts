@@ -10,11 +10,31 @@ export interface FullScreenshot {
   imageWidth: number;
   imageHeight: number;
   overlayLabel: string;
+  windowCandidates: WindowCandidate[];
+}
+
+export interface WindowCandidate {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  zIndex: number;
 }
 
 export interface OcrResult {
   text: string;
   engine: "onnx";
+  blocks: OcrTextBlock[];
+}
+
+export interface OcrTextBlock {
+  text: string;
+  confidence: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export interface QrDecodeResult {

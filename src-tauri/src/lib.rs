@@ -319,13 +319,6 @@ pub struct SupportedKey {
     pub group: &'static str,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct EngineStatus {
-    pub running: bool,
-    pub enabled: bool,
-    pub last_error: Option<String>,
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryScheme {
@@ -367,6 +360,7 @@ impl<'de> Deserialize<'de> for MemoryScheme {
 pub struct WidgetConfig {
     pub memory_scheme: MemoryScheme,
     pub refresh_interval_secs: u8,
+    pub network_interface: Option<String>,
 }
 
 impl Default for WidgetConfig {
@@ -374,6 +368,7 @@ impl Default for WidgetConfig {
         Self {
             memory_scheme: MemoryScheme::Capsule,
             refresh_interval_secs: 1,
+            network_interface: None,
         }
     }
 }
@@ -449,25 +444,51 @@ fn commit_scancode_change(
     )
 }
 
-fn commit_shortcut_change_with<R, S>(
-    previous_shortcut: &str,
-    next_shortcut: &str,
+fn commit_shortcut_change_with<RC, RP, S>(
+    previous_shortcuts: (&str, &str),
+    next_shortcuts: (&str, &str),
     next_config: &config::AppConfig,
-    mut register: R,
+    mut register_capture: RC,
+    mut register_pin: RP,
     save: S,
 ) -> Result<(), String>
 where
-    R: FnMut(&str) -> Result<(), String>,
+    RC: FnMut(&str) -> Result<(), String>,
+    RP: FnMut(&str) -> Result<(), String>,
     S: FnOnce(&config::AppConfig) -> Result<(), String>,
 {
-    register(next_shortcut)?;
+    let capture_changed = previous_shortcuts.0 != next_shortcuts.0;
+    let pin_changed = previous_shortcuts.1 != next_shortcuts.1;
+
+    if capture_changed {
+        register_capture(next_shortcuts.0)?;
+    }
+    if pin_changed {
+        if let Err(error) = register_pin(next_shortcuts.1) {
+            if !capture_changed {
+                return Err(error);
+            }
+            return match register_capture(previous_shortcuts.0) {
+                Ok(()) => Err(error),
+                Err(rollback) => Err(format!("{error}；同时恢复截图快捷键失败：{rollback}")),
+            };
+        }
+    }
     if let Err(save_error) = save(next_config) {
-        return match register(previous_shortcut) {
-            Ok(()) => Err(save_error),
-            Err(rollback_error) => Err(format!(
-                "{save_error}；同时恢复截图快捷键失败：{rollback_error}"
-            )),
-        };
+        let capture_rollback = capture_changed
+            .then(|| register_capture(previous_shortcuts.0).err())
+            .flatten();
+        let pin_rollback = pin_changed
+            .then(|| register_pin(previous_shortcuts.1).err())
+            .flatten();
+        if capture_rollback.is_none() && pin_rollback.is_none() {
+            return Err(save_error);
+        }
+        return Err(format!(
+            "{save_error}；同时恢复快捷键失败：截图={}; 贴图={}",
+            capture_rollback.unwrap_or_else(|| "成功".into()),
+            pin_rollback.unwrap_or_else(|| "成功".into())
+        ));
     }
     Ok(())
 }
@@ -618,20 +639,6 @@ fn sync_key_mappings(
     }
     app.emit("config-changed", ())
         .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn get_engine_status(state: State<'_, AppState>) -> EngineStatus {
-    let applied = state
-        .config
-        .lock()
-        .map(|config| config.scancode_map_applied)
-        .unwrap_or(false);
-    EngineStatus {
-        running: false,
-        enabled: applied,
-        last_error: None,
-    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -793,6 +800,18 @@ fn get_widget_config(state: State<'_, AppState>) -> Result<WidgetConfig, String>
 }
 
 #[tauri::command]
+fn get_network_interfaces() -> Vec<String> {
+    let networks = sysinfo::Networks::new_with_refreshed_list();
+    let mut names = networks
+        .iter()
+        .map(|(name, _)| name.to_string())
+        .collect::<Vec<_>>();
+    names.sort();
+    names.dedup();
+    names
+}
+
+#[tauri::command]
 fn update_widget_config(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -821,6 +840,7 @@ fn update_widget_config(
     }
     if let Some(control) = app.try_state::<sys_monitor::SysMonitorControl>() {
         control.set_interval(config.refresh_interval_secs);
+        control.set_network_interface(config.network_interface.clone());
     }
     let width = state
         .widget_width
@@ -859,13 +879,15 @@ fn update_screenshot_config(
         .map_err(|_| "配置状态已损坏".to_string())?
         .clone();
     let previous_shortcut = previous_config.screenshot_config.shortcut.clone();
+    let previous_pin_shortcut = previous_config.screenshot_config.pin_shortcut.clone();
     let mut next_config = previous_config.clone();
     next_config.screenshot_config = screenshot_config.clone();
     commit_shortcut_change_with(
-        &previous_shortcut,
-        &screenshot_config.shortcut,
+        (&previous_shortcut, &previous_pin_shortcut),
+        (&screenshot_config.shortcut, &screenshot_config.pin_shortcut),
         &next_config,
-        |shortcut| litesnap::update_shortcut(&app, shortcut),
+        |shortcut| litesnap::update_capture_shortcut(&app, shortcut),
+        |shortcut| litesnap::update_pin_shortcut(&app, shortcut),
         |config| config::save(&state.config_path, config),
     )?;
     *state
@@ -1042,6 +1064,7 @@ pub fn run() {
             let config_path = app.path().app_data_dir()?.join("config.json");
             let loaded_config = config::load(&config_path);
             let monitor_interval = loaded_config.widget_config.refresh_interval_secs;
+            let monitor_interface = loaded_config.widget_config.network_interface.clone();
             let state = AppState {
                 config: Mutex::new(loaded_config),
                 images: image_store::ImageStore::default(),
@@ -1050,7 +1073,7 @@ pub fn run() {
                 mutation_lock: Mutex::new(()),
             };
             app.manage(state);
-            app.manage(sys_monitor::SysMonitorControl::new(monitor_interval));
+            app.manage(sys_monitor::SysMonitorControl::new(monitor_interval, monitor_interface));
             app.manage(ocr::OcrService::new(app.handle())?);
             if let Err(error) = litesnap::initialize(app.handle()) {
                 tracing::error!(target: "dock_mapper::shortcut", %error, "注册截图快捷键失败");
@@ -1105,7 +1128,6 @@ pub fn run() {
             get_supported_keys,
             get_key_mappings,
             sync_key_mappings,
-            get_engine_status,
             get_scancode_map_status,
             apply_scancode_map,
             restore_scancode_map,
@@ -1123,6 +1145,11 @@ pub fn run() {
             litesnap::save_image,
             litesnap::pin_image,
             litesnap::get_pin_image,
+            litesnap::pin_image_ready,
+            litesnap::get_pin_options,
+            litesnap::update_pin_options,
+            litesnap::copy_pin_image,
+            litesnap::save_pin_image,
             litesnap::close_pin_window,
             litesnap::scale_pin_window,
             litesnap::open_url,
@@ -1136,6 +1163,7 @@ pub fn run() {
             check_is_admin,
             relaunch_as_admin,
             get_widget_config,
+            get_network_interfaces,
             update_widget_config,
             sync_widget_dynamic_width,
             get_minimize_to_tray,
@@ -1178,23 +1206,81 @@ mod transaction_tests {
 
     #[test]
     fn shortcut_transaction_restores_previous_registration_when_save_fails() {
-        let registrations = Mutex::new(Vec::new());
+        let capture_registrations = Mutex::new(Vec::new());
+        let pin_registrations = Mutex::new(Vec::new());
         let config = config::AppConfig::default();
         let result = commit_shortcut_change_with(
-            "Ctrl+1",
-            "Ctrl+Shift+1",
+            ("Ctrl+1", "Ctrl+2"),
+            ("Ctrl+Shift+1", "Ctrl+Shift+2"),
             &config,
             |value| {
-                registrations.lock().unwrap().push(value.to_string());
+                capture_registrations.lock().unwrap().push(value.to_string());
+                Ok(())
+            },
+            |value| {
+                pin_registrations.lock().unwrap().push(value.to_string());
                 Ok(())
             },
             |_| Err("保存失败".into()),
         );
         assert_eq!(result.unwrap_err(), "保存失败");
         assert_eq!(
-            *registrations.lock().unwrap(),
+            *capture_registrations.lock().unwrap(),
             vec!["Ctrl+Shift+1", "Ctrl+1"]
         );
+        assert_eq!(
+            *pin_registrations.lock().unwrap(),
+            vec!["Ctrl+Shift+2", "Ctrl+2"]
+        );
+    }
+
+    #[test]
+    fn shortcut_transaction_rolls_capture_back_when_pin_registration_fails() {
+        let capture_registrations = Mutex::new(Vec::new());
+        let saved = Mutex::new(false);
+        let config = config::AppConfig::default();
+        let result = commit_shortcut_change_with(
+            ("Ctrl+1", "Ctrl+2"),
+            ("Ctrl+Shift+1", "Ctrl+Shift+2"),
+            &config,
+            |value| {
+                capture_registrations.lock().unwrap().push(value.to_string());
+                Ok(())
+            },
+            |_| Err("快捷键已占用".into()),
+            |_| {
+                *saved.lock().unwrap() = true;
+                Ok(())
+            },
+        );
+        assert_eq!(result.unwrap_err(), "快捷键已占用");
+        assert_eq!(
+            *capture_registrations.lock().unwrap(),
+            vec!["Ctrl+Shift+1", "Ctrl+1"]
+        );
+        assert!(!*saved.lock().unwrap());
+    }
+
+    #[test]
+    fn shortcut_transaction_does_not_reregister_unchanged_hotkeys() {
+        let registrations = Mutex::new(Vec::<String>::new());
+        let config = config::AppConfig::default();
+        commit_shortcut_change_with(
+            ("Control+1", "Control+2"),
+            ("Control+1", "Control+2"),
+            &config,
+            |value| {
+                registrations.lock().unwrap().push(format!("capture:{value}"));
+                Ok(())
+            },
+            |value| {
+                registrations.lock().unwrap().push(format!("pin:{value}"));
+                Ok(())
+            },
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert!(registrations.lock().unwrap().is_empty());
     }
 
     #[test]

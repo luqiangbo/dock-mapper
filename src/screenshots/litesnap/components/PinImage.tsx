@@ -4,10 +4,17 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, PhysicalSize } from "@tauri-apps/api/window";
 import { copyBinaryPayload } from "../utils/binaryPayload";
 
+interface PinOptions {
+  opacity: number;
+  locked: boolean;
+}
+
 export default function PinImage(): React.JSX.Element {
   const pinId = new URLSearchParams(window.location.search).get("id") ?? getCurrentWindow().label;
   const [imageUrl, setImageUrl] = useState("");
   const [loadError, setLoadError] = useState("");
+  const [options, setOptions] = useState<PinOptions>({ opacity: 1, locked: false });
+  const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const imageUrlRef = useRef("");
   const aspectRatio = useRef(1);
   const correctingSize = useRef(false);
@@ -57,6 +64,10 @@ export default function PinImage(): React.JSX.Element {
       if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current);
       imageUrlRef.current = "";
     };
+  }, [pinId]);
+
+  useEffect(() => {
+    void invoke<PinOptions>("get_pin_options", { id: pinId }).then(setOptions).catch(() => undefined);
   }, [pinId]);
 
   useEffect(() => {
@@ -111,9 +122,41 @@ export default function PinImage(): React.JSX.Element {
   }, []);
 
   const startDragging = (event: React.PointerEvent<HTMLDivElement>): void => {
-    if (event.button !== 0 || (event.target as HTMLElement).closest("button")) return;
+    if (menuPosition && !(event.target as HTMLElement).closest(".pin-menu")) {
+      setMenuPosition(null);
+      return;
+    }
+    if (
+      options.locked ||
+      event.button !== 0 ||
+      (event.target as HTMLElement).closest("button, .pin-menu")
+    )
+      return;
     event.preventDefault();
     void getCurrentWindow().startDragging();
+  };
+
+  const updateOptions = async (next: PinOptions): Promise<void> => {
+    setOptions(next);
+    try {
+      const saved = await invoke<PinOptions>("update_pin_options", {
+        id: pinId,
+        opacity: next.opacity,
+        locked: next.locked,
+      });
+      setOptions(saved);
+    } catch (error) {
+      setLoadError(`贴图设置失败：${String(error)}`);
+    }
+  };
+
+  const runPinCommand = async (command: string): Promise<void> => {
+    try {
+      await invoke(command, { id: pinId });
+      if (command !== "close_pin_window") setMenuPosition(null);
+    } catch (error) {
+      setLoadError(`贴图操作失败：${error instanceof Error ? error.message : String(error)}`);
+    }
   };
 
   const scaleAtPointer = (event: React.WheelEvent<HTMLDivElement>): void => {
@@ -133,15 +176,28 @@ export default function PinImage(): React.JSX.Element {
       className={`pin-wrap${loadError ? " pin-wrap-error" : ""}`}
       onPointerDown={startDragging}
       onWheel={scaleAtPointer}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        setMenuPosition({
+          left: Math.min(event.clientX, Math.max(8, window.innerWidth - 190)),
+          top: Math.min(event.clientY, Math.max(8, window.innerHeight - 220)),
+        });
+      }}
     >
       {imageUrl ? (
         <img
           src={imageUrl}
           draggable={false}
+          style={{ opacity: options.opacity }}
           onLoad={(event) => {
             const image = event.currentTarget;
             aspectRatio.current = image.naturalWidth / Math.max(1, image.naturalHeight);
             setLoadError("");
+            void invoke("pin_image_ready", { id: pinId }).catch((error) => {
+              setLoadError(
+                `贴图显示失败：${error instanceof Error ? error.message : String(error)}`,
+              );
+            });
           }}
           onError={() => setLoadError("贴图加载失败：无法解码 PNG 图片")}
         />
@@ -151,17 +207,50 @@ export default function PinImage(): React.JSX.Element {
           {loadError}
         </div>
       ) : null}
+      {menuPosition ? (
+        <div
+          className="pin-menu"
+          style={menuPosition}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <label>
+            <span>透明度 {Math.round(options.opacity * 100)}%</span>
+            <input
+              type="range"
+              min="20"
+              max="100"
+              step="5"
+              value={Math.round(options.opacity * 100)}
+              onChange={(event) =>
+                void updateOptions({ ...options, opacity: Number(event.target.value) / 100 })
+              }
+            />
+          </label>
+          <button type="button" onClick={() => void updateOptions({ ...options, locked: !options.locked })}>
+            {options.locked ? "解除锁定" : "锁定位置"}
+          </button>
+          <button type="button" onClick={() => void runPinCommand("copy_pin_image")}>
+            复制图片
+          </button>
+          <button type="button" onClick={() => void runPinCommand("save_pin_image")}>
+            保存图片
+          </button>
+          <button type="button" onClick={() => void runPinCommand("close_pin_window")}>
+            关闭贴图
+          </button>
+        </div>
+      ) : null}
       <button
         type="button"
         className="pin-close"
         aria-label="Close"
         title="Close"
         onPointerDown={(event) => event.stopPropagation()}
-        onClick={() => void invoke("close_pin_window", { id: pinId })}
+        onClick={() => void runPinCommand("close_pin_window")}
       >
         ×
       </button>
-      <button
+      {!options.locked && <button
         type="button"
         className="pin-resize"
         aria-label="Resize"
@@ -177,7 +266,7 @@ export default function PinImage(): React.JSX.Element {
               userResizing.current = false;
             });
         }}
-      />
+      />}
     </div>
   );
 }

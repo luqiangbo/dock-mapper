@@ -9,7 +9,7 @@ import {
   ExclamationCircleOutlined,
   KeyOutlined,
 } from "@ant-design/icons";
-import type { EngineStatus, SysStatus } from "../types";
+import type { ScancodeMapStatus, SysStatus } from "../types";
 import { formatSpeed } from "../utils/format";
 import styles from "./components.module.scss";
 
@@ -17,7 +17,7 @@ const { Text, Title } = Typography;
 
 export default function Dashboard() {
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
-  const [engine, setEngine] = useState<EngineStatus | null>(null);
+  const [mapStatus, setMapStatus] = useState<ScancodeMapStatus | null>(null);
   const [sysStatus, setSysStatus] = useState<SysStatus>({
     upload_speed: 0,
     download_speed: 0,
@@ -28,41 +28,43 @@ export default function Dashboard() {
     void invoke<boolean>("check_is_admin")
       .then(setIsAdmin)
       .catch(() => setIsAdmin(false));
-    void invoke<EngineStatus>("get_engine_status")
-      .then(setEngine)
-      .catch(() => {
-        setEngine({
-          running: false,
-          enabled: false,
-          last_error: "读取引擎状态失败",
-        });
-      });
+    const refreshMapStatus = () =>
+      invoke<ScancodeMapStatus>("get_scancode_map_status")
+        .then(setMapStatus)
+        .catch(() => setMapStatus(null));
+    void refreshMapStatus();
 
     const statusListener = listen<SysStatus>("sys-status-update", (event) => {
       setSysStatus(event.payload);
     });
-    const engineListener = listen<EngineStatus>("engine-status-changed", (event) => {
-      setEngine(event.payload);
-    });
+    const mapListener = listen("scancode-map-changed", () => void refreshMapStatus());
 
     return () => {
       void statusListener.then((unlisten) => unlisten());
-      void engineListener.then((unlisten) => unlisten());
+      void mapListener.then((unlisten) => unlisten());
     };
   }, []);
 
-  const engineClass = engine?.last_error
-    ? `${styles.status} ${styles.error}`
-    : engine?.running && engine.enabled
-      ? `${styles.status} ${styles.running}`
-      : styles.status;
-  const engineLabel = engine?.last_error
-    ? "启动异常"
-    : !engine?.running
-      ? "未运行"
-      : engine.enabled
-        ? "运行中"
-        : "已暂停";
+  const mappingLabel = !mapStatus
+    ? "状态未知"
+    : mapStatus.requires_restart
+      ? "等待重启生效"
+      : mapStatus.applied
+        ? "已写入系统"
+        : mapStatus.has_external_map
+          ? "检测到外部映射"
+          : "尚未应用";
+  const mappingDescription = !mapStatus
+    ? "无法读取系统扫描码映射状态。"
+    : mapStatus.has_external_map
+      ? "系统中存在其他工具写入的 Scancode Map，接管前会先备份。"
+      : mapStatus.applied
+        ? mapStatus.requires_restart
+          ? "映射已安全写入注册表，重新登录或重启 Windows 后生效。"
+          : "DockMapper 的 Scancode Map 已存在于系统注册表。"
+        : mapStatus.backup_available
+          ? "当前未应用 DockMapper 映射，可恢复接管前的系统映射。"
+          : "在按键映射页配置规则并应用到系统。";
 
   return (
     <div className={styles.page}>
@@ -74,7 +76,7 @@ export default function Dashboard() {
             </span>
             <div className={styles.adminCopy}>
               <strong>当前为普通用户权限</strong>
-              <Text type="secondary">高权限窗口中的按键映射可能不生效。</Text>
+              <Text type="secondary">应用或恢复系统 Scancode Map 时需要管理员权限。</Text>
             </div>
             <Button
               className={styles.adminButton}
@@ -130,19 +132,16 @@ export default function Dashboard() {
               <KeyOutlined />
             </span>
             <div>
-              <Title level={5}>键盘映射引擎</Title>
-              <Text type="secondary">
-                {engine?.last_error ??
-                  (engine?.enabled
-                    ? "原生 Windows 低级键盘钩子已就绪，注入事件会被自动忽略。"
-                    : "映射规则已保留，重新启用后立即生效。")}
-              </Text>
+              <Title level={5}>系统扫描码映射</Title>
+              <Text type="secondary">{mappingDescription}</Text>
             </div>
           </div>
-          {engine === null ? (
+          {mapStatus === null ? (
             <Spin size="small" />
           ) : (
-            <span className={engineClass}>{engineLabel}</span>
+            <span className={`${styles.status} ${mapStatus.applied ? styles.running : ""}`}>
+              {mappingLabel}
+            </span>
           )}
         </div>
       </Card>
@@ -155,9 +154,7 @@ export default function Dashboard() {
             </span>
             <div>
               <Title level={5}>权限状态</Title>
-              <Text type="secondary">
-                管理员权限仅用于让映射覆盖高权限窗口；其他功能可在普通权限下使用。
-              </Text>
+              <Text type="secondary">管理员权限仅用于写入或恢复系统 Scancode Map。</Text>
             </div>
           </div>
           {isAdmin === null ? (

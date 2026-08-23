@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     io::Cursor,
     path::PathBuf,
@@ -18,10 +18,11 @@ use serde::{Deserialize, Serialize};
 use tauri::http::{Request, Response, StatusCode};
 use tauri::Monitor;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 mod clipboard;
 mod shortcut;
+#[path = "litesnap/windows.rs"]
+mod window_candidates;
 
 trait DiagnosticMutex<T> {
     fn lock_or_recover(&self) -> MutexGuard<'_, T>;
@@ -57,6 +58,7 @@ struct CaptureData {
     physical_origin_y: i32,
     physical_width: u32,
     physical_height: u32,
+    window_candidates: Vec<window_candidates::WindowCandidate>,
 }
 
 #[derive(Clone, Debug)]
@@ -71,11 +73,14 @@ pub struct AppState {
     capture: Mutex<Option<CaptureData>>,
     pin_data: Mutex<HashMap<String, Vec<u8>>>,
     pin_generation: AtomicU64,
+    pin_ready: Mutex<HashSet<String>>,
+    pin_options: Mutex<HashMap<String, PinOptions>>,
     // Ctrl+2 deliberately consumes only a PNG exported by the editor. Keeping
     // it separate from the frozen full-screen capture prevents accidental
     // pinning before the user has confirmed a selection.
     confirmed_png: Mutex<Option<Vec<u8>>>,
     registered_shortcut: Mutex<Option<String>>,
+    registered_pin_shortcut: Mutex<Option<String>>,
     overlay_ready: AtomicBool,
     active_overlay: Mutex<Option<String>>,
     capture_in_progress: AtomicBool,
@@ -94,8 +99,11 @@ pub fn create_state() -> AppState {
         capture: Mutex::new(None),
         pin_data: Mutex::new(HashMap::new()),
         pin_generation: AtomicU64::new(0),
+        pin_ready: Mutex::new(HashSet::new()),
+        pin_options: Mutex::new(HashMap::new()),
         confirmed_png: Mutex::new(None),
         registered_shortcut: Mutex::new(None),
+        registered_pin_shortcut: Mutex::new(None),
         overlay_ready: AtomicBool::new(false),
         active_overlay: Mutex::new(None),
         capture_in_progress: AtomicBool::new(false),
@@ -118,29 +126,17 @@ pub fn initialize(app: &AppHandle) -> Result<(), String> {
         });
     }
 
-    let shortcut = app
+    let shortcuts = app
         .state::<crate::AppState>()
         .config
         .lock()
         .map_err(|_| "配置状态已损坏".to_string())?
         .screenshot_config
-        .shortcut
         .clone();
-    shortcut::register(app, &shortcut)
-        .map_err(|error| format!("注册 {shortcut} 截图快捷键失败：{error}"))?;
-    app.global_shortcut()
-        .on_shortcut("Control+2", |app, _, event| {
-            if event.state() == ShortcutState::Pressed {
-                if let Err(error) = pin_confirmed_image(app) {
-                    let _ = rfd::MessageDialog::new()
-                        .set_title("DockMapper 截图")
-                        .set_description(error)
-                        .set_level(rfd::MessageLevel::Info)
-                        .show();
-                }
-            }
-        })
-        .map_err(|error| format!("注册 Ctrl+2 贴图快捷键失败：{error}"))?;
+    shortcut::register_capture(app, &shortcuts.shortcut)
+        .map_err(|error| format!("注册 {} 截图快捷键失败：{error}", shortcuts.shortcut))?;
+    shortcut::register_pin(app, &shortcuts.pin_shortcut)
+        .map_err(|error| format!("注册 {} 贴图快捷键失败：{error}", shortcuts.pin_shortcut))?;
     Ok(())
 }
 
@@ -163,6 +159,30 @@ pub struct FullScreenshot {
     image_width: u32,
     image_height: u32,
     overlay_label: String,
+    window_candidates: Vec<window_candidates::WindowCandidate>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PinOptions {
+    opacity: f64,
+    locked: bool,
+}
+
+impl Default for PinOptions {
+    fn default() -> Self {
+        Self {
+            opacity: 1.0,
+            locked: false,
+        }
+    }
+}
+
+fn normalized_pin_options(opacity: f64, locked: bool) -> PinOptions {
+    PinOptions {
+        opacity: opacity.clamp(0.2, 1.0),
+        locked,
+    }
 }
 
 pub fn serve_capture_uri(request: Request<Vec<u8>>) -> Response<std::borrow::Cow<'static, [u8]>> {
@@ -492,6 +512,13 @@ fn capture_active_screen(app: &AppHandle) -> Result<CaptureData, String> {
         )
     };
     let scale_factor = image_width as f64 / bounds.width.max(1.0);
+    let window_candidates = window_candidates::candidates_for_monitor(
+        physical_origin_x,
+        physical_origin_y,
+        image_width,
+        image_height,
+        scale_factor,
+    );
     Ok(CaptureData {
         bmp,
         generation: app
@@ -508,6 +535,7 @@ fn capture_active_screen(app: &AppHandle) -> Result<CaptureData, String> {
         physical_origin_y,
         physical_width: image_width,
         physical_height: image_height,
+        window_candidates,
     })
 }
 
@@ -804,8 +832,12 @@ fn pin_confirmed_image(app: &AppHandle) -> Result<bool, String> {
     pin_image_impl(app.clone(), data).map(|_| true)
 }
 
-pub fn update_shortcut(app: &AppHandle, shortcut: &str) -> Result<(), String> {
-    shortcut::register(app, shortcut)
+pub fn update_capture_shortcut(app: &AppHandle, shortcut: &str) -> Result<(), String> {
+    shortcut::register_capture(app, shortcut)
+}
+
+pub fn update_pin_shortcut(app: &AppHandle, shortcut: &str) -> Result<(), String> {
+    shortcut::register_pin(app, shortcut)
 }
 
 #[tauri::command]
@@ -884,6 +916,7 @@ pub fn get_full_screenshot(
         image_width: capture.image_width,
         image_height: capture.image_height,
         overlay_label: label,
+        window_candidates: capture.window_candidates,
     })
 }
 
@@ -1052,6 +1085,10 @@ fn pin_image_impl(app: AppHandle, data: Vec<u8>) -> Result<String, String> {
         .pin_data
         .lock_or_recover()
         .insert(id.clone(), data);
+    app.state::<AppState>()
+        .pin_options
+        .lock_or_recover()
+        .insert(id.clone(), PinOptions::default());
     build_pin_window(&app, &id, window_x, window_y, window_width, window_height)?;
 
     let window = app
@@ -1079,7 +1116,22 @@ fn pin_image_impl(app: AppHandle, data: Vec<u8>) -> Result<String, String> {
         }
         let _ = window.emit("pin-image-updated", &id);
     }
-    window.show().map_err(|error| error.to_string())?;
+    let fallback_app = app.clone();
+    let fallback_id = id.clone();
+    thread::spawn(move || {
+        thread::sleep(std::time::Duration::from_secs(2));
+        let ready = fallback_app
+            .state::<AppState>()
+            .pin_ready
+            .lock_or_recover()
+            .contains(&fallback_id);
+        if !ready {
+            tracing::warn!(target: "dock_mapper::pin", pin_id = %fallback_id, "贴图解码握手超时，显示窗口以便诊断");
+            if let Some(window) = fallback_app.get_webview_window(&fallback_id) {
+                let _ = window.show();
+            }
+        }
+    });
     close_overlay_impl(&app);
     Ok(id)
 }
@@ -1107,12 +1159,97 @@ pub fn get_pin_image(state: State<AppState>, id: String) -> Result<tauri::ipc::R
 }
 
 #[tauri::command]
+pub fn pin_image_ready(app: AppHandle, id: String) -> Result<bool, String> {
+    let state = app.state::<AppState>();
+    if !state.pin_data.lock_or_recover().contains_key(&id) {
+        return Err("贴图数据不存在".into());
+    }
+    state.pin_ready.lock_or_recover().insert(id.clone());
+    let window = app
+        .get_webview_window(&id)
+        .ok_or_else(|| "贴图窗口不存在".to_string())?;
+    window.show().map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
+#[tauri::command]
+pub fn get_pin_options(state: State<AppState>, id: String) -> Result<PinOptions, String> {
+    state
+        .pin_options
+        .lock_or_recover()
+        .get(&id)
+        .copied()
+        .ok_or_else(|| "贴图窗口不存在".into())
+}
+
+#[tauri::command]
+pub fn update_pin_options(
+    app: AppHandle,
+    id: String,
+    opacity: f64,
+    locked: bool,
+) -> Result<PinOptions, String> {
+    let options = normalized_pin_options(opacity, locked);
+    let state = app.state::<AppState>();
+    let mut values = state.pin_options.lock_or_recover();
+    if !values.contains_key(&id) {
+        return Err("贴图窗口不存在".into());
+    }
+    values.insert(id.clone(), options);
+    drop(values);
+    let window = app
+        .get_webview_window(&id)
+        .ok_or_else(|| "贴图窗口不存在".to_string())?;
+    window
+        .set_resizable(!locked)
+        .map_err(|error| error.to_string())?;
+    Ok(options)
+}
+
+#[tauri::command]
+pub fn copy_pin_image(state: State<AppState>, id: String) -> Result<bool, String> {
+    let data = state
+        .pin_data
+        .lock_or_recover()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| "贴图数据不存在".to_string())?;
+    clipboard::write_png(&data)?;
+    Ok(true)
+}
+
+#[tauri::command]
+pub fn save_pin_image(state: State<AppState>, id: String) -> Result<bool, String> {
+    let data = state
+        .pin_data
+        .lock_or_recover()
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| "贴图数据不存在".to_string())?;
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("保存贴图")
+        .set_file_name("DockMapper-pin.png")
+        .add_filter("PNG Image", &["png"])
+        .save_file()
+    else {
+        return Ok(false);
+    };
+    fs::write(path, data).map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
+#[tauri::command]
 pub fn close_pin_window(app: AppHandle, id: String) {
     if let Some(window) = app.get_webview_window(&id) {
         let _ = window.destroy();
     }
     app.state::<AppState>()
         .pin_data
+        .lock_or_recover()
+        .remove(&id);
+    app.state::<AppState>().pin_ready.lock_or_recover().remove(&id);
+    app.state::<AppState>()
+        .pin_options
         .lock_or_recover()
         .remove(&id);
 }
@@ -1193,5 +1330,12 @@ mod tests {
         assert_eq!(&bmp[..2], b"BM");
         assert_eq!(i32::from_le_bytes(bmp[22..26].try_into().unwrap()), -1);
         assert_eq!(&bmp[54..58], &[0x56, 0x34, 0x12, 0xff]);
+    }
+
+    #[test]
+    fn pin_runtime_opacity_is_clamped_without_persisting_state() {
+        assert_eq!(normalized_pin_options(0.05, true).opacity, 0.2);
+        assert_eq!(normalized_pin_options(1.5, false).opacity, 1.0);
+        assert!(normalized_pin_options(0.75, true).locked);
     }
 }

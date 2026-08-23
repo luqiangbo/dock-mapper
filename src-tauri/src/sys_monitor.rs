@@ -10,10 +10,11 @@ pub struct SysStatusPayload {
     memory_usage: f32,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct MonitorSettings {
     interval_secs: u8,
     shutdown: bool,
+    network_interface: Option<String>,
 }
 
 pub struct SysMonitorControl {
@@ -21,10 +22,11 @@ pub struct SysMonitorControl {
 }
 
 impl SysMonitorControl {
-    pub fn new(interval_secs: u8) -> Self {
+    pub fn new(interval_secs: u8, network_interface: Option<String>) -> Self {
         let (settings, _) = watch::channel(MonitorSettings {
             interval_secs: interval_secs.clamp(1, 5),
             shutdown: false,
+            network_interface,
         });
         Self { settings }
     }
@@ -39,6 +41,12 @@ impl SysMonitorControl {
         self.settings
             .send_modify(|settings| settings.shutdown = true);
     }
+
+    pub fn set_network_interface(&self, network_interface: Option<String>) {
+        self.settings.send_modify(|settings| {
+            settings.network_interface = network_interface;
+        });
+    }
 }
 
 pub fn start_sys_monitor(app: AppHandle) {
@@ -52,18 +60,21 @@ pub fn start_sys_monitor(app: AppHandle) {
         let mut previous_tick = Instant::now();
 
         loop {
-            let current = *settings.borrow();
+            let current = settings.borrow().clone();
             if current.shutdown {
                 break;
             }
             networks.refresh();
             sys.refresh_memory();
+            let selected = current.network_interface.as_deref();
             let total_rx = networks
                 .iter()
+                .filter(|(name, _)| selected.map_or_else(|| !is_virtual_adapter(name), |value| value == *name))
                 .map(|(_, data)| data.total_received())
                 .sum::<u64>();
             let total_tx = networks
                 .iter()
+                .filter(|(name, _)| selected.map_or_else(|| !is_virtual_adapter(name), |value| value == *name))
                 .map(|(_, data)| data.total_transmitted())
                 .sum::<u64>();
             let now = Instant::now();
@@ -109,6 +120,13 @@ pub fn start_sys_monitor(app: AppHandle) {
     });
 }
 
+fn is_virtual_adapter(name: &str) -> bool {
+    let value = name.to_ascii_lowercase();
+    ["loopback", "vethernet", "virtual", "vmware", "hyper-v", "wsl", "npcap"]
+        .iter()
+        .any(|marker| value.contains(marker))
+}
+
 fn emit_if_visible(app: &AppHandle, label: &str, payload: SysStatusPayload) -> bool {
     let Some(window) = app.get_webview_window(label) else {
         return false;
@@ -126,7 +144,7 @@ mod tests {
 
     #[test]
     fn monitor_interval_is_clamped_and_shutdown_is_observable() {
-        let control = SysMonitorControl::new(0);
+        let control = SysMonitorControl::new(0, None);
         assert_eq!(control.settings.borrow().interval_secs, 1);
         control.set_interval(9);
         assert_eq!(control.settings.borrow().interval_secs, 5);

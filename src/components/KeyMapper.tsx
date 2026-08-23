@@ -29,8 +29,7 @@ export default function KeyMapper() {
         setMapStatus(status);
       })
       .catch((error) => {
-        console.error(error);
-        notification.error({ message: "加载按键映射失败" });
+        notification.error({ message: "加载按键映射失败", description: String(error) });
       });
   }, [notification]);
 
