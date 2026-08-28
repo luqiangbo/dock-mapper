@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-decode-qr-selection"
+description = "Enables the decode_qr_selection command without any pre-configured scope."
+commands.allow = ["decode_qr_selection"]
+
+[[permission]]
+identifier = "deny-decode-qr-selection"
+description = "Denies the decode_qr_selection command without any pre-configured scope."
+commands.deny = ["decode_qr_selection"]

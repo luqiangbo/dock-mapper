@@ -56,4 +56,12 @@ describe("retained annotation scene", () => {
     expect(bounds.width).toBeCloseTo(100);
     expect(bounds.height).toBeCloseTo(80);
   });
+
+  it("keeps the requested visual bounds for wide strokes", () => {
+    const resized = resizeAnnotation(
+      { ...rectangle, style: { ...rectangle.style, strokeWidth: 20 } },
+      { x: 5, y: 7, width: 120, height: 90 },
+    );
+    expect(annotationBounds(resized)).toEqual({ x: 5, y: 7, width: 120, height: 90 });
+  });
 });

@@ -36,11 +36,18 @@ export function useOcr({ enabled, exportPng, engineFailed, exportFailed, onError
     setPanel({ result: null, error: null, pending: true, elapsedMs: null });
     setRunning(true);
     void (async () => {
+      let imageId: string | null = null;
       try {
         const png = await exportPng();
+        if (!request.current.isCurrent(generation)) return;
         const startedAt = performance.now();
-        const imageId = await window.api.uploadImage(png);
+        imageId = await window.api.uploadImage(png);
+        if (!request.current.isCurrent(generation)) {
+          await window.api.releaseImage(imageId);
+          return;
+        }
         const result = await window.api.recognizeSelection(imageId);
+        imageId = null;
         if (!request.current.isCurrent(generation)) return;
         setPanel({
           result,
@@ -49,6 +56,7 @@ export function useOcr({ enabled, exportPng, engineFailed, exportFailed, onError
           elapsedMs: Math.round(performance.now() - startedAt),
         });
       } catch (error) {
+        if (imageId) await window.api.releaseImage(imageId).catch(() => undefined);
         if (!request.current.isCurrent(generation)) return;
         const message = error instanceof Error ? error.message : engineFailed;
         onError(error instanceof Error ? error.message : exportFailed);

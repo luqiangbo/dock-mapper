@@ -497,8 +497,16 @@ mod tests {
 
     #[test]
     fn maps_ocr_block_coordinates_back_to_the_original_selection() {
-        let block = scaled_text_block("DockMapper".into(), 0.98, (10.0, 20.0, 30.0, 8.0), (2.0, 1.5));
-        assert_eq!((block.x, block.y, block.width, block.height), (20.0, 30.0, 60.0, 12.0));
+        let block = scaled_text_block(
+            "DockMapper".into(),
+            0.98,
+            (10.0, 20.0, 30.0, 8.0),
+            (2.0, 1.5),
+        );
+        assert_eq!(
+            (block.x, block.y, block.width, block.height),
+            (20.0, 30.0, 60.0, 12.0)
+        );
         assert_eq!(block.text, "DockMapper");
     }
 }

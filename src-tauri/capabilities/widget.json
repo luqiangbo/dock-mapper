@@ -4,6 +4,10 @@
   "description": "任务栏挂件仅接收状态事件",
   "windows": ["taskbar_widget"],
   "permissions": [
-    "core:event:allow-listen"
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-get-widget-config",
+    "allow-sync-widget-dynamic-width",
+    "allow-refresh-widget-position"
   ]
 }

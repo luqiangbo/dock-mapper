@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-key-mappings"
+description = "Enables the get_key_mappings command without any pre-configured scope."
+commands.allow = ["get_key_mappings"]
+
+[[permission]]
+identifier = "deny-get-key-mappings"
+description = "Denies the get_key_mappings command without any pre-configured scope."
+commands.deny = ["get_key_mappings"]

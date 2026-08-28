@@ -32,6 +32,25 @@ export interface SceneBounds {
   height: number;
 }
 
+function annotationPadding(annotation: RasterAnnotation): number {
+  return Math.max(4, annotation.style.strokeWidth / 2);
+}
+
+export function annotationGeometryBounds(annotation: RasterAnnotation): SceneBounds {
+  const xs = annotation.points.map((point) => point.x);
+  const ys = annotation.points.map((point) => point.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  return {
+    x: minX,
+    y: minY,
+    width: Math.max(1, maxX - minX),
+    height: Math.max(1, maxY - minY),
+  };
+}
+
 export function cloneRasterAnnotations(items: RasterAnnotation[]): RasterAnnotation[] {
   return items.map((item) => ({
     ...item,
@@ -59,18 +78,13 @@ export function simplifyScenePoints(points: ScenePoint[], minimumDistance = 1): 
 }
 
 export function annotationBounds(annotation: RasterAnnotation): SceneBounds {
-  const xs = annotation.points.map((point) => point.x);
-  const ys = annotation.points.map((point) => point.y);
-  const padding = Math.max(4, annotation.style.strokeWidth / 2);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
+  const geometry = annotationGeometryBounds(annotation);
+  const padding = annotationPadding(annotation);
   return {
-    x: minX - padding,
-    y: minY - padding,
-    width: Math.max(1, maxX - minX) + padding * 2,
-    height: Math.max(1, maxY - minY) + padding * 2,
+    x: geometry.x - padding,
+    y: geometry.y - padding,
+    width: geometry.width + padding * 2,
+    height: geometry.height + padding * 2,
   };
 }
 
@@ -97,14 +111,19 @@ export function resizeAnnotation(
   annotation: RasterAnnotation,
   nextBounds: SceneBounds,
 ): RasterAnnotation {
-  const current = annotationBounds(annotation);
-  const scaleX = nextBounds.width / Math.max(1, current.width);
-  const scaleY = nextBounds.height / Math.max(1, current.height);
+  const current = annotationGeometryBounds(annotation);
+  const padding = annotationPadding(annotation);
+  const targetWidth = Math.max(1, nextBounds.width - padding * 2);
+  const targetHeight = Math.max(1, nextBounds.height - padding * 2);
+  const targetX = nextBounds.x + padding;
+  const targetY = nextBounds.y + padding;
+  const scaleX = targetWidth / current.width;
+  const scaleY = targetHeight / current.height;
   return {
     ...annotation,
     points: annotation.points.map((point) => ({
-      x: nextBounds.x + (point.x - current.x) * scaleX,
-      y: nextBounds.y + (point.y - current.y) * scaleY,
+      x: targetX + (point.x - current.x) * scaleX,
+      y: targetY + (point.y - current.y) * scaleY,
     })),
   };
 }

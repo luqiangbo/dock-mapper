@@ -16,7 +16,6 @@ pub struct DiagnosticsState {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SanitizedConfig {
-    schema_version: u32,
     mapping_count: usize,
     memory_scheme: crate::MemoryScheme,
     refresh_interval_secs: u8,
@@ -27,6 +26,9 @@ struct SanitizedConfig {
     color_copy_format: crate::config::ColorCopyFormat,
     scancode_map_applied: bool,
     backup_available: bool,
+    transient_image_count: usize,
+    transient_image_bytes: usize,
+    screenshot_history_count: usize,
 }
 
 pub fn initialize(app: &AppHandle) -> Result<DiagnosticsState, String> {
@@ -58,8 +60,9 @@ pub fn export(
         .lock()
         .map_err(|_| "配置状态已损坏".to_string())?
         .clone();
+    let (transient_image_count, transient_image_bytes) = state.images.stats()?;
+    let screenshot_history_count = state.history.list()?.len();
     let sanitized = SanitizedConfig {
-        schema_version: config.schema_version,
         mapping_count: config.key_mappings.len(),
         memory_scheme: config.widget_config.memory_scheme,
         refresh_interval_secs: config.widget_config.refresh_interval_secs,
@@ -70,6 +73,9 @@ pub fn export(
         color_copy_format: config.screenshot_config.color_copy_format,
         scancode_map_applied: config.scancode_map_applied,
         backup_available: config.scancode_map_backup.is_some(),
+        transient_image_count,
+        transient_image_bytes,
+        screenshot_history_count,
     };
     let Some(path) = rfd::FileDialog::new()
         .set_title("导出 DockMapper 诊断信息")

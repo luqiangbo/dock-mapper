@@ -345,6 +345,618 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the apply_scancode_map command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-apply-scancode-map",
+          "markdownDescription": "Enables the apply_scancode_map command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the check_is_admin command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-check-is-admin",
+          "markdownDescription": "Enables the check_is_admin command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the check_screen_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-check-screen-permission",
+          "markdownDescription": "Enables the check_screen_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the choose_screenshot_save_directory command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-choose-screenshot-save-directory",
+          "markdownDescription": "Enables the choose_screenshot_save_directory command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the close_overlay command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-close-overlay",
+          "markdownDescription": "Enables the close_overlay command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the close_pin_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-close-pin-window",
+          "markdownDescription": "Enables the close_pin_window command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the copy_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-copy-image",
+          "markdownDescription": "Enables the copy_image command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the copy_pin_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-copy-pin-image",
+          "markdownDescription": "Enables the copy_pin_image command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the copy_screenshot_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-copy-screenshot-history",
+          "markdownDescription": "Enables the copy_screenshot_history command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the copy_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-copy-text",
+          "markdownDescription": "Enables the copy_text command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the create_screenshot_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-create-screenshot-history",
+          "markdownDescription": "Enables the create_screenshot_history command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the decode_qr_selection command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-decode-qr-selection",
+          "markdownDescription": "Enables the decode_qr_selection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the delete_screenshot_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-delete-screenshot-history",
+          "markdownDescription": "Enables the delete_screenshot_history command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the export_diagnostics command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-export-diagnostics",
+          "markdownDescription": "Enables the export_diagnostics command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_full_screenshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-full-screenshot",
+          "markdownDescription": "Enables the get_full_screenshot command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_key_mappings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-key-mappings",
+          "markdownDescription": "Enables the get_key_mappings command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_minimize_to_tray command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-minimize-to-tray",
+          "markdownDescription": "Enables the get_minimize_to_tray command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_network_interfaces command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-network-interfaces",
+          "markdownDescription": "Enables the get_network_interfaces command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_pin_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-pin-image",
+          "markdownDescription": "Enables the get_pin_image command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_pin_options command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-pin-options",
+          "markdownDescription": "Enables the get_pin_options command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_scancode_map_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-scancode-map-status",
+          "markdownDescription": "Enables the get_scancode_map_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_screenshot_config command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-screenshot-config",
+          "markdownDescription": "Enables the get_screenshot_config command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_screenshot_history_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-screenshot-history-image",
+          "markdownDescription": "Enables the get_screenshot_history_image command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_screenshot_history_thumbnail command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-screenshot-history-thumbnail",
+          "markdownDescription": "Enables the get_screenshot_history_thumbnail command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_supported_keys command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-supported-keys",
+          "markdownDescription": "Enables the get_supported_keys command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_widget_config command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-widget-config",
+          "markdownDescription": "Enables the get_widget_config command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_screenshot_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-screenshot-history",
+          "markdownDescription": "Enables the list_screenshot_history command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_url command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-url",
+          "markdownDescription": "Enables the open_url command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the overlay_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-overlay-ready",
+          "markdownDescription": "Enables the overlay_ready command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the pin_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-pin-image",
+          "markdownDescription": "Enables the pin_image command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the pin_image_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-pin-image-ready",
+          "markdownDescription": "Enables the pin_image_ready command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the pin_screenshot_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-pin-screenshot-history",
+          "markdownDescription": "Enables the pin_screenshot_history command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the recognize_selection command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-recognize-selection",
+          "markdownDescription": "Enables the recognize_selection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the refresh_widget_position command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-refresh-widget-position",
+          "markdownDescription": "Enables the refresh_widget_position command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the relaunch_as_admin command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-relaunch-as-admin",
+          "markdownDescription": "Enables the relaunch_as_admin command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the release_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-release-image",
+          "markdownDescription": "Enables the release_image command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the report_capture_rendered command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-report-capture-rendered",
+          "markdownDescription": "Enables the report_capture_rendered command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the restore_scancode_map command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-restore-scancode-map",
+          "markdownDescription": "Enables the restore_scancode_map command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the save_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-save-image",
+          "markdownDescription": "Enables the save_image command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the save_pin_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-save-pin-image",
+          "markdownDescription": "Enables the save_pin_image command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the scale_pin_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-scale-pin-window",
+          "markdownDescription": "Enables the scale_pin_window command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_minimize_to_tray command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-minimize-to-tray",
+          "markdownDescription": "Enables the set_minimize_to_tray command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_screenshot_history_favorite command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-screenshot-history-favorite",
+          "markdownDescription": "Enables the set_screenshot_history_favorite command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the show_capture_overlay command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-show-capture-overlay",
+          "markdownDescription": "Enables the show_capture_overlay command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the start_screenshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-start-screenshot",
+          "markdownDescription": "Enables the start_screenshot command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the sync_key_mappings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-sync-key-mappings",
+          "markdownDescription": "Enables the sync_key_mappings command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the sync_widget_dynamic_width command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-sync-widget-dynamic-width",
+          "markdownDescription": "Enables the sync_widget_dynamic_width command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_pin_options command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-update-pin-options",
+          "markdownDescription": "Enables the update_pin_options command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_screenshot_config command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-update-screenshot-config",
+          "markdownDescription": "Enables the update_screenshot_config command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_widget_config command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-update-widget-config",
+          "markdownDescription": "Enables the update_widget_config command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the upload_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-upload-image",
+          "markdownDescription": "Enables the upload_image command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the apply_scancode_map command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-apply-scancode-map",
+          "markdownDescription": "Denies the apply_scancode_map command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the check_is_admin command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-check-is-admin",
+          "markdownDescription": "Denies the check_is_admin command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the check_screen_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-check-screen-permission",
+          "markdownDescription": "Denies the check_screen_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the choose_screenshot_save_directory command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-choose-screenshot-save-directory",
+          "markdownDescription": "Denies the choose_screenshot_save_directory command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the close_overlay command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-close-overlay",
+          "markdownDescription": "Denies the close_overlay command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the close_pin_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-close-pin-window",
+          "markdownDescription": "Denies the close_pin_window command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the copy_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-copy-image",
+          "markdownDescription": "Denies the copy_image command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the copy_pin_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-copy-pin-image",
+          "markdownDescription": "Denies the copy_pin_image command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the copy_screenshot_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-copy-screenshot-history",
+          "markdownDescription": "Denies the copy_screenshot_history command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the copy_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-copy-text",
+          "markdownDescription": "Denies the copy_text command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the create_screenshot_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-create-screenshot-history",
+          "markdownDescription": "Denies the create_screenshot_history command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the decode_qr_selection command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-decode-qr-selection",
+          "markdownDescription": "Denies the decode_qr_selection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the delete_screenshot_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-delete-screenshot-history",
+          "markdownDescription": "Denies the delete_screenshot_history command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the export_diagnostics command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-export-diagnostics",
+          "markdownDescription": "Denies the export_diagnostics command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_full_screenshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-full-screenshot",
+          "markdownDescription": "Denies the get_full_screenshot command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_key_mappings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-key-mappings",
+          "markdownDescription": "Denies the get_key_mappings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_minimize_to_tray command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-minimize-to-tray",
+          "markdownDescription": "Denies the get_minimize_to_tray command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_network_interfaces command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-network-interfaces",
+          "markdownDescription": "Denies the get_network_interfaces command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_pin_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-pin-image",
+          "markdownDescription": "Denies the get_pin_image command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_pin_options command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-pin-options",
+          "markdownDescription": "Denies the get_pin_options command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_scancode_map_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-scancode-map-status",
+          "markdownDescription": "Denies the get_scancode_map_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_screenshot_config command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-screenshot-config",
+          "markdownDescription": "Denies the get_screenshot_config command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_screenshot_history_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-screenshot-history-image",
+          "markdownDescription": "Denies the get_screenshot_history_image command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_screenshot_history_thumbnail command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-screenshot-history-thumbnail",
+          "markdownDescription": "Denies the get_screenshot_history_thumbnail command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_supported_keys command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-supported-keys",
+          "markdownDescription": "Denies the get_supported_keys command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_widget_config command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-widget-config",
+          "markdownDescription": "Denies the get_widget_config command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_screenshot_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-screenshot-history",
+          "markdownDescription": "Denies the list_screenshot_history command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_url command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-url",
+          "markdownDescription": "Denies the open_url command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the overlay_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-overlay-ready",
+          "markdownDescription": "Denies the overlay_ready command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the pin_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-pin-image",
+          "markdownDescription": "Denies the pin_image command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the pin_image_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-pin-image-ready",
+          "markdownDescription": "Denies the pin_image_ready command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the pin_screenshot_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-pin-screenshot-history",
+          "markdownDescription": "Denies the pin_screenshot_history command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the recognize_selection command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-recognize-selection",
+          "markdownDescription": "Denies the recognize_selection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the refresh_widget_position command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-refresh-widget-position",
+          "markdownDescription": "Denies the refresh_widget_position command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the relaunch_as_admin command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-relaunch-as-admin",
+          "markdownDescription": "Denies the relaunch_as_admin command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the release_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-release-image",
+          "markdownDescription": "Denies the release_image command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the report_capture_rendered command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-report-capture-rendered",
+          "markdownDescription": "Denies the report_capture_rendered command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the restore_scancode_map command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-restore-scancode-map",
+          "markdownDescription": "Denies the restore_scancode_map command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the save_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-save-image",
+          "markdownDescription": "Denies the save_image command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the save_pin_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-save-pin-image",
+          "markdownDescription": "Denies the save_pin_image command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the scale_pin_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-scale-pin-window",
+          "markdownDescription": "Denies the scale_pin_window command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_minimize_to_tray command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-minimize-to-tray",
+          "markdownDescription": "Denies the set_minimize_to_tray command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_screenshot_history_favorite command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-screenshot-history-favorite",
+          "markdownDescription": "Denies the set_screenshot_history_favorite command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the show_capture_overlay command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-show-capture-overlay",
+          "markdownDescription": "Denies the show_capture_overlay command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the start_screenshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-start-screenshot",
+          "markdownDescription": "Denies the start_screenshot command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sync_key_mappings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-sync-key-mappings",
+          "markdownDescription": "Denies the sync_key_mappings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sync_widget_dynamic_width command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-sync-widget-dynamic-width",
+          "markdownDescription": "Denies the sync_widget_dynamic_width command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_pin_options command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-update-pin-options",
+          "markdownDescription": "Denies the update_pin_options command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_screenshot_config command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-update-screenshot-config",
+          "markdownDescription": "Denies the update_screenshot_config command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_widget_config command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-update-widget-config",
+          "markdownDescription": "Denies the update_widget_config command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the upload_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-upload-image",
+          "markdownDescription": "Denies the upload_image command without any pre-configured scope."
+        },
+        {
           "description": "This permission set configures if your\napplication can enable or disable auto\nstarting the application on boot.\n\n#### Granted Permissions\n\nIt allows all to check, enable and\ndisable the automatic start on boot.\n\n\n#### This default permission set includes:\n\n- `allow-enable`\n- `allow-disable`\n- `allow-is-enabled`",
           "type": "string",
           "const": "autostart:default",

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-apply-scancode-map"
+description = "Enables the apply_scancode_map command without any pre-configured scope."
+commands.allow = ["apply_scancode_map"]
+
+[[permission]]
+identifier = "deny-apply-scancode-map"
+description = "Denies the apply_scancode_map command without any pre-configured scope."
+commands.deny = ["apply_scancode_map"]

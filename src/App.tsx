@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button, Layout, Menu, Splitter, Tooltip, Typography } from "antd";
@@ -30,6 +31,12 @@ const SIDER_MAX_WIDTH = 320;
 const SIDER_INITIAL_WIDTH = 208;
 
 type PageKey = "dashboard" | "keymapper" | "screenshot" | "widget" | "settings";
+type ScreenshotTabKey = "history" | "settings";
+
+interface MainNavigation {
+  page: PageKey;
+  tab?: ScreenshotTabKey;
+}
 
 interface PageItem {
   key: PageKey;
@@ -47,6 +54,7 @@ const PAGES: PageItem[] = [
 
 export default function App() {
   const [activePage, setActivePage] = useState<PageKey>("dashboard");
+  const [screenshotTab, setScreenshotTab] = useState<ScreenshotTabKey>("history");
   const [siderWidth, setSiderWidth] = useState(SIDER_INITIAL_WIDTH);
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const { resolved, setMode } = useTheme();
@@ -62,13 +70,33 @@ export default function App() {
       .catch(() => setIsAdmin(false));
   }, []);
 
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen<MainNavigation>("navigate-main", ({ payload }) => {
+      if (payload.page === "screenshot") {
+        setScreenshotTab(payload.tab ?? "history");
+      }
+      setActivePage(payload.page);
+    }).then((off) => {
+      if (disposed) off();
+      else unlisten = off;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
   const currentPage = PAGES.find((page) => page.key === activePage) ?? PAGES[0];
   const page = useMemo(() => {
     switch (activePage) {
       case "keymapper":
         return <KeyMapper />;
       case "screenshot":
-        return <ScreenshotSettings />;
+        return (
+          <ScreenshotSettings activeTab={screenshotTab} onActiveTabChange={setScreenshotTab} />
+        );
       case "widget":
         return <WidgetSettings />;
       case "settings":
@@ -76,7 +104,7 @@ export default function App() {
       default:
         return <Dashboard />;
     }
-  }, [activePage]);
+  }, [activePage, screenshotTab]);
 
   return (
     <Splitter

@@ -59,6 +59,7 @@ struct CaptureData {
     physical_width: u32,
     physical_height: u32,
     window_candidates: Vec<window_candidates::WindowCandidate>,
+    backend: &'static str,
 }
 
 #[derive(Clone, Debug)]
@@ -67,20 +68,18 @@ struct CaptureTiming {
     started: Instant,
     native_ready_ms: u128,
     webview_ready_ms: Option<u128>,
+    backend: &'static str,
 }
 
 pub struct AppState {
     capture: Mutex<Option<CaptureData>>,
-    pin_data: Mutex<HashMap<String, Vec<u8>>>,
+    pin_runtime: Mutex<PinRuntimeState>,
     pin_generation: AtomicU64,
-    pin_ready: Mutex<HashSet<String>>,
-    pin_options: Mutex<HashMap<String, PinOptions>>,
     // Ctrl+2 deliberately consumes only a PNG exported by the editor. Keeping
     // it separate from the frozen full-screen capture prevents accidental
     // pinning before the user has confirmed a selection.
-    confirmed_png: Mutex<Option<Vec<u8>>>,
-    registered_shortcut: Mutex<Option<String>>,
-    registered_pin_shortcut: Mutex<Option<String>>,
+    confirmed_png: Mutex<Option<Arc<[u8]>>>,
+    registered_shortcuts: Mutex<HashMap<shortcut::ShortcutAction, String>>,
     overlay_ready: AtomicBool,
     active_overlay: Mutex<Option<String>>,
     capture_in_progress: AtomicBool,
@@ -97,13 +96,10 @@ static URI_CAPTURE: LazyLock<Mutex<Option<CaptureData>>> = LazyLock::new(|| Mute
 pub fn create_state() -> AppState {
     AppState {
         capture: Mutex::new(None),
-        pin_data: Mutex::new(HashMap::new()),
+        pin_runtime: Mutex::new(PinRuntimeState::default()),
         pin_generation: AtomicU64::new(0),
-        pin_ready: Mutex::new(HashSet::new()),
-        pin_options: Mutex::new(HashMap::new()),
         confirmed_png: Mutex::new(None),
-        registered_shortcut: Mutex::new(None),
-        registered_pin_shortcut: Mutex::new(None),
+        registered_shortcuts: Mutex::new(HashMap::new()),
         overlay_ready: AtomicBool::new(false),
         active_overlay: Mutex::new(None),
         capture_in_progress: AtomicBool::new(false),
@@ -133,10 +129,7 @@ pub fn initialize(app: &AppHandle) -> Result<(), String> {
         .map_err(|_| "配置状态已损坏".to_string())?
         .screenshot_config
         .clone();
-    shortcut::register_capture(app, &shortcuts.shortcut)
-        .map_err(|error| format!("注册 {} 截图快捷键失败：{error}", shortcuts.shortcut))?;
-    shortcut::register_pin(app, &shortcuts.pin_shortcut)
-        .map_err(|error| format!("注册 {} 贴图快捷键失败：{error}", shortcuts.pin_shortcut))?;
+    shortcut::register_initial(app, &shortcuts);
     Ok(())
 }
 
@@ -167,6 +160,126 @@ pub struct FullScreenshot {
 pub struct PinOptions {
     opacity: f64,
     locked: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PinPlacement {
+    screen_id: u32,
+    slot: u32,
+}
+
+#[derive(Default)]
+struct PinRuntimeState {
+    data: HashMap<String, Arc<[u8]>>,
+    ready: HashSet<String>,
+    options: HashMap<String, PinOptions>,
+    placements: HashMap<String, PinPlacement>,
+    order: Vec<String>,
+}
+
+impl PinRuntimeState {
+    fn reserve(&mut self, id: String, data: Arc<[u8]>, screen_id: u32) -> u32 {
+        let occupied = self
+            .placements
+            .values()
+            .filter(|placement| placement.screen_id == screen_id)
+            .map(|placement| placement.slot)
+            .collect::<HashSet<_>>();
+        let slot = (0..).find(|slot| !occupied.contains(slot)).unwrap_or(0);
+        self.data.insert(id.clone(), data);
+        self.options.insert(id.clone(), PinOptions::default());
+        self.placements
+            .insert(id.clone(), PinPlacement { screen_id, slot });
+        self.order.push(id);
+        slot
+    }
+
+    fn remove(&mut self, id: &str) {
+        self.data.remove(id);
+        self.ready.remove(id);
+        self.options.remove(id);
+        self.placements.remove(id);
+        self.order.retain(|candidate| candidate != id);
+    }
+
+    fn latest(&self) -> Option<&str> {
+        self.order.last().map(String::as_str)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PinWindowLayout {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+const PIN_WINDOW_MARGIN: f64 = 20.0;
+const PIN_CASCADE_STEP: f64 = 28.0;
+
+fn pin_window_layout(
+    screen: Rect,
+    window_width: f64,
+    window_height: f64,
+    slot: u32,
+) -> PinWindowLayout {
+    let width = window_width.max(60.0).min(screen.width.max(60.0));
+    let height = window_height.max(60.0).min(screen.height.max(60.0));
+    let min_x = screen.x + PIN_WINDOW_MARGIN;
+    let min_y = screen.y + PIN_WINDOW_MARGIN;
+    let max_x = (screen.x + screen.width - width - PIN_WINDOW_MARGIN).max(min_x);
+    let max_y = (screen.y + screen.height - height - PIN_WINDOW_MARGIN).max(min_y);
+    let center_x = (screen.x + (screen.width - width) / 2.0).clamp(min_x, max_x);
+    let center_y = (screen.y + (screen.height - height) / 2.0).clamp(min_y, max_y);
+    let mut candidates = vec![(center_x, center_y)];
+    let max_radius =
+        (((max_x - min_x).max(max_y - min_y) / PIN_CASCADE_STEP).ceil() as i32 + 1).max(1);
+    for radius in 1..=max_radius {
+        for (dx, dy) in [
+            (radius, radius),
+            (-radius, radius),
+            (radius, -radius),
+            (-radius, -radius),
+            (radius, 0),
+            (0, radius),
+            (-radius, 0),
+            (0, -radius),
+        ] {
+            let candidate = (
+                (center_x + dx as f64 * PIN_CASCADE_STEP).clamp(min_x, max_x),
+                (center_y + dy as f64 * PIN_CASCADE_STEP).clamp(min_y, max_y),
+            );
+            if !candidates.iter().any(|existing| {
+                (existing.0 - candidate.0).abs() < 0.5 && (existing.1 - candidate.1).abs() < 0.5
+            }) {
+                candidates.push(candidate);
+            }
+        }
+    }
+    let (x, y) = candidates[slot as usize % candidates.len()];
+    PinWindowLayout {
+        x,
+        y,
+        width,
+        height,
+    }
+}
+
+fn logical_pin_to_physical(
+    logical_screen: Rect,
+    physical_origin_x: i32,
+    physical_origin_y: i32,
+    scale: f64,
+    layout: PinWindowLayout,
+) -> (i32, i32, u32, u32) {
+    let scale = scale.max(1.0);
+    (
+        physical_origin_x + ((layout.x - logical_screen.x) * scale).round() as i32,
+        physical_origin_y + ((layout.y - logical_screen.y) * scale).round() as i32,
+        (layout.width * scale).round().max(1.0) as u32,
+        (layout.height * scale).round().max(1.0) as u32,
+    )
 }
 
 impl Default for PinOptions {
@@ -289,6 +402,20 @@ fn image_is_blank(image: &RgbaImage) -> bool {
         }
     }
     true
+}
+
+fn capture_with_gdi_fallback<T>(
+    primary: Result<T, String>,
+    fallback: impl FnOnce(&str) -> Result<T, String>,
+) -> Result<(T, &'static str), String> {
+    match primary {
+        Ok(frame) => Ok((frame, "dxgi")),
+        Err(dxgi_error) => fallback(&dxgi_error)
+            .map(|frame| (frame, "gdi"))
+            .map_err(|gdi_error| {
+                format!("DXGI 捕获失败：{dxgi_error}；GDI 兼容回退失败：{gdi_error}")
+            }),
+    }
 }
 
 fn active_screen(app: &AppHandle) -> Result<Screen, String> {
@@ -441,7 +568,7 @@ fn capture_active_screen(app: &AppHandle) -> Result<CaptureData, String> {
     let _entered = span.enter();
     let screen = active_screen(app)?;
     let info = screen.display_info;
-    let (bmp, image_width, image_height, bounds, physical_origin_x, physical_origin_y) = {
+    let (bmp, image_width, image_height, bounds, physical_origin_x, physical_origin_y, backend) = {
         // Tao/Tauri makes the process Per-Monitor-V2 DPI aware. `screenshots`
         // also multiplies DisplayInfo dimensions by its detected scale factor,
         // which can scale an already-physical Windows desktop a second time.
@@ -474,14 +601,17 @@ fn capture_active_screen(app: &AppHandle) -> Result<CaptureData, String> {
             .dxgi_capture
             .lock()
             .map_err(|_| "DXGI capture state is unavailable".to_string())?
-            .capture(rect, 20);
-        let (bmp, image_width, image_height) = match dxgi {
-            Ok(frame) => (
-                bmp_from_bgra(frame.width, frame.height, &frame.bytes)?,
-                frame.width,
-                frame.height,
-            ),
-            Err(error) => {
+            .capture(rect, 20)
+            .and_then(|frame| {
+                Ok((
+                    bmp_from_bgra(frame.width, frame.height, &frame.bytes)?,
+                    frame.width,
+                    frame.height,
+                ))
+            });
+        let ((bmp, image_width, image_height), backend) = capture_with_gdi_fallback(
+            dxgi,
+            |error| {
                 // Desktop Duplication is unavailable in some RDP, protected
                 // content and multi-GPU configurations. Keep a verified GDI
                 // fallback so a fast path failure never disables screenshots.
@@ -494,9 +624,9 @@ fn capture_active_screen(app: &AppHandle) -> Result<CaptureData, String> {
                 }
                 let width = image.width();
                 let height = image.height();
-                (bmp_from_rgba(&image)?, width, height)
-            }
-        };
+                Ok((bmp_from_rgba(&image)?, width, height))
+            },
+        )?;
         (
             bmp,
             image_width,
@@ -509,6 +639,7 @@ fn capture_active_screen(app: &AppHandle) -> Result<CaptureData, String> {
             },
             position.x,
             position.y,
+            backend,
         )
     };
     let scale_factor = image_width as f64 / bounds.width.max(1.0);
@@ -536,6 +667,7 @@ fn capture_active_screen(app: &AppHandle) -> Result<CaptureData, String> {
         physical_width: image_width,
         physical_height: image_height,
         window_candidates,
+        backend,
     })
 }
 
@@ -593,25 +725,28 @@ fn open_overlay(app: &AppHandle, capture: &CaptureData) -> Result<(), String> {
             capture.bounds.width,
             capture.bounds.height,
         )?;
-        #[cfg(target_os = "windows")]
-        if let Some(window) = app.get_webview_window(&label) {
-            window
-                .set_position(tauri::PhysicalPosition::new(
-                    capture.physical_origin_x,
-                    capture.physical_origin_y,
-                ))
-                .map_err(|error| error.to_string())?;
-            window
-                .set_size(tauri::PhysicalSize::new(
-                    capture.physical_width,
-                    capture.physical_height,
-                ))
-                .map_err(|error| error.to_string())?;
-        }
     }
     *app.state::<AppState>().active_overlay.lock_or_recover() = Some(label.clone());
-    if app.get_webview_window(&label).is_none() {
-        return Err("Capture overlay is unavailable".into());
+    let window = app
+        .get_webview_window(&label)
+        .ok_or_else(|| "Capture overlay is unavailable".to_string())?;
+    // A prewarmed overlay can be reused after a display-mode change or for a
+    // history image whose editor window is smaller than the monitor. Always
+    // refresh native geometry instead of assuming its first size is current.
+    #[cfg(target_os = "windows")]
+    {
+        window
+            .set_position(tauri::PhysicalPosition::new(
+                capture.physical_origin_x,
+                capture.physical_origin_y,
+            ))
+            .map_err(|error| error.to_string())?;
+        window
+            .set_size(tauri::PhysicalSize::new(
+                capture.physical_width,
+                capture.physical_height,
+            ))
+            .map_err(|error| error.to_string())?;
     }
     // `handle_start_capture` already hides the prewarmed overlay before the
     // native frame is captured. Hiding it again here introduces an extra DWM
@@ -631,6 +766,7 @@ fn record_capture_timing(
     generation: u64,
     started: Instant,
     native_ready_ms: u128,
+    backend: &'static str,
 ) {
     let state = app.state::<AppState>();
     let mut timings = state.capture_timings.lock_or_recover();
@@ -639,6 +775,7 @@ fn record_capture_timing(
         started,
         native_ready_ms,
         webview_ready_ms: None,
+        backend,
     });
     if timings.len() > 20 {
         timings.remove(0);
@@ -715,6 +852,18 @@ fn build_pin_window(
     .map_err(|error| error.to_string())
 }
 
+fn release_pin_runtime(app: &AppHandle, id: &str, destroy_window: bool) {
+    if destroy_window {
+        if let Some(window) = app.get_webview_window(id) {
+            let _ = window.destroy();
+        }
+    }
+    app.state::<AppState>()
+        .pin_runtime
+        .lock_or_recover()
+        .remove(id);
+}
+
 fn show_capture_error(app: &AppHandle, detail: &str) {
     tracing::error!(target: "dock_mapper::capture", %detail, "LiteSnap capture failed");
     let _ = app.emit("capture-error", detail.to_string());
@@ -757,7 +906,13 @@ fn handle_start_capture(app: &AppHandle) {
                 Ok(capture) => {
                     *ui_app.state::<AppState>().capture.lock_or_recover() = Some(capture.clone());
                     *URI_CAPTURE.lock_or_recover() = Some(capture.clone());
-                    record_capture_timing(&ui_app, capture.generation, started, native_ready_ms);
+                    record_capture_timing(
+                        &ui_app,
+                        capture.generation,
+                        started,
+                        native_ready_ms,
+                        capture.backend,
+                    );
                     if let Err(error) = open_overlay(&ui_app, &capture) {
                         show_capture_error(&ui_app, &error);
                     }
@@ -815,11 +970,11 @@ pub fn copy_text(value: String) -> Result<bool, String> {
     Ok(true)
 }
 
-fn remember_confirmed_image(app: &AppHandle, data: &[u8]) {
-    *app.state::<AppState>().confirmed_png.lock_or_recover() = Some(data.to_vec());
+fn remember_confirmed_image(app: &AppHandle, data: Arc<[u8]>) {
+    *app.state::<AppState>().confirmed_png.lock_or_recover() = Some(data);
 }
 
-fn confirmed_image(state: &AppState) -> Result<Vec<u8>, String> {
+fn confirmed_image(state: &AppState) -> Result<Arc<[u8]>, String> {
     state
         .confirmed_png
         .lock_or_recover()
@@ -829,15 +984,62 @@ fn confirmed_image(state: &AppState) -> Result<Vec<u8>, String> {
 
 fn pin_confirmed_image(app: &AppHandle) -> Result<bool, String> {
     let data = confirmed_image(&app.state::<AppState>())?;
-    pin_image_impl(app.clone(), data).map(|_| true)
+    pin_image_impl(app.clone(), data, true).map(|_| true)
 }
 
-pub fn update_capture_shortcut(app: &AppHandle, shortcut: &str) -> Result<(), String> {
-    shortcut::register_capture(app, shortcut)
+pub fn copy_png_bytes(data: &[u8]) -> Result<(), String> {
+    clipboard::write_png(data)
 }
 
-pub fn update_pin_shortcut(app: &AppHandle, shortcut: &str) -> Result<(), String> {
-    shortcut::register_pin(app, shortcut)
+pub fn pin_external_image(app: AppHandle, data: Vec<u8>) -> Result<String, String> {
+    pin_image_impl(app, Arc::from(data.into_boxed_slice()), false)
+}
+
+pub fn update_shortcuts(
+    app: &AppHandle,
+    previous: &crate::config::ScreenshotConfig,
+    next: &crate::config::ScreenshotConfig,
+) -> Result<(), String> {
+    shortcut::replace_changed(app, previous, next)
+}
+
+fn toggle_latest_pin(app: &AppHandle) {
+    loop {
+        let (latest, ready) = {
+            let state = app.state::<AppState>();
+            let runtime = state.pin_runtime.lock_or_recover();
+            let latest = runtime.latest().map(str::to_owned);
+            let ready = latest.as_ref().is_some_and(|id| runtime.ready.contains(id));
+            (latest, ready)
+        };
+        let Some(id) = latest else {
+            tracing::debug!(target: "dock_mapper::pin", "没有可显隐的贴图窗口");
+            return;
+        };
+        let Some(window) = app.get_webview_window(&id) else {
+            app.state::<AppState>()
+                .pin_runtime
+                .lock_or_recover()
+                .remove(&id);
+            continue;
+        };
+        if !ready {
+            tracing::debug!(target: "dock_mapper::pin", pin_id = %id, "最近贴图仍在加载，忽略显隐快捷键");
+            return;
+        }
+        let result = match window.is_visible() {
+            Ok(true) => window.hide(),
+            Ok(false) => window.show(),
+            Err(error) => {
+                tracing::warn!(target: "dock_mapper::pin", pin_id = %id, %error, "读取贴图可见状态失败");
+                return;
+            }
+        };
+        if let Err(error) = result {
+            tracing::warn!(target: "dock_mapper::pin", pin_id = %id, %error, "切换贴图可见状态失败");
+        }
+        return;
+    }
 }
 
 #[tauri::command]
@@ -948,7 +1150,24 @@ pub fn report_capture_rendered(
             generation = timing.generation,
             native_ms = timing.native_ready_ms,
             webview_ms = timing.webview_ready_ms.unwrap_or_default(),
+            backend = timing.backend,
             "Screenshot rendered"
+        );
+    }
+    let mut completed = timings
+        .iter()
+        .filter_map(|timing| timing.webview_ready_ms)
+        .collect::<Vec<_>>();
+    if completed.len() >= 5 && generation % 5 == 0 {
+        completed.sort_unstable();
+        let p95_index = ((completed.len() as f64 * 0.95).ceil() as usize)
+            .saturating_sub(1)
+            .min(completed.len() - 1);
+        tracing::info!(
+            target: "dock_mapper::capture",
+            sample_count = completed.len(),
+            p95_ms = completed[p95_index],
+            "Recent screenshot latency"
         );
     }
     drop(timings);
@@ -966,14 +1185,13 @@ pub fn copy_image(
     config_state: State<'_, crate::AppState>,
     image_id: String,
 ) -> Result<bool, String> {
-    let data = config_state.images.get(&image_id)?;
-    config_state.images.remove(&image_id);
+    let data = config_state.images.take(&image_id)?;
     hide_overlay_for_commit(&app);
     if let Err(error) = clipboard::write_png(&data) {
         restore_overlay_after_commit_failure(&app);
         return Err(error);
     }
-    remember_confirmed_image(&app, &data);
+    remember_confirmed_image(&app, data);
     finish_overlay_commit(&app);
     Ok(true)
 }
@@ -984,14 +1202,13 @@ pub fn save_image(
     config_state: State<'_, crate::AppState>,
     image_id: String,
 ) -> Result<bool, String> {
-    let data = config_state.images.get(&image_id)?;
-    config_state.images.remove(&image_id);
+    let data = config_state.images.take(&image_id)?;
     hide_overlay_for_commit(&app);
     if let Err(error) = clipboard::write_png(&data) {
         restore_overlay_after_commit_failure(&app);
         return Err(error);
     }
-    remember_confirmed_image(&app, &data);
+    remember_confirmed_image(&app, data.clone());
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -1017,7 +1234,7 @@ pub fn save_image(
         restore_overlay_after_commit_failure(&app);
         return Ok(false);
     };
-    if let Err(error) = fs::write(path, data) {
+    if let Err(error) = fs::write(path, data.as_ref()) {
         restore_overlay_after_commit_failure(&app);
         return Err(error.to_string());
     }
@@ -1025,12 +1242,16 @@ pub fn save_image(
     Ok(true)
 }
 
-fn pin_image_impl(app: AppHandle, data: Vec<u8>) -> Result<String, String> {
+fn pin_image_impl(
+    app: AppHandle,
+    data: Arc<[u8]>,
+    close_source_overlay: bool,
+) -> Result<String, String> {
     // Reading the PNG header is enough to size the native window. Fully
     // decoding a large/long screenshot on Tauri's IPC thread can starve the
     // Windows event loop, which also prevents Cancel and the global shortcut
     // from being processed.
-    let (pixel_width, pixel_height) = image::io::Reader::new(Cursor::new(&data))
+    let (pixel_width, pixel_height) = image::io::Reader::new(Cursor::new(data.as_ref()))
         .with_guessed_format()
         .map_err(|error| error.to_string())?
         .into_dimensions()
@@ -1043,16 +1264,19 @@ fn pin_image_impl(app: AppHandle, data: Vec<u8>) -> Result<String, String> {
         .max(1.0);
     let natural_width = pixel_width as f64 / scale;
     let natural_height = pixel_height as f64 / scale;
-    let screen_bounds = if let Some(capture) = capture.as_ref() {
-        capture.bounds
+    let (screen_id, screen_bounds) = if let Some(capture) = capture.as_ref() {
+        (capture.screen_id, capture.bounds)
     } else {
         let info = active_screen(&app)?.display_info;
-        Rect {
-            x: info.x as f64,
-            y: info.y as f64,
-            width: info.width as f64,
-            height: info.height as f64,
-        }
+        (
+            info.id,
+            Rect {
+                x: info.x as f64,
+                y: info.y as f64,
+                width: info.width as f64,
+                height: info.height as f64,
+            },
+        )
     };
     let max_width = (screen_bounds.width - 40.0).max(160.0);
     let max_height = (screen_bounds.height - 40.0).max(160.0);
@@ -1061,19 +1285,6 @@ fn pin_image_impl(app: AppHandle, data: Vec<u8>) -> Result<String, String> {
         .min(1.0);
     let window_width = (natural_width * fit).max(60.0);
     let window_height = (natural_height * fit).max(60.0);
-    let window_x = screen_bounds.x + (screen_bounds.width - window_width) / 2.0;
-    let window_y = screen_bounds.y + (screen_bounds.height - window_height) / 2.0;
-    #[cfg(target_os = "windows")]
-    let physical_geometry = capture.as_ref().map(|capture| {
-        let scale = capture.scale_factor.max(1.0);
-        (
-            capture.physical_origin_x + ((window_x - capture.bounds.x) * scale).round() as i32,
-            capture.physical_origin_y + ((window_y - capture.bounds.y) * scale).round() as i32,
-            (window_width * scale).round().max(1.0) as u32,
-            (window_height * scale).round().max(1.0) as u32,
-        )
-    });
-    remember_confirmed_image(&app, &data);
     let id = format!(
         "pin-{}",
         app.state::<AppState>()
@@ -1081,49 +1292,82 @@ fn pin_image_impl(app: AppHandle, data: Vec<u8>) -> Result<String, String> {
             .fetch_add(1, Ordering::SeqCst)
             + 1
     );
-    app.state::<AppState>()
-        .pin_data
+    let slot = app
+        .state::<AppState>()
+        .pin_runtime
         .lock_or_recover()
-        .insert(id.clone(), data);
-    app.state::<AppState>()
-        .pin_options
-        .lock_or_recover()
-        .insert(id.clone(), PinOptions::default());
-    build_pin_window(&app, &id, window_x, window_y, window_width, window_height)?;
-
-    let window = app
-        .get_webview_window(&id)
-        .ok_or_else(|| "Pin window is unavailable".to_string())?;
+        .reserve(id.clone(), data.clone(), screen_id);
+    let layout = pin_window_layout(screen_bounds, window_width, window_height, slot);
     #[cfg(target_os = "windows")]
+    let physical_geometry = capture.as_ref().map(|capture| {
+        logical_pin_to_physical(
+            capture.bounds,
+            capture.physical_origin_x,
+            capture.physical_origin_y,
+            capture.scale_factor,
+            layout,
+        )
+    });
+
+    if let Err(error) = build_pin_window(&app, &id, layout.x, layout.y, layout.width, layout.height)
     {
-        if let Some((x, y, width, height)) = physical_geometry {
-            // A physical window pixel now maps to one captured image pixel.
-            // This also avoids sizing the reused WebView with the DPI of the
-            // monitor where it was prewarmed instead of the capture monitor.
-            window
-                .set_position(tauri::PhysicalPosition::new(x, y))
-                .map_err(|error| error.to_string())?;
-            window
-                .set_size(tauri::PhysicalSize::new(width, height))
-                .map_err(|error| error.to_string())?;
-        } else {
-            window
-                .set_position(tauri::LogicalPosition::new(window_x, window_y))
-                .map_err(|error| error.to_string())?;
-            window
-                .set_size(tauri::LogicalSize::new(window_width, window_height))
-                .map_err(|error| error.to_string())?;
-        }
-        let _ = window.emit("pin-image-updated", &id);
+        release_pin_runtime(&app, &id, true);
+        return Err(error);
     }
+
+    let initialize_result = (|| {
+        let window = app
+            .get_webview_window(&id)
+            .ok_or_else(|| "Pin window is unavailable".to_string())?;
+        let destroyed_app = app.clone();
+        let destroyed_id = id.clone();
+        window.on_window_event(move |event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                destroyed_app
+                    .state::<AppState>()
+                    .pin_runtime
+                    .lock_or_recover()
+                    .remove(&destroyed_id);
+            }
+        });
+        #[cfg(target_os = "windows")]
+        {
+            if let Some((x, y, width, height)) = physical_geometry {
+                // A physical window pixel now maps to one captured image pixel.
+                // This also avoids sizing the reused WebView with the DPI of the
+                // monitor where it was prewarmed instead of the capture monitor.
+                window
+                    .set_position(tauri::PhysicalPosition::new(x, y))
+                    .map_err(|error| error.to_string())?;
+                window
+                    .set_size(tauri::PhysicalSize::new(width, height))
+                    .map_err(|error| error.to_string())?;
+            } else {
+                window
+                    .set_position(tauri::LogicalPosition::new(layout.x, layout.y))
+                    .map_err(|error| error.to_string())?;
+                window
+                    .set_size(tauri::LogicalSize::new(layout.width, layout.height))
+                    .map_err(|error| error.to_string())?;
+            }
+            let _ = window.emit("pin-image-updated", &id);
+        }
+        Ok::<(), String>(())
+    })();
+    if let Err(error) = initialize_result {
+        release_pin_runtime(&app, &id, true);
+        return Err(error);
+    }
+    remember_confirmed_image(&app, data);
     let fallback_app = app.clone();
     let fallback_id = id.clone();
     thread::spawn(move || {
         thread::sleep(std::time::Duration::from_secs(2));
         let ready = fallback_app
             .state::<AppState>()
-            .pin_ready
+            .pin_runtime
             .lock_or_recover()
+            .ready
             .contains(&fallback_id);
         if !ready {
             tracing::warn!(target: "dock_mapper::pin", pin_id = %fallback_id, "贴图解码握手超时，显示窗口以便诊断");
@@ -1132,7 +1376,9 @@ fn pin_image_impl(app: AppHandle, data: Vec<u8>) -> Result<String, String> {
             }
         }
     });
-    close_overlay_impl(&app);
+    if close_source_overlay {
+        close_overlay_impl(&app);
+    }
     Ok(id)
 }
 
@@ -1142,29 +1388,31 @@ pub async fn pin_image(
     config_state: State<'_, crate::AppState>,
     image_id: String,
 ) -> Result<String, String> {
-    let data = config_state.images.get(&image_id)?;
-    config_state.images.remove(&image_id);
-    pin_image_impl(app, data)
+    let data = config_state.images.take(&image_id)?;
+    pin_image_impl(app, data, true)
 }
 
 #[tauri::command]
 pub fn get_pin_image(state: State<AppState>, id: String) -> Result<tauri::ipc::Response, String> {
     state
-        .pin_data
+        .pin_runtime
         .lock_or_recover()
+        .data
         .get(&id)
         .cloned()
-        .map(tauri::ipc::Response::new)
+        .map(|data| tauri::ipc::Response::new(data.as_ref().to_vec()))
         .ok_or_else(|| "No pinned image is available".into())
 }
 
 #[tauri::command]
 pub fn pin_image_ready(app: AppHandle, id: String) -> Result<bool, String> {
     let state = app.state::<AppState>();
-    if !state.pin_data.lock_or_recover().contains_key(&id) {
+    let mut runtime = state.pin_runtime.lock_or_recover();
+    if !runtime.data.contains_key(&id) {
         return Err("贴图数据不存在".into());
     }
-    state.pin_ready.lock_or_recover().insert(id.clone());
+    runtime.ready.insert(id.clone());
+    drop(runtime);
     let window = app
         .get_webview_window(&id)
         .ok_or_else(|| "贴图窗口不存在".to_string())?;
@@ -1175,8 +1423,9 @@ pub fn pin_image_ready(app: AppHandle, id: String) -> Result<bool, String> {
 #[tauri::command]
 pub fn get_pin_options(state: State<AppState>, id: String) -> Result<PinOptions, String> {
     state
-        .pin_options
+        .pin_runtime
         .lock_or_recover()
+        .options
         .get(&id)
         .copied()
         .ok_or_else(|| "贴图窗口不存在".into())
@@ -1191,12 +1440,12 @@ pub fn update_pin_options(
 ) -> Result<PinOptions, String> {
     let options = normalized_pin_options(opacity, locked);
     let state = app.state::<AppState>();
-    let mut values = state.pin_options.lock_or_recover();
-    if !values.contains_key(&id) {
+    let mut runtime = state.pin_runtime.lock_or_recover();
+    if !runtime.options.contains_key(&id) {
         return Err("贴图窗口不存在".into());
     }
-    values.insert(id.clone(), options);
-    drop(values);
+    runtime.options.insert(id.clone(), options);
+    drop(runtime);
     let window = app
         .get_webview_window(&id)
         .ok_or_else(|| "贴图窗口不存在".to_string())?;
@@ -1209,8 +1458,9 @@ pub fn update_pin_options(
 #[tauri::command]
 pub fn copy_pin_image(state: State<AppState>, id: String) -> Result<bool, String> {
     let data = state
-        .pin_data
+        .pin_runtime
         .lock_or_recover()
+        .data
         .get(&id)
         .cloned()
         .ok_or_else(|| "贴图数据不存在".to_string())?;
@@ -1221,8 +1471,9 @@ pub fn copy_pin_image(state: State<AppState>, id: String) -> Result<bool, String
 #[tauri::command]
 pub fn save_pin_image(state: State<AppState>, id: String) -> Result<bool, String> {
     let data = state
-        .pin_data
+        .pin_runtime
         .lock_or_recover()
+        .data
         .get(&id)
         .cloned()
         .ok_or_else(|| "贴图数据不存在".to_string())?;
@@ -1234,24 +1485,13 @@ pub fn save_pin_image(state: State<AppState>, id: String) -> Result<bool, String
     else {
         return Ok(false);
     };
-    fs::write(path, data).map_err(|error| error.to_string())?;
+    fs::write(path, data.as_ref()).map_err(|error| error.to_string())?;
     Ok(true)
 }
 
 #[tauri::command]
 pub fn close_pin_window(app: AppHandle, id: String) {
-    if let Some(window) = app.get_webview_window(&id) {
-        let _ = window.destroy();
-    }
-    app.state::<AppState>()
-        .pin_data
-        .lock_or_recover()
-        .remove(&id);
-    app.state::<AppState>().pin_ready.lock_or_recover().remove(&id);
-    app.state::<AppState>()
-        .pin_options
-        .lock_or_recover()
-        .remove(&id);
+    release_pin_runtime(&app, &id, true);
 }
 
 #[tauri::command]
@@ -1317,11 +1557,24 @@ mod tests {
         let state = create_state();
         assert!(confirmed_image(&state).is_err());
 
-        *state.confirmed_png.lock_or_recover() = Some(vec![1, 2, 3]);
+        *state.confirmed_png.lock_or_recover() = Some(vec![1, 2, 3].into());
         assert_eq!(
             confirmed_image(&state).expect("confirmed PNG"),
-            vec![1, 2, 3]
+            Arc::<[u8]>::from(vec![1, 2, 3])
         );
+    }
+
+    #[test]
+    fn uses_gdi_when_dxgi_returns_an_error() {
+        let mut reason = None;
+        let (frame, backend) = capture_with_gdi_fallback(Err("access lost".into()), |error| {
+            reason = Some(error.to_string());
+            Ok::<_, String>(42)
+        })
+        .unwrap();
+        assert_eq!(frame, 42);
+        assert_eq!(backend, "gdi");
+        assert_eq!(reason.as_deref(), Some("access lost"));
     }
 
     #[test]
@@ -1337,5 +1590,102 @@ mod tests {
         assert_eq!(normalized_pin_options(0.05, true).opacity, 0.2);
         assert_eq!(normalized_pin_options(1.5, false).opacity, 1.0);
         assert!(normalized_pin_options(0.75, true).locked);
+    }
+
+    #[test]
+    fn first_pin_is_centered_and_following_pins_use_distinct_slots() {
+        let screen = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 1920.0,
+            height: 1080.0,
+        };
+        let first = pin_window_layout(screen, 400.0, 300.0, 0);
+        let second = pin_window_layout(screen, 400.0, 300.0, 1);
+        assert_eq!((first.x, first.y), (760.0, 390.0));
+        assert_ne!((first.x, first.y), (second.x, second.y));
+        assert_eq!(
+            ((second.x - first.x).abs(), (second.y - first.y).abs()),
+            (PIN_CASCADE_STEP, PIN_CASCADE_STEP)
+        );
+    }
+
+    #[test]
+    fn pin_layout_wraps_inside_negative_monitor_bounds() {
+        let screen = Rect {
+            x: -1920.0,
+            y: -120.0,
+            width: 1280.0,
+            height: 720.0,
+        };
+        for slot in 0..80 {
+            let layout = pin_window_layout(screen, 700.0, 500.0, slot);
+            assert!(layout.x >= screen.x + PIN_WINDOW_MARGIN);
+            assert!(layout.y >= screen.y + PIN_WINDOW_MARGIN);
+            assert!(layout.x + layout.width <= screen.x + screen.width - PIN_WINDOW_MARGIN + 0.5);
+            assert!(layout.y + layout.height <= screen.y + screen.height - PIN_WINDOW_MARGIN + 0.5);
+        }
+    }
+
+    #[test]
+    fn oversized_pin_uses_the_only_safe_position() {
+        let screen = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 1920.0,
+            height: 1080.0,
+        };
+        let first = pin_window_layout(screen, 1880.0, 1040.0, 0);
+        let later = pin_window_layout(screen, 1880.0, 1040.0, 9);
+        assert_eq!(first, later);
+        assert_eq!((first.x, first.y), (20.0, 20.0));
+    }
+
+    #[test]
+    fn logical_pin_geometry_respects_mixed_dpi_and_negative_origins() {
+        let physical = logical_pin_to_physical(
+            Rect {
+                x: -1280.0,
+                y: 0.0,
+                width: 1280.0,
+                height: 720.0,
+            },
+            -1920,
+            0,
+            1.5,
+            PinWindowLayout {
+                x: -1000.0,
+                y: 100.0,
+                width: 300.0,
+                height: 200.0,
+            },
+        );
+        assert_eq!(physical, (-1500, 150, 450, 300));
+    }
+
+    #[test]
+    fn releasing_one_pin_keeps_others_and_reuses_only_its_slot() {
+        let mut runtime = PinRuntimeState::default();
+        let first_slot = runtime.reserve("pin-1".into(), Arc::<[u8]>::from(vec![1]), 7);
+        let second_slot = runtime.reserve("pin-2".into(), Arc::<[u8]>::from(vec![2]), 7);
+        let other_monitor_slot = runtime.reserve("pin-3".into(), Arc::<[u8]>::from(vec![3]), 8);
+        assert_eq!((first_slot, second_slot, other_monitor_slot), (0, 1, 0));
+        assert_eq!(runtime.latest(), Some("pin-3"));
+
+        runtime.ready.insert("pin-1".into());
+        runtime.remove("pin-1");
+        assert!(!runtime.data.contains_key("pin-1"));
+        assert!(!runtime.options.contains_key("pin-1"));
+        assert!(!runtime.placements.contains_key("pin-1"));
+        assert!(runtime.data.contains_key("pin-2"));
+        runtime.remove("pin-3");
+        assert_eq!(runtime.latest(), Some("pin-2"));
+
+        let reused = runtime.reserve("pin-4".into(), Arc::<[u8]>::from(vec![4]), 7);
+        assert_eq!(reused, 0);
+        assert_eq!(runtime.latest(), Some("pin-4"));
+        runtime.remove("pin-4");
+        runtime.remove("pin-2");
+        assert_eq!(runtime.latest(), None);
     }
 }

@@ -4,12 +4,19 @@
   "description": "贴图窗口仅允许关闭自身和读取其内存图片",
   "windows": ["pin-*"],
   "permissions": [
-    "core:default",
     "core:event:allow-listen",
+    "core:event:allow-unlisten",
     "core:window:allow-close",
-    "core:window:allow-set-theme",
     "core:window:allow-start-dragging",
     "core:window:allow-start-resize-dragging",
-    "core:window:allow-set-size"
+    "core:window:allow-set-size",
+    "allow-get-pin-image",
+    "allow-pin-image-ready",
+    "allow-get-pin-options",
+    "allow-update-pin-options",
+    "allow-copy-pin-image",
+    "allow-save-pin-image",
+    "allow-close-pin-window",
+    "allow-scale-pin-window"
   ]
 }

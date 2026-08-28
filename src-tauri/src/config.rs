@@ -11,8 +11,6 @@ use windows::{
     Win32::Storage::FileSystem::{ReplaceFileW, REPLACEFILE_WRITE_THROUGH},
 };
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 10;
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ColorCopyFormat {
@@ -32,7 +30,6 @@ impl Default for ColorCopyFormat {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
-    pub schema_version: u32,
     pub key_mappings: Vec<KeyMapping>,
     pub widget_config: WidgetConfig,
     pub minimize_to_tray: bool,
@@ -47,6 +44,8 @@ pub struct AppConfig {
 pub struct ScreenshotConfig {
     pub shortcut: String,
     pub pin_shortcut: String,
+    pub history_shortcut: String,
+    pub toggle_pin_shortcut: String,
     pub save_directory: Option<String>,
     pub filename_prefix: String,
     pub color_copy_format: ColorCopyFormat,
@@ -57,6 +56,8 @@ impl Default for ScreenshotConfig {
         Self {
             shortcut: "Control+1".into(),
             pin_shortcut: "Control+2".into(),
+            history_shortcut: "Control+3".into(),
+            toggle_pin_shortcut: "Control+Alt+P".into(),
             save_directory: None,
             filename_prefix: "DockMapper".into(),
             color_copy_format: ColorCopyFormat::Hex,
@@ -67,7 +68,6 @@ impl Default for ScreenshotConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            schema_version: CURRENT_SCHEMA_VERSION,
             key_mappings: Vec::new(),
             widget_config: WidgetConfig::default(),
             minimize_to_tray: true,
@@ -92,7 +92,7 @@ pub fn load(path: &Path) -> AppConfig {
         }
         AppConfig::default()
     });
-    migrate(&mut config);
+    normalize_loaded_config(&mut config);
     config
 }
 
@@ -113,11 +113,7 @@ fn read_config(path: &Path) -> Option<AppConfig> {
 }
 
 pub fn save(path: &Path, config: &AppConfig) -> Result<(), String> {
-    let span = tracing::info_span!(
-        target: "dock_mapper::config",
-        "save_config",
-        schema_version = config.schema_version
-    );
+    let span = tracing::info_span!(target: "dock_mapper::config", "save_config");
     let _entered = span.enter();
     let started = std::time::Instant::now();
     if let Some(parent) = path.parent() {
@@ -145,7 +141,6 @@ pub fn save(path: &Path, config: &AppConfig) -> Result<(), String> {
     tracing::debug!(
         target: "dock_mapper::config",
         elapsed_ms = started.elapsed().as_millis(),
-        schema_version = config.schema_version,
         "Configuration saved"
     );
     Ok(())
@@ -205,14 +200,10 @@ pub fn normalize_screenshot_config(config: &mut ScreenshotConfig) {
     }
 }
 
-fn migrate(config: &mut AppConfig) {
+fn normalize_loaded_config(config: &mut AppConfig) {
     config.widget_config.refresh_interval_secs =
         config.widget_config.refresh_interval_secs.clamp(1, 5);
-    if config.screenshot_config.shortcut == "Control+Shift+A" {
-        config.screenshot_config.shortcut = "Control+1".into();
-    }
     normalize_screenshot_config(&mut config.screenshot_config);
-    config.schema_version = CURRENT_SCHEMA_VERSION;
 }
 
 fn backup_path(path: &Path) -> PathBuf {
@@ -316,22 +307,6 @@ mod tests {
     }
 
     #[test]
-    fn migrates_legacy_screenshot_shortcut_to_fixed_ctrl_1() {
-        let mut config = AppConfig {
-            screenshot_config: ScreenshotConfig {
-                shortcut: "Control+Shift+A".into(),
-                ..ScreenshotConfig::default()
-            },
-            ..AppConfig::default()
-        };
-
-        migrate(&mut config);
-
-        assert_eq!(config.screenshot_config.shortcut, "Control+1");
-        assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
-    }
-
-    #[test]
     fn screenshot_defaults_are_normalized_for_safe_file_names() {
         let mut config = AppConfig {
             screenshot_config: ScreenshotConfig {
@@ -341,38 +316,8 @@ mod tests {
             },
             ..AppConfig::default()
         };
-        migrate(&mut config);
+        normalize_loaded_config(&mut config);
         assert_eq!(config.screenshot_config.filename_prefix, "DockMapper");
         assert_eq!(config.screenshot_config.save_directory, None);
-    }
-
-    #[test]
-    fn migrates_new_screenshot_defaults() {
-        let mut config = AppConfig {
-            schema_version: 7,
-            screenshot_config: ScreenshotConfig::default(),
-            ..AppConfig::default()
-        };
-
-        migrate(&mut config);
-
-        assert_eq!(
-            config.screenshot_config.color_copy_format,
-            ColorCopyFormat::Hex
-        );
-        assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
-    }
-
-    #[test]
-    fn ignores_removed_legacy_engine_fields() {
-        let json = r#"{
-            "schema_version": 8,
-            "engine_enabled": true,
-            "screenshot_config": { "ocr_engine": "rusto" }
-        }"#;
-        let mut config: AppConfig = serde_json::from_str(json).expect("legacy config");
-        migrate(&mut config);
-        assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
-        assert_eq!(config.screenshot_config.shortcut, "Control+1");
     }
 }

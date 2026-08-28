@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, VecDeque},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Mutex,
+        Arc, Mutex,
     },
     time::{Duration, Instant},
 };
@@ -13,7 +13,7 @@ const MAX_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 const ENTRY_TTL: Duration = Duration::from_secs(10 * 60);
 
 struct StoredImage {
-    bytes: Vec<u8>,
+    bytes: Arc<[u8]>,
     created_at: Instant,
 }
 
@@ -68,7 +68,7 @@ impl ImageStore {
         inner.entries.insert(
             id.clone(),
             StoredImage {
-                bytes,
+                bytes: Arc::from(bytes.into_boxed_slice()),
                 created_at: Instant::now(),
             },
         );
@@ -78,7 +78,7 @@ impl ImageStore {
         Ok(id)
     }
 
-    pub fn get(&self, id: &str) -> Result<Vec<u8>, String> {
+    pub fn get(&self, id: &str) -> Result<Arc<[u8]>, String> {
         let mut inner = self
             .inner
             .lock()
@@ -89,6 +89,21 @@ impl ImageStore {
             .get(id)
             .map(|entry| entry.bytes.clone())
             .ok_or_else(|| "图片已过期或不存在，请重新截取".to_string())
+    }
+
+    pub fn take(&self, id: &str) -> Result<Arc<[u8]>, String> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| "图片仓库状态已损坏".to_string())?;
+        prune(&mut inner, self.entry_ttl);
+        let entry = inner
+            .entries
+            .remove(id)
+            .ok_or_else(|| "图片已过期或不存在，请重新截取".to_string())?;
+        inner.total_bytes = inner.total_bytes.saturating_sub(entry.bytes.len());
+        inner.order.retain(|current| current != id);
+        Ok(entry.bytes)
     }
 
     pub fn remove(&self, id: &str) {
@@ -109,6 +124,15 @@ impl ImageStore {
         inner.order.clear();
         inner.total_bytes = 0;
         Ok(())
+    }
+
+    pub fn stats(&self) -> Result<(usize, usize), String> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| "图片仓库状态已损坏".to_string())?;
+        prune(&mut inner, self.entry_ttl);
+        Ok((inner.entries.len(), inner.total_bytes))
     }
 
     #[cfg(test)]
@@ -199,7 +223,7 @@ mod tests {
         let first = store.insert(vec![1, 2, 3]).unwrap();
         let second = store.insert(vec![4, 5, 6]).unwrap();
         assert!(store.get(&first).is_err());
-        assert_eq!(store.get(&second).unwrap(), vec![4, 5, 6]);
+        assert_eq!(store.get(&second).unwrap().as_ref(), &[4, 5, 6]);
     }
 
     #[test]
@@ -216,5 +240,15 @@ mod tests {
             .created_at = Instant::now() - ENTRY_TTL;
         assert!(store.get(&id).is_err());
         assert_eq!(store.len(), 0);
+    }
+
+    #[test]
+    fn take_returns_shared_bytes_and_releases_the_entry() {
+        let store = ImageStore::default();
+        let id = store.insert(vec![1, 2, 3]).unwrap();
+        let first = store.get(&id).unwrap();
+        let taken = store.take(&id).unwrap();
+        assert!(Arc::ptr_eq(&first, &taken));
+        assert!(store.get(&id).is_err());
     }
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pin-screenshot-history"
+description = "Enables the pin_screenshot_history command without any pre-configured scope."
+commands.allow = ["pin_screenshot_history"]
+
+[[permission]]
+identifier = "deny-pin-screenshot-history"
+description = "Denies the pin_screenshot_history command without any pre-configured scope."
+commands.deny = ["pin_screenshot_history"]

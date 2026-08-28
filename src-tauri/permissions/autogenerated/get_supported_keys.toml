@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-supported-keys"
+description = "Enables the get_supported_keys command without any pre-configured scope."
+commands.allow = ["get_supported_keys"]
+
+[[permission]]
+identifier = "deny-get-supported-keys"
+description = "Denies the get_supported_keys command without any pre-configured scope."
+commands.deny = ["get_supported_keys"]

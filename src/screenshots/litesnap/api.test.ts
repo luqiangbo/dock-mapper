@@ -30,4 +30,12 @@ describe("binary image IPC", () => {
     expect(mocks.invoke).toHaveBeenNthCalledWith(1, "upload_image", bytes);
     expect(mocks.invoke).toHaveBeenNthCalledWith(2, "copy_image", { imageId: "image-1" });
   });
+
+  it("creates final-image history using a camel-case IPC argument", async () => {
+    mocks.invoke.mockResolvedValueOnce({ id: "history-1" });
+    await api.createScreenshotHistory("result-1");
+    expect(mocks.invoke).toHaveBeenCalledWith("create_screenshot_history", {
+      resultImageId: "result-1",
+    });
+  });
 });

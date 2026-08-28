@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-scale-pin-window"
+description = "Enables the scale_pin_window command without any pre-configured scope."
+commands.allow = ["scale_pin_window"]
+
+[[permission]]
+identifier = "deny-scale-pin-window"
+description = "Denies the scale_pin_window command without any pre-configured scope."
+commands.deny = ["scale_pin_window"]

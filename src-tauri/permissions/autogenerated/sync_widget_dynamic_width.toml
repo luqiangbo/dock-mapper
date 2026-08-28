@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sync-widget-dynamic-width"
+description = "Enables the sync_widget_dynamic_width command without any pre-configured scope."
+commands.allow = ["sync_widget_dynamic_width"]
+
+[[permission]]
+identifier = "deny-sync-widget-dynamic-width"
+description = "Denies the sync_widget_dynamic_width command without any pre-configured scope."
+commands.deny = ["sync_widget_dynamic_width"]

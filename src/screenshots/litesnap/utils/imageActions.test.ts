@@ -18,4 +18,19 @@ describe("screenshot image actions", () => {
     expect(busy).toEqual([true, false]);
     expect(errors).toEqual(["复制失败"]);
   });
+
+  it("does not treat a cancelled native save as a committed image", async () => {
+    const committed = vi.fn();
+    const result = await runImageAction({
+      exportPng: async () => new Uint8Array([1]),
+      uploadImage: async () => "image-1",
+      consumeImage: vi.fn().mockResolvedValue(false),
+      onCommitted: committed,
+      setBusy: vi.fn(),
+      onError: vi.fn(),
+      fallbackError: "保存失败",
+    });
+    expect(result).toBe(false);
+    expect(committed).not.toHaveBeenCalled();
+  });
 });

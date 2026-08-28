@@ -41,6 +41,15 @@ export interface QrDecodeResult {
   contents: string[];
 }
 
+export interface ScreenshotHistorySummary {
+  id: string;
+  createdAtMs: number;
+  width: number;
+  height: number;
+  favorite: boolean;
+  totalBytes: number;
+}
+
 export interface Api {
   closeOverlay: () => void;
   showCaptureOverlay: (generation?: number) => Promise<boolean>;
@@ -60,6 +69,7 @@ export interface Api {
   openUrl: (url: string) => Promise<boolean>;
   getScreenshotConfig: () => Promise<ScreenshotConfig>;
   updateScreenshotConfig: (config: ScreenshotConfig) => Promise<ScreenshotConfig>;
+  createScreenshotHistory: (resultImageId: string) => Promise<ScreenshotHistorySummary>;
 }
 
 function subscribe<T>(event: string, callback: (payload: T) => void): () => void {
@@ -96,6 +106,8 @@ export const api: Api = {
   getScreenshotConfig: () => invoke("get_screenshot_config"),
   updateScreenshotConfig: (config) =>
     invoke("update_screenshot_config", { screenshotConfig: config }),
+  createScreenshotHistory: (resultImageId) =>
+    invoke("create_screenshot_history", { resultImageId }),
 };
 
 declare global {

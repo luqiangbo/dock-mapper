@@ -2,6 +2,7 @@ mod admin;
 mod config;
 mod diagnostics;
 mod dxgi_capture;
+mod history;
 mod image_store;
 mod litesnap;
 mod ocr;
@@ -9,8 +10,11 @@ mod scancode_mapper;
 mod sys_monitor;
 mod taskbar;
 
-use serde::{Deserialize, Deserializer, Serialize};
-use std::{path::PathBuf, sync::Mutex};
+use serde::{Deserialize, Serialize};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -319,40 +323,13 @@ pub struct SupportedKey {
     pub group: &'static str,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryScheme {
     #[default]
     Capsule,
     Ring,
     Gauge,
-}
-
-impl<'de> Deserialize<'de> for MemoryScheme {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Repr {
-            Name(String),
-            Legacy(u8),
-        }
-
-        match Repr::deserialize(deserializer)? {
-            Repr::Name(value) => match value.as_str() {
-                "capsule" => Ok(Self::Capsule),
-                "ring" => Ok(Self::Ring),
-                "gauge" => Ok(Self::Gauge),
-                _ => Err(serde::de::Error::custom("未知的内存显示方案")),
-            },
-            Repr::Legacy(1) => Ok(Self::Capsule),
-            Repr::Legacy(2) => Ok(Self::Ring),
-            Repr::Legacy(3) => Ok(Self::Gauge),
-            Repr::Legacy(_) => Err(serde::de::Error::custom("旧版内存显示方案超出范围")),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -376,6 +353,7 @@ impl Default for WidgetConfig {
 pub struct AppState {
     pub config: Mutex<config::AppConfig>,
     pub images: image_store::ImageStore,
+    pub history: Arc<history::HistoryStore>,
     config_path: PathBuf,
     widget_width: Mutex<f64>,
     mutation_lock: Mutex<()>,
@@ -395,6 +373,107 @@ fn upload_image(
 #[tauri::command]
 fn release_image(state: State<'_, AppState>, image_id: String) {
     state.images.remove(&image_id);
+}
+
+async fn run_history_task<T, F>(task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tokio::task::spawn_blocking(task)
+        .await
+        .map_err(|error| format!("截图历史后台任务失败：{error}"))?
+}
+
+#[tauri::command]
+async fn list_screenshot_history(
+    state: State<'_, AppState>,
+) -> Result<Vec<history::ScreenshotHistorySummary>, String> {
+    let history = Arc::clone(&state.history);
+    run_history_task(move || history.list()).await
+}
+
+#[tauri::command]
+async fn get_screenshot_history_image(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<tauri::ipc::Response, String> {
+    let history = Arc::clone(&state.history);
+    let image = run_history_task(move || history.image(&id)).await?;
+    Ok(tauri::ipc::Response::new(image))
+}
+
+#[tauri::command]
+async fn get_screenshot_history_thumbnail(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<tauri::ipc::Response, String> {
+    let history = Arc::clone(&state.history);
+    let thumbnail = run_history_task(move || history.thumbnail(&id)).await?;
+    Ok(tauri::ipc::Response::new(thumbnail))
+}
+
+#[tauri::command]
+async fn create_screenshot_history(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    result_image_id: String,
+) -> Result<history::ScreenshotHistorySummary, String> {
+    let result = state.images.get(&result_image_id)?;
+    let history = Arc::clone(&state.history);
+    let summary = run_history_task(move || history.create(&result)).await?;
+    app.state::<AppState>().images.remove(&result_image_id);
+    let _ = app.emit("screenshot-history-changed", ());
+    Ok(summary)
+}
+
+#[tauri::command]
+async fn set_screenshot_history_favorite(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    favorite: bool,
+) -> Result<history::ScreenshotHistorySummary, String> {
+    let history = Arc::clone(&state.history);
+    let summary = run_history_task(move || history.set_favorite(&id, favorite)).await?;
+    let _ = app.emit("screenshot-history-changed", ());
+    Ok(summary)
+}
+
+#[tauri::command]
+async fn delete_screenshot_history(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<bool, String> {
+    let history = Arc::clone(&state.history);
+    let deleted = run_history_task(move || history.delete(&id)).await?;
+    if deleted {
+        let _ = app.emit("screenshot-history-changed", ());
+    }
+    Ok(deleted)
+}
+
+#[tauri::command]
+async fn copy_screenshot_history(state: State<'_, AppState>, id: String) -> Result<bool, String> {
+    let history = Arc::clone(&state.history);
+    run_history_task(move || {
+        let data = history.image(&id)?;
+        litesnap::copy_png_bytes(&data)?;
+        Ok(true)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn pin_screenshot_history(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<String, String> {
+    let history = Arc::clone(&state.history);
+    let data = run_history_task(move || history.image(&id)).await?;
+    litesnap::pin_external_image(app, data)
 }
 
 fn persist(state: &AppState) -> Result<(), String> {
@@ -444,51 +523,32 @@ fn commit_scancode_change(
     )
 }
 
-fn commit_shortcut_change_with<RC, RP, S>(
-    previous_shortcuts: (&str, &str),
-    next_shortcuts: (&str, &str),
+fn commit_shortcut_change_with<A, S>(
+    previous_shortcuts: &config::ScreenshotConfig,
+    next_shortcuts: &config::ScreenshotConfig,
     next_config: &config::AppConfig,
-    mut register_capture: RC,
-    mut register_pin: RP,
+    mut apply: A,
     save: S,
 ) -> Result<(), String>
 where
-    RC: FnMut(&str) -> Result<(), String>,
-    RP: FnMut(&str) -> Result<(), String>,
+    A: FnMut(&config::ScreenshotConfig, &config::ScreenshotConfig) -> Result<(), String>,
     S: FnOnce(&config::AppConfig) -> Result<(), String>,
 {
-    let capture_changed = previous_shortcuts.0 != next_shortcuts.0;
-    let pin_changed = previous_shortcuts.1 != next_shortcuts.1;
-
-    if capture_changed {
-        register_capture(next_shortcuts.0)?;
-    }
-    if pin_changed {
-        if let Err(error) = register_pin(next_shortcuts.1) {
-            if !capture_changed {
-                return Err(error);
-            }
-            return match register_capture(previous_shortcuts.0) {
-                Ok(()) => Err(error),
-                Err(rollback) => Err(format!("{error}；同时恢复截图快捷键失败：{rollback}")),
-            };
-        }
+    let shortcuts_changed = previous_shortcuts.shortcut != next_shortcuts.shortcut
+        || previous_shortcuts.pin_shortcut != next_shortcuts.pin_shortcut
+        || previous_shortcuts.history_shortcut != next_shortcuts.history_shortcut
+        || previous_shortcuts.toggle_pin_shortcut != next_shortcuts.toggle_pin_shortcut;
+    if shortcuts_changed {
+        apply(previous_shortcuts, next_shortcuts)?;
     }
     if let Err(save_error) = save(next_config) {
-        let capture_rollback = capture_changed
-            .then(|| register_capture(previous_shortcuts.0).err())
-            .flatten();
-        let pin_rollback = pin_changed
-            .then(|| register_pin(previous_shortcuts.1).err())
-            .flatten();
-        if capture_rollback.is_none() && pin_rollback.is_none() {
+        if !shortcuts_changed {
             return Err(save_error);
         }
-        return Err(format!(
-            "{save_error}；同时恢复快捷键失败：截图={}; 贴图={}",
-            capture_rollback.unwrap_or_else(|| "成功".into()),
-            pin_rollback.unwrap_or_else(|| "成功".into())
-        ));
+        return match apply(next_shortcuts, previous_shortcuts) {
+            Ok(()) => Err(save_error),
+            Err(rollback) => Err(format!("{save_error}；同时恢复快捷键失败：{rollback}")),
+        };
     }
     Ok(())
 }
@@ -878,16 +938,13 @@ fn update_screenshot_config(
         .lock()
         .map_err(|_| "配置状态已损坏".to_string())?
         .clone();
-    let previous_shortcut = previous_config.screenshot_config.shortcut.clone();
-    let previous_pin_shortcut = previous_config.screenshot_config.pin_shortcut.clone();
     let mut next_config = previous_config.clone();
     next_config.screenshot_config = screenshot_config.clone();
     commit_shortcut_change_with(
-        (&previous_shortcut, &previous_pin_shortcut),
-        (&screenshot_config.shortcut, &screenshot_config.pin_shortcut),
+        &previous_config.screenshot_config,
+        &screenshot_config,
         &next_config,
-        |shortcut| litesnap::update_capture_shortcut(&app, shortcut),
-        |shortcut| litesnap::update_pin_shortcut(&app, shortcut),
+        |previous, next| litesnap::update_shortcuts(&app, previous, next),
         |config| config::save(&state.config_path, config),
     )?;
     *state
@@ -903,9 +960,8 @@ async fn recognize_selection(
     service: State<'_, ocr::OcrService>,
     image_id: String,
 ) -> Result<ocr::OcrTextResult, String> {
-    let png = state.images.get(&image_id)?;
-    state.images.remove(&image_id);
-    service.recognize(png).await
+    let png = state.images.take(&image_id)?;
+    service.recognize(png.as_ref().to_vec()).await
 }
 
 #[tauri::command]
@@ -913,9 +969,8 @@ async fn decode_qr_selection(
     state: State<'_, AppState>,
     image_id: String,
 ) -> Result<ocr::QrDecodeResult, String> {
-    let png = state.images.get(&image_id)?;
-    state.images.remove(&image_id);
-    tokio::task::spawn_blocking(move || ocr::decode_qr(png))
+    let png = state.images.take(&image_id)?;
+    tokio::task::spawn_blocking(move || ocr::decode_qr(png.as_ref().to_vec()))
         .await
         .map_err(|error| format!("二维码解码后台任务异常：{error}"))?
 }
@@ -1061,19 +1116,25 @@ pub fn run() {
             #[cfg(desktop)]
             setup_tray(app)?;
 
-            let config_path = app.path().app_data_dir()?.join("config.json");
+            let app_data_dir = app.path().app_data_dir()?;
+            let config_path = app_data_dir.join("config.json");
             let loaded_config = config::load(&config_path);
+            let history = Arc::new(history::HistoryStore::new(app_data_dir.join("history"))?);
             let monitor_interval = loaded_config.widget_config.refresh_interval_secs;
             let monitor_interface = loaded_config.widget_config.network_interface.clone();
             let state = AppState {
                 config: Mutex::new(loaded_config),
                 images: image_store::ImageStore::default(),
+                history,
                 config_path,
                 widget_width: Mutex::new(DEFAULT_WIDGET_WIDTH),
                 mutation_lock: Mutex::new(()),
             };
             app.manage(state);
-            app.manage(sys_monitor::SysMonitorControl::new(monitor_interval, monitor_interface));
+            app.manage(sys_monitor::SysMonitorControl::new(
+                monitor_interval,
+                monitor_interface,
+            ));
             app.manage(ocr::OcrService::new(app.handle())?);
             if let Err(error) = litesnap::initialize(app.handle()) {
                 tracing::error!(target: "dock_mapper::shortcut", %error, "注册截图快捷键失败");
@@ -1133,6 +1194,14 @@ pub fn run() {
             restore_scancode_map,
             upload_image,
             release_image,
+            list_screenshot_history,
+            get_screenshot_history_image,
+            get_screenshot_history_thumbnail,
+            create_screenshot_history,
+            set_screenshot_history_favorite,
+            delete_screenshot_history,
+            copy_screenshot_history,
+            pin_screenshot_history,
             litesnap::start_screenshot,
             litesnap::close_overlay,
             litesnap::show_capture_overlay,
@@ -1190,6 +1259,15 @@ mod transaction_tests {
     use std::sync::Mutex;
 
     #[test]
+    fn memory_scheme_only_accepts_current_string_values() {
+        assert_eq!(
+            serde_json::from_str::<MemoryScheme>(r#""capsule""#).unwrap(),
+            MemoryScheme::Capsule
+        );
+        assert!(serde_json::from_str::<MemoryScheme>("1").is_err());
+    }
+
+    #[test]
     fn scancode_restore_requires_a_backup() {
         assert_eq!(
             required_scancode_backup(None).unwrap_err(),
@@ -1206,58 +1284,62 @@ mod transaction_tests {
 
     #[test]
     fn shortcut_transaction_restores_previous_registration_when_save_fails() {
-        let capture_registrations = Mutex::new(Vec::new());
-        let pin_registrations = Mutex::new(Vec::new());
+        let registrations = Mutex::new(Vec::new());
         let config = config::AppConfig::default();
+        let previous = config.screenshot_config.clone();
+        let next = config::ScreenshotConfig {
+            shortcut: "Control+Shift+1".into(),
+            history_shortcut: "Control+Shift+3".into(),
+            ..previous.clone()
+        };
         let result = commit_shortcut_change_with(
-            ("Ctrl+1", "Ctrl+2"),
-            ("Ctrl+Shift+1", "Ctrl+Shift+2"),
+            &previous,
+            &next,
             &config,
-            |value| {
-                capture_registrations.lock().unwrap().push(value.to_string());
-                Ok(())
-            },
-            |value| {
-                pin_registrations.lock().unwrap().push(value.to_string());
+            |from, to| {
+                registrations.lock().unwrap().push(format!(
+                    "{}+{} -> {}+{}",
+                    from.shortcut, from.history_shortcut, to.shortcut, to.history_shortcut
+                ));
                 Ok(())
             },
             |_| Err("保存失败".into()),
         );
         assert_eq!(result.unwrap_err(), "保存失败");
         assert_eq!(
-            *capture_registrations.lock().unwrap(),
-            vec!["Ctrl+Shift+1", "Ctrl+1"]
-        );
-        assert_eq!(
-            *pin_registrations.lock().unwrap(),
-            vec!["Ctrl+Shift+2", "Ctrl+2"]
+            *registrations.lock().unwrap(),
+            vec![
+                "Control+1+Control+3 -> Control+Shift+1+Control+Shift+3",
+                "Control+Shift+1+Control+Shift+3 -> Control+1+Control+3"
+            ]
         );
     }
 
     #[test]
-    fn shortcut_transaction_rolls_capture_back_when_pin_registration_fails() {
-        let capture_registrations = Mutex::new(Vec::new());
+    fn shortcut_transaction_does_not_save_after_registration_failure() {
+        let registrations = Mutex::new(0_u8);
         let saved = Mutex::new(false);
         let config = config::AppConfig::default();
+        let previous = config.screenshot_config.clone();
+        let next = config::ScreenshotConfig {
+            toggle_pin_shortcut: "Control+Alt+L".into(),
+            ..previous.clone()
+        };
         let result = commit_shortcut_change_with(
-            ("Ctrl+1", "Ctrl+2"),
-            ("Ctrl+Shift+1", "Ctrl+Shift+2"),
+            &previous,
+            &next,
             &config,
-            |value| {
-                capture_registrations.lock().unwrap().push(value.to_string());
-                Ok(())
+            |_, _| {
+                *registrations.lock().unwrap() += 1;
+                Err("快捷键已占用".into())
             },
-            |_| Err("快捷键已占用".into()),
             |_| {
                 *saved.lock().unwrap() = true;
                 Ok(())
             },
         );
         assert_eq!(result.unwrap_err(), "快捷键已占用");
-        assert_eq!(
-            *capture_registrations.lock().unwrap(),
-            vec!["Ctrl+Shift+1", "Ctrl+1"]
-        );
+        assert_eq!(*registrations.lock().unwrap(), 1);
         assert!(!*saved.lock().unwrap());
     }
 
@@ -1266,15 +1348,11 @@ mod transaction_tests {
         let registrations = Mutex::new(Vec::<String>::new());
         let config = config::AppConfig::default();
         commit_shortcut_change_with(
-            ("Control+1", "Control+2"),
-            ("Control+1", "Control+2"),
+            &config.screenshot_config,
+            &config.screenshot_config,
             &config,
-            |value| {
-                registrations.lock().unwrap().push(format!("capture:{value}"));
-                Ok(())
-            },
-            |value| {
-                registrations.lock().unwrap().push(format!("pin:{value}"));
+            |_, _| {
+                registrations.lock().unwrap().push("changed".into());
                 Ok(())
             },
             |_| Ok(()),

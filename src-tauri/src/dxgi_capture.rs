@@ -61,13 +61,20 @@ impl CaptureManager {
     pub fn prewarm(&mut self) {
         // Initialization is deliberately best-effort. A disconnected monitor,
         // RDP session or driver reset must never block application startup.
-        for rect in enumerate_outputs() {
+        let outputs = enumerate_outputs();
+        self.outputs.retain(|rect, _| outputs.contains(rect));
+        for rect in outputs {
             let _ = self.ensure_output(rect);
         }
     }
 
     pub fn capture(&mut self, rect: MonitorRect, timeout_ms: u32) -> Result<BgraFrame, String> {
+        // Release duplications for disconnected or reconfigured outputs before
+        // selecting the active monitor. A resolution change produces a new
+        // rectangle and must not leave the previous D3D device alive forever.
         if !self.outputs.contains_key(&rect) {
+            let connected = enumerate_outputs();
+            self.outputs.retain(|known, _| connected.contains(known));
             self.ensure_output(rect)?;
         }
         let capture = self.outputs.get_mut(&rect).expect("DXGI output inserted");

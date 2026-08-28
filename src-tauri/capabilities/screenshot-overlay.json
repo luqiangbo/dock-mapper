@@ -1,12 +1,29 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "screenshot-overlay",
-  "description": "冻结截图编辑器与滚动控制窗口：仅拥有编辑所需的核心窗口和事件权限",
-  "windows": ["overlay-*", "scroll-control"],
+  "description": "冻结截图编辑器仅拥有选区、标注、识别和输出所需权限",
+  "windows": ["overlay-*"],
   "permissions": [
-    "core:default",
     "core:event:allow-listen",
+    "core:event:allow-unlisten",
     "core:window:allow-close",
-    "core:window:allow-set-theme"
+    "allow-upload-image",
+    "allow-release-image",
+    "allow-create-screenshot-history",
+    "allow-close-overlay",
+    "allow-show-capture-overlay",
+    "allow-overlay-ready",
+    "allow-get-full-screenshot",
+    "allow-report-capture-rendered",
+    "allow-check-screen-permission",
+    "allow-copy-image",
+    "allow-copy-text",
+    "allow-save-image",
+    "allow-pin-image",
+    "allow-recognize-selection",
+    "allow-decode-qr-selection",
+    "allow-open-url",
+    "allow-get-screenshot-config",
+    "allow-update-screenshot-config"
   ]
 }

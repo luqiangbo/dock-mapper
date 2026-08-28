@@ -25,6 +25,8 @@ export interface ScancodeMapStatus {
 export interface ScreenshotConfig {
   shortcut: string;
   pin_shortcut: string;
+  history_shortcut: string;
+  toggle_pin_shortcut: string;
   save_directory: string | null;
   filename_prefix: string;
   color_copy_format: "hex" | "rgb" | "hsl" | "hsv" | "css";

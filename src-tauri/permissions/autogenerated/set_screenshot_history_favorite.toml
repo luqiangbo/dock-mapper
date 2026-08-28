@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-screenshot-history-favorite"
+description = "Enables the set_screenshot_history_favorite command without any pre-configured scope."
+commands.allow = ["set_screenshot_history_favorite"]
+
+[[permission]]
+identifier = "deny-set-screenshot-history-favorite"
+description = "Denies the set_screenshot_history_favorite command without any pre-configured scope."
+commands.deny = ["set_screenshot_history_favorite"]

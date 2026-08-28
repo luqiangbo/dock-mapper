@@ -16,6 +16,9 @@ import {
 } from "./textTypes";
 import ToolOptionsBar from "./ToolOptionsBar";
 import { useOcr } from "../hooks/useOcr";
+import { RequestGeneration } from "../hooks/requestGeneration";
+import { useCaptureLifecycle } from "../hooks/useCaptureLifecycle";
+import { useEditorSceneState } from "../hooks/useEditorSceneState";
 import { useOverlayKeyboard } from "../hooks/useOverlayKeyboard";
 import { ObjectMutationTransaction, useEditorHistory } from "../hooks/useCanvasHistory";
 import {
@@ -115,10 +118,7 @@ interface NativeCanvasHandlers {
   sample: (event: NativeCanvasPoint) => void;
 }
 
-function rasterFromGesture(
-  gesture: ActiveAnnotationGesture,
-  scale: number,
-): RasterAnnotation {
+function rasterFromGesture(gesture: ActiveAnnotationGesture, scale: number): RasterAnnotation {
   const isFreehand = gesture.tool === "pen" || gesture.tool === "highlight";
   const last = gesture.points[gesture.points.length - 1] ?? gesture.start;
   return {
@@ -315,6 +315,7 @@ function ScreenshotOverlay(): React.JSX.Element {
   const nativeInputGateRef = useRef(new NativeInputGate());
   const nativeCanvasHandlersRef = useRef<NativeCanvasHandlers | null>(null);
   const pendingAction = useRef(0);
+  const qrRequest = useRef(new RequestGeneration());
   // 递增令牌使得选区变化、关闭或新截图后的迟到 OCR 结果立即失效。
   const imageScaleRef = useRef({ scaleX: 1, scaleY: 1 });
   const lastTextFontSize = useRef<TextSize>(TEXT_SIZES[1]);
@@ -378,13 +379,49 @@ function ScreenshotOverlay(): React.JSX.Element {
     baseRasterAnnotations: RasterAnnotation[];
   } | null>(null);
 
-  const [phase, setPhase] = useState<"loading" | "selecting" | "editing">("loading");
   const [dragging, setDragging] = useState(false);
   const [windowCandidates, setWindowCandidates] = useState<WindowCandidate[]>([]);
   const [hoveredWindow, setHoveredWindow] = useState<Selection | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [shotReady, setShotReady] = useState(false);
-  const [tool, setTool] = useState<AnnotTool>(null);
+  const {
+    phase,
+    busy,
+    shotReady,
+    error,
+    setPhase,
+    setBusy,
+    setShotReady,
+    setError,
+    beginCapture,
+    captureReady,
+    beginEditing,
+    beginCommit,
+    restoreEditing,
+    fail,
+    reset,
+  } = useCaptureLifecycle();
+  const {
+    tool,
+    setTool,
+    textEditor,
+    setTextEditor,
+    textDraft,
+    setTextDraft,
+    textObjects,
+    setTextObjects,
+    numberObjects,
+    setNumberObjects,
+    rasterAnnotations,
+    setRasterAnnotations,
+    rasterPreview,
+    setRasterPreview,
+    selectedRasterId,
+    setSelectedRasterId,
+    selectedTextId,
+    setSelectedTextId,
+    selectedNumberId,
+    setSelectedNumberId,
+    resetScene,
+  } = useEditorSceneState();
   const [strokeColor, setStrokeColor] = useState<string>(STROKE_COLORS[0]);
   const [strokeWidth, setStrokeWidth] = useState(3);
   const [fillOpacity, setFillOpacity] = useState(0);
@@ -395,17 +432,7 @@ function ScreenshotOverlay(): React.JSX.Element {
   const [mosaicBlock, setMosaicBlock] = useState(12);
   const [textStyle, setTextStyle] = useState(DEFAULT_TEXT_STYLE);
   const [numberStyle, setNumberStyle] = useState(DEFAULT_NUMBER_STYLE);
-  const [textEditor, setTextEditor] = useState<TextEditorState | null>(null);
-  const [textDraft, setTextDraft] = useState("");
-  const [textObjects, setTextObjects] = useState<TextObject[]>([]);
-  const [numberObjects, setNumberObjects] = useState<NumberObject[]>([]);
-  const [rasterAnnotations, setRasterAnnotations] = useState<RasterAnnotation[]>([]);
-  const [rasterPreview, setRasterPreview] = useState<RasterAnnotation | null>(null);
-  const [selectedRasterId, setSelectedRasterId] = useState<string | null>(null);
-  const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
-  const [selectedNumberId, setSelectedNumberId] = useState<string | null>(null);
   const [adjustingRegion, setAdjustingRegion] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [pickerSample, setPickerSample] = useState<PickerSample | null>(null);
   const [pickerCopied, setPickerCopied] = useState(false);
   const [pickerFormat, setPickerFormat] = useState<ColorCopyFormat>("hex");
@@ -445,10 +472,7 @@ function ScreenshotOverlay(): React.JSX.Element {
     reset: resetHistory,
   } = useEditorHistory(restoreObjectSnapshot);
 
-  const captureObjectSnapshot = useCallback(
-    () => cloneObjectSnapshot(objectStateRef.current),
-    [],
-  );
+  const captureObjectSnapshot = useCallback(() => cloneObjectSnapshot(objectStateRef.current), []);
   const beginObjectMutation = useCallback(() => {
     objectMutationRef.current.begin(captureObjectSnapshot());
   }, [captureObjectSnapshot]);
@@ -492,6 +516,7 @@ function ScreenshotOverlay(): React.JSX.Element {
   }, [cancelObjectMutation, captureObjectSnapshot, redoHistory]);
 
   useEffect(() => {
+    qrRequest.current.cancel();
     setQrContents(null);
     setActiveOcrBlock(null);
   }, [selection?.x, selection?.y, selection?.width, selection?.height]);
@@ -744,7 +769,6 @@ function ScreenshotOverlay(): React.JSX.Element {
 
   const exportOcrPng = useCallback(async (): Promise<Uint8Array> => {
     const canvas = shotRef.current;
-    if (!canvas) throw new Error("No canvas");
     const source = document.createElement("canvas");
     const ctx = source.getContext("2d");
     if (!ctx) throw new Error("Canvas unavailable");
@@ -756,10 +780,12 @@ function ScreenshotOverlay(): React.JSX.Element {
       source.width = sw;
       source.height = sh;
       ctx.drawImage(frozenImage, sx, sy, sw, sh, 0, 0, sw, sh);
-    } else {
+    } else if (canvas) {
       source.width = canvas.width;
       source.height = canvas.height;
       ctx.drawImage(canvas, 0, 0);
+    } else {
+      throw new Error("No canvas");
     }
     const blob = await new Promise<Blob>((resolve, reject) => {
       source.toBlob(
@@ -770,17 +796,52 @@ function ScreenshotOverlay(): React.JSX.Element {
     return new Uint8Array(await blob.arrayBuffer());
   }, [selection]);
 
+  const persistHistory = useCallback(async (resultPng: Uint8Array): Promise<void> => {
+    let resultImageId: string | null = null;
+    try {
+      resultImageId = await window.api.uploadImage(resultPng);
+      await window.api.createScreenshotHistory(resultImageId);
+      resultImageId = null;
+    } catch (historyError) {
+      if (resultImageId) await window.api.releaseImage(resultImageId).catch(() => undefined);
+      console.error("保存截图历史失败", historyError);
+    }
+  }, []);
+
   const runCommittedImageAction = useCallback(
-    (consumeImage: (imageId: string) => Promise<unknown>, fallbackError: string) =>
-      runImageAction({
-        exportPng,
+    (consumeImage: (imageId: string) => Promise<unknown>, fallbackError: string) => {
+      const action = ++pendingAction.current;
+      return runImageAction({
+        exportPng: async () => {
+          const png = await exportPng();
+          if (action !== pendingAction.current) throw new Error("截图操作已取消");
+          return png;
+        },
         uploadImage: window.api.uploadImage,
-        consumeImage,
-        setBusy,
-        onError: setError,
+        consumeImage: async (imageId) => {
+          if (action !== pendingAction.current) {
+            await window.api.releaseImage(imageId);
+            return false;
+          }
+          beginCommit();
+          const result = await consumeImage(imageId);
+          if (result === false && action === pendingAction.current) restoreEditing();
+          return result;
+        },
+        releaseImage: window.api.releaseImage,
+        onCommitted: persistHistory,
+        setBusy: (value) => {
+          if (action === pendingAction.current) setBusy(value);
+        },
+        onError: (message) => {
+          if (action === pendingAction.current) {
+            fail(message, "editing");
+          }
+        },
         fallbackError,
-      }),
-    [exportPng],
+      });
+    },
+    [beginCommit, exportPng, fail, persistHistory, restoreEditing],
   );
 
   const {
@@ -812,9 +873,10 @@ function ScreenshotOverlay(): React.JSX.Element {
     nativeInputGateRef.current.reset();
     cancelObjectMutation();
     dismissOcr();
-    setBusy(false);
+    qrRequest.current.cancel();
+    reset();
     window.api.closeOverlay();
-  }, [cancelObjectMutation, dismissOcr]);
+  }, [cancelObjectMutation, dismissOcr, reset]);
 
   const screenToCanvas = useCallback(
     (left: number, top: number): { canvasX: number; canvasY: number } => {
@@ -941,24 +1003,14 @@ function ScreenshotOverlay(): React.JSX.Element {
         if (cancelled || current !== revision) return;
         const img = await loadImageFromUrl(shot.url);
         if (cancelled || current !== revision) return;
-        setPhase("loading");
+        beginCapture();
         setSelection(null);
         setWindowCandidates(shot.windowCandidates ?? []);
         setHoveredWindow(null);
         setTool(null);
         setPickerSample(null);
-        setShotReady(false);
-        setBusy(false);
-        setTextObjects([]);
-        setNumberObjects([]);
-        setRasterAnnotations([]);
-        setRasterPreview(null);
-        setSelectedRasterId(null);
+        resetScene();
         cancelObjectMutation();
-        setTextEditor(null);
-        setTextDraft("");
-        setSelectedTextId(null);
-        setSelectedNumberId(null);
         resetHistory();
         fullImageRef.current = img;
         imageScaleRef.current = syncImageScale(img);
@@ -968,8 +1020,7 @@ function ScreenshotOverlay(): React.JSX.Element {
         canvas.height = shot.imageHeight;
         imageScaleRef.current = syncImageScale(img);
         paintBackground(null);
-        setPhase("selecting");
-        setError(null);
+        captureReady();
         await waitForOverlayPaint();
         if (cancelled || current !== revision) return;
         await window.api.reportCaptureRendered(shot.generation, overlayLabel);
@@ -977,8 +1028,7 @@ function ScreenshotOverlay(): React.JSX.Element {
         // A prewarmed overlay has no image until the first capture; waiting
         // for the ready event is expected and must not surface an error.
         if (!cancelled && !String(err).includes("No screenshot is available")) {
-          setError(err instanceof Error ? err.message : "Failed to load screenshot");
-          setPhase("selecting");
+          fail(err instanceof Error ? err.message : "Failed to load screenshot", "selecting");
         }
       }
     };
@@ -991,10 +1041,20 @@ function ScreenshotOverlay(): React.JSX.Element {
       window.clearTimeout(readyTimer);
       offCaptureReady();
     };
-  }, [paintBackground, setSelection]);
+  }, [
+    beginCapture,
+    cancelObjectMutation,
+    captureReady,
+    fail,
+    paintBackground,
+    resetHistory,
+    resetScene,
+    setSelection,
+    setTool,
+  ]);
 
   useEffect(() => {
-    if (phase === "loading") return;
+    if (phase === "idle" || phase === "capturing") return;
     if (phase === "editing" && selection) {
       paintBackground(selection, selection.height);
       return;
@@ -1015,19 +1075,9 @@ function ScreenshotOverlay(): React.JSX.Element {
       lastConfirmedSelection = { ...clamped };
       imageScaleRef.current = syncImageScale(image);
 
-      setPhase("editing");
-      setTool(null);
-      setShotReady(false);
-      setTextObjects([]);
-      setNumberObjects([]);
-      setRasterAnnotations([]);
-      setRasterPreview(null);
-      setSelectedRasterId(null);
+      beginEditing();
+      resetScene();
       cancelObjectMutation();
-      setSelectedTextId(null);
-      setSelectedNumberId(null);
-      setTextEditor(null);
-      setTextDraft("");
       setSelection(clamped);
       setHoveredWindow(null);
       paintBackground(clamped, clamped.height, 0, true);
@@ -1060,7 +1110,7 @@ function ScreenshotOverlay(): React.JSX.Element {
         setError(null);
       });
     },
-    [paintBackground, setSelection],
+    [beginEditing, cancelObjectMutation, paintBackground, resetHistory, resetScene, setSelection],
   );
 
   useLayoutEffect(() => {
@@ -1183,9 +1233,7 @@ function ScreenshotOverlay(): React.JSX.Element {
         setSelectedNumberId(null);
       }
       if (selectedRasterId) {
-        setRasterAnnotations((previous) =>
-          previous.filter((item) => item.id !== selectedRasterId),
-        );
+        setRasterAnnotations((previous) => previous.filter((item) => item.id !== selectedRasterId));
         setSelectedRasterId(null);
       }
     },
@@ -1198,7 +1246,9 @@ function ScreenshotOverlay(): React.JSX.Element {
   });
 
   useEffect(() => {
-    const onMove = (event: PointerEvent): void => {
+    let pendingMove: PointerEvent | null = null;
+    let moveFrame = 0;
+    const processMove = (event: PointerEvent): void => {
       const canvas = shotRef.current;
       if (!canvas || !selection) return;
       const scale = canvas.width / Math.max(1, selection.width);
@@ -1221,13 +1271,7 @@ function ScreenshotOverlay(): React.JSX.Element {
         const dy = (event.clientY - rasterTransform.startY) * scale;
         const next =
           rasterTransform.mode === "move"
-            ? translateAnnotation(
-                rasterTransform.origin,
-                dx,
-                dy,
-                canvas.width,
-                canvas.height,
-              )
+            ? translateAnnotation(rasterTransform.origin, dx, dy, canvas.width, canvas.height)
             : resizeAnnotation(
                 rasterTransform.origin,
                 resizeRect(
@@ -1330,7 +1374,19 @@ function ScreenshotOverlay(): React.JSX.Element {
         );
       }
     };
+    const flushMove = (): void => {
+      moveFrame = 0;
+      const event = pendingMove;
+      pendingMove = null;
+      if (event) processMove(event);
+    };
+    const onMove = (event: PointerEvent): void => {
+      pendingMove = event;
+      if (!moveFrame) moveFrame = requestAnimationFrame(flushMove);
+    };
     const onUp = (event: PointerEvent): void => {
+      if (moveFrame) cancelAnimationFrame(moveFrame);
+      flushMove();
       if (rasterTransformRef.current?.pointerId === event.pointerId) {
         const changed = rasterTransformRef.current.changed;
         rasterTransformRef.current = null;
@@ -1361,6 +1417,7 @@ function ScreenshotOverlay(): React.JSX.Element {
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
     return () => {
+      if (moveFrame) cancelAnimationFrame(moveFrame);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
@@ -1415,9 +1472,7 @@ function ScreenshotOverlay(): React.JSX.Element {
       const offset = offsets[event.key];
       if (!offset) return;
       event.preventDefault();
-      setHoveredWindow((current) =>
-        current ? moveRect(current, offset[0], offset[1]) : current,
-      );
+      setHoveredWindow((current) => (current ? moveRect(current, offset[0], offset[1]) : current));
     };
     window.addEventListener("keydown", adjustWindowSelection);
     return () => window.removeEventListener("keydown", adjustWindowSelection);
@@ -1583,13 +1638,7 @@ function ScreenshotOverlay(): React.JSX.Element {
         pushCurrentObjects();
         setNumberObjects((previous) => {
           const radius = Math.max(12, (numberStyle.size * scale) / 2);
-          const center = clampNumberCenter(
-            point.x,
-            point.y,
-            radius,
-            canvas.width,
-            canvas.height,
-          );
+          const center = clampNumberCenter(point.x, point.y, radius, canvas.width, canvas.height);
           return appendNumberObject(previous, {
             id: `number-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
             ...center,
@@ -1842,9 +1891,12 @@ function ScreenshotOverlay(): React.JSX.Element {
     if (changes.strokeColor !== undefined) rasterStylePatch.color = changes.strokeColor;
     if (changes.fillOpacity !== undefined) rasterStylePatch.fillOpacity = changes.fillOpacity;
     if (changes.arrowStyle !== undefined) rasterStylePatch.arrowStyle = changes.arrowStyle;
-    if (changes.arrowHeadSize !== undefined)
-      rasterStylePatch.arrowHeadSize = changes.arrowHeadSize;
-    if (changes.strokeWidth !== undefined && selectedRaster?.kind !== "pen" && selectedRaster?.kind !== "highlight")
+    if (changes.arrowHeadSize !== undefined) rasterStylePatch.arrowHeadSize = changes.arrowHeadSize;
+    if (
+      changes.strokeWidth !== undefined &&
+      selectedRaster?.kind !== "pen" &&
+      selectedRaster?.kind !== "highlight"
+    )
       rasterStylePatch.strokeWidth = changes.strokeWidth * annotationScale;
     if (changes.penWidth !== undefined && selectedRaster?.kind === "pen")
       rasterStylePatch.strokeWidth = changes.penWidth * annotationScale;
@@ -1856,9 +1908,9 @@ function ScreenshotOverlay(): React.JSX.Element {
       rasterStylePatch.mosaicBlock = changes.mosaicBlock * annotationScale;
     const changesRaster = Boolean(
       selectedRaster &&
-        (Object.keys(rasterStylePatch) as Array<keyof RasterAnnotation["style"]>).some(
-          (key) => rasterStylePatch[key] !== selectedRaster.style[key],
-        ),
+      (Object.keys(rasterStylePatch) as Array<keyof RasterAnnotation["style"]>).some(
+        (key) => rasterStylePatch[key] !== selectedRaster.style[key],
+      ),
     );
     const changesSelectedObject = Boolean(
       (changes.textStyle !== undefined &&
@@ -1866,10 +1918,10 @@ function ScreenshotOverlay(): React.JSX.Element {
         (Object.keys(changes.textStyle) as Array<keyof TextStyle>).some(
           (key) => changes.textStyle![key] !== selectedText[key],
         )) ||
-        (changes.numberStyle !== undefined &&
-          selectedNumber &&
-          JSON.stringify(changes.numberStyle) !== JSON.stringify(selectedNumber.style)) ||
-        changesRaster,
+      (changes.numberStyle !== undefined &&
+        selectedNumber &&
+        JSON.stringify(changes.numberStyle) !== JSON.stringify(selectedNumber.style)) ||
+      changesRaster,
     );
     const immediateObjectMutation = changesSelectedObject && !objectMutationRef.current.active;
     if (immediateObjectMutation) beginObjectMutation();
@@ -2148,7 +2200,8 @@ function ScreenshotOverlay(): React.JSX.Element {
                 }}
               >
                 {obj.text}
-                {selectedTextId === obj.id && textObjectsInteractive &&
+                {selectedTextId === obj.id &&
+                  textObjectsInteractive &&
                   TEXT_RESIZE_HANDLES.map((handle) => (
                     <span
                       key={handle}
@@ -2332,7 +2385,7 @@ function ScreenshotOverlay(): React.JSX.Element {
         <div className="overlay-interaction-hint">{t.textEditor.moveHint}</div>
       )}
 
-      {phase === "loading" && <div className="overlay-status">{t.hints.capturing}</div>}
+      {phase === "capturing" && <div className="overlay-status">{t.hints.capturing}</div>}
 
       {phase === "selecting" && !selection && !error && (
         <div className="overlay-hint-bar">{t.hints.dragToSelect}</div>
@@ -2516,37 +2569,30 @@ function ScreenshotOverlay(): React.JSX.Element {
               void runCommittedImageAction(window.api.saveImage, "保存截图失败");
             }}
             onPin={() => {
-              void (async () => {
-                const action = ++pendingAction.current;
-                setBusy(true);
-                try {
-                  const png = await exportPng();
-                  if (action !== pendingAction.current) return;
-                  const imageId = await window.api.uploadImage(png);
-                  if (action !== pendingAction.current) {
-                    await window.api.releaseImage(imageId);
-                    return;
-                  }
-                  await window.api.pinImage(imageId);
-                } catch (err) {
-                  if (action === pendingAction.current) {
-                    setError(err instanceof Error ? err.message : "Failed to pin screenshot");
-                  }
-                } finally {
-                  if (action === pendingAction.current) setBusy(false);
-                }
-              })();
+              void runCommittedImageAction(window.api.pinImage, "贴图失败");
             }}
             onOcr={recognizeSelection}
             onQr={() => {
               if (!selection || !shotReady || ocrRunning) return;
+              const generation = qrRequest.current.next();
               void (async () => {
+                let imageId: string | null = null;
                 try {
-                  const imageId = await window.api.uploadImage(await exportOcrPng());
+                  const png = await exportOcrPng();
+                  if (!qrRequest.current.isCurrent(generation)) return;
+                  imageId = await window.api.uploadImage(png);
+                  if (!qrRequest.current.isCurrent(generation)) {
+                    await window.api.releaseImage(imageId);
+                    return;
+                  }
                   const result = await window.api.decodeQrSelection(imageId);
-                  setQrContents(result.contents);
+                  imageId = null;
+                  if (qrRequest.current.isCurrent(generation)) setQrContents(result.contents);
                 } catch (err) {
-                  setError(err instanceof Error ? err.message : "二维码识别失败");
+                  if (imageId) await window.api.releaseImage(imageId).catch(() => undefined);
+                  if (qrRequest.current.isCurrent(generation)) {
+                    setError(err instanceof Error ? err.message : "二维码识别失败");
+                  }
                 }
               })();
             }}

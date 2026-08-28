@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-recognize-selection"
+description = "Enables the recognize_selection command without any pre-configured scope."
+commands.allow = ["recognize_selection"]
+
+[[permission]]
+identifier = "deny-recognize-selection"
+description = "Denies the recognize_selection command without any pre-configured scope."
+commands.deny = ["recognize_selection"]

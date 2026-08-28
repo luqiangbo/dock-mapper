@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-restore-scancode-map"
+description = "Enables the restore_scancode_map command without any pre-configured scope."
+commands.allow = ["restore_scancode_map"]
+
+[[permission]]
+identifier = "deny-restore-scancode-map"
+description = "Denies the restore_scancode_map command without any pre-configured scope."
+commands.deny = ["restore_scancode_map"]

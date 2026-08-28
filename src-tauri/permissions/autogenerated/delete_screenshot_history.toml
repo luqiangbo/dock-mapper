@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-delete-screenshot-history"
+description = "Enables the delete_screenshot_history command without any pre-configured scope."
+commands.allow = ["delete_screenshot_history"]
+
+[[permission]]
+identifier = "deny-delete-screenshot-history"
+description = "Denies the delete_screenshot_history command without any pre-configured scope."
+commands.deny = ["delete_screenshot_history"]
