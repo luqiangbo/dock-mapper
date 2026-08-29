@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { Alert, App as AntApp, Button, Modal, Select, Switch, Table, Tag, Typography } from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import type { KeyCode, KeyMapping, ScancodeMapStatus, SupportedKey } from "../types";
+import { errorMessage, keyMappingApi } from "../api/commands";
 import styles from "./components.module.scss";
 
 const { Text } = Typography;
@@ -19,9 +19,9 @@ export default function KeyMapper() {
 
   useEffect(() => {
     Promise.all([
-      invoke<KeyMapping[]>("get_key_mappings"),
-      invoke<SupportedKey[]>("get_supported_keys"),
-      invoke<ScancodeMapStatus>("get_scancode_map_status"),
+      keyMappingApi.mappings(),
+      keyMappingApi.supportedKeys(),
+      keyMappingApi.status(),
     ])
       .then(([rules, keys, status]) => {
         setMappings(rules);
@@ -29,7 +29,7 @@ export default function KeyMapper() {
         setMapStatus(status);
       })
       .catch((error) => {
-        notification.error({ message: "加载按键映射失败", description: String(error) });
+        notification.error({ message: "加载按键映射失败", description: errorMessage(error) });
       });
   }, [notification]);
 
@@ -63,12 +63,13 @@ export default function KeyMapper() {
     async (updated: KeyMapping[]) => {
       setSaving(true);
       try {
-        await invoke("sync_key_mappings", { mappings: updated });
+        await keyMappingApi.sync(updated);
         setMappings(updated);
+        setMapStatus(await keyMappingApi.status());
         notification.success({ message: "按键映射已更新" });
         return true;
       } catch (error) {
-        notification.error({ message: "同步失败", description: String(error) });
+        notification.error({ message: "同步失败", description: errorMessage(error) });
         return false;
       } finally {
         setSaving(false);
@@ -110,15 +111,9 @@ export default function KeyMapper() {
   const applyToSystem = async (confirmTakeover = false) => {
     setSaving(true);
     try {
-      const status = await invoke<ScancodeMapStatus>("apply_scancode_map", { confirmTakeover });
-      setMapStatus(status);
-      notification.success({
-        message: "系统映射已写入",
-        description: "请重新登录或重启 Windows 后生效。",
-      });
-    } catch (error) {
-      const text = String(error);
-      if (text.includes("确认备份后接管")) {
+      const result = await keyMappingApi.apply(confirmTakeover);
+      setMapStatus(result.status);
+      if (result.outcome === "confirmationRequired") {
         modal.confirm({
           title: "检测到其他工具的键盘映射",
           content: "DockMapper 会备份当前 Scancode Map 后接管。恢复时可写回该备份。",
@@ -126,9 +121,14 @@ export default function KeyMapper() {
           cancelText: "取消",
           onOk: () => applyToSystem(true),
         });
-      } else {
-        notification.error({ message: "写入系统映射失败", description: text });
+        return;
       }
+      notification.success({
+        message: "系统映射已写入",
+        description: "若尚未重新登录或重启，系统仍可能使用旧映射。",
+      });
+    } catch (error) {
+      notification.error({ message: "写入系统映射失败", description: errorMessage(error) });
     } finally {
       setSaving(false);
     }
@@ -137,14 +137,14 @@ export default function KeyMapper() {
   const restoreOriginal = async () => {
     setSaving(true);
     try {
-      const status = await invoke<ScancodeMapStatus>("restore_scancode_map");
+      const status = await keyMappingApi.restore();
       setMapStatus(status);
       notification.success({
         message: "已恢复应用前映射",
-        description: "请重新登录或重启 Windows 后生效。",
+        description: "若尚未重新登录或重启，系统仍可能使用旧映射。",
       });
     } catch (error) {
-      notification.error({ message: "恢复失败", description: String(error) });
+      notification.error({ message: "恢复失败", description: errorMessage(error) });
     } finally {
       setSaving(false);
     }
@@ -202,9 +202,11 @@ export default function KeyMapper() {
         <div>
           <Text strong>系统扫描码映射</Text>
           <span className={styles.description}>
-            {mapStatus?.applied
-              ? "已写入系统，重新登录或重启后生效"
-              : "编辑规则后，使用管理员权限应用到系统"}
+            {mapStatus?.state === "applied"
+              ? "当前规则已写入注册表；若尚未重新登录或重启，系统仍可能使用旧映射"
+              : mapStatus?.state === "draft_changed"
+                ? "规则草稿已修改，需要重新应用到系统"
+                : "编辑规则后，按需请求管理员权限应用到系统"}
           </span>
         </div>
         <div className={styles.actionRow}>
@@ -220,12 +222,12 @@ export default function KeyMapper() {
         </div>
       </div>
 
-      {mapStatus?.has_external_map && !mapStatus.applied ? (
+      {mapStatus?.state === "system_changed" ? (
         <Alert
           type="warning"
           showIcon
-          message="发现其他工具的系统键盘映射"
-          description="应用 DockMapper 前会备份它；系统 Scancode Map 无法安全合并多个工具的规则。"
+          message="系统键盘映射已发生变化"
+          description="可能来自其他工具或手动修改；再次应用 DockMapper 前会要求确认并备份当前 Scancode Map。"
         />
       ) : null}
       <Alert

@@ -1,28 +1,28 @@
 @import "./base.css";
 
 :root {
-  --ls-accent: #6366f1;
-  --ls-accent-strong: #4f46e5;
-  --ls-accent-soft: rgba(99, 102, 241, 0.22);
-  --ls-danger: #f43f5e;
+  --screenshot-accent: #6366f1;
+  --screenshot-accent-strong: #4f46e5;
+  --screenshot-accent-soft: rgba(99, 102, 241, 0.22);
+  --screenshot-danger: #f43f5e;
 
-  --ls-glass: rgba(22, 22, 30, 0.72);
-  --ls-glass-hover: rgba(255, 255, 255, 0.1);
-  --ls-glass-border: rgba(255, 255, 255, 0.14);
+  --screenshot-glass: rgba(22, 22, 30, 0.72);
+  --screenshot-glass-hover: rgba(255, 255, 255, 0.1);
+  --screenshot-glass-border: rgba(255, 255, 255, 0.14);
 
-  --ls-panel: rgba(252, 252, 253, 0.97);
-  --ls-panel-border: rgba(15, 17, 26, 0.08);
-  --ls-ink: #1c1d26;
-  --ls-ink-dim: #6b6d7c;
+  --screenshot-panel: rgba(252, 252, 253, 0.97);
+  --screenshot-panel-border: rgba(15, 17, 26, 0.08);
+  --screenshot-ink: #1c1d26;
+  --screenshot-ink-dim: #6b6d7c;
 
-  --ls-on-glass: rgba(255, 255, 255, 0.9);
-  --ls-on-glass-dim: rgba(255, 255, 255, 0.55);
+  --screenshot-on-glass: rgba(255, 255, 255, 0.9);
+  --screenshot-on-glass-dim: rgba(255, 255, 255, 0.55);
 
-  --ls-shadow: 0 10px 34px rgba(10, 12, 24, 0.34), 0 2px 6px rgba(10, 12, 24, 0.2);
-  --ls-shadow-sm: 0 4px 14px rgba(10, 12, 24, 0.22);
+  --screenshot-shadow: 0 10px 34px rgba(10, 12, 24, 0.34), 0 2px 6px rgba(10, 12, 24, 0.2);
+  --screenshot-shadow-sm: 0 4px 14px rgba(10, 12, 24, 0.22);
 
-  --ls-radius: 14px;
-  --ls-radius-sm: 9px;
+  --screenshot-radius: 14px;
+  --screenshot-radius-sm: 9px;
 }
 
 html,
@@ -58,7 +58,7 @@ body,
   position: fixed;
   z-index: 15;
   overflow: hidden;
-  background: #fff;
+  background: transparent;
 }
 
 .shot-viewport--scrollable {
@@ -100,12 +100,12 @@ body,
   border-radius: 50%;
   background: #fff;
   box-shadow:
-    0 0 0 1.5px var(--ls-accent),
+    0 0 0 1.5px var(--screenshot-accent),
     0 1px 5px rgba(10, 12, 24, 0.35);
 }
 
 .selection-handle:hover {
-  background: var(--ls-accent);
+  background: var(--screenshot-accent);
   box-shadow:
     0 0 0 1.5px #fff,
     0 1px 5px rgba(10, 12, 24, 0.35);
@@ -137,7 +137,7 @@ body,
 }
 
 .text-object.is-interactive:hover {
-  outline: 1px solid var(--ls-accent-soft);
+  outline: 1px solid var(--screenshot-accent-soft);
 }
 
 .text-object.is-selected {
@@ -192,11 +192,11 @@ body,
   right: 16px;
   z-index: 22;
   padding: 6px 12px;
-  border: 1px solid var(--ls-glass-border);
+  border: 1px solid var(--screenshot-glass-border);
   border-radius: 999px;
-  background: var(--ls-glass);
+  background: var(--screenshot-glass);
   backdrop-filter: blur(18px) saturate(160%);
-  color: var(--ls-on-glass);
+  color: var(--screenshot-on-glass);
   font-size: 12px;
   letter-spacing: 0.01em;
   pointer-events: none;
@@ -209,11 +209,11 @@ body,
   transform: translateX(-50%);
   z-index: 20;
   padding: 7px 16px;
-  border: 1px solid var(--ls-glass-border);
+  border: 1px solid var(--screenshot-glass-border);
   border-radius: 999px;
-  background: var(--ls-glass);
+  background: var(--screenshot-glass);
   backdrop-filter: blur(18px) saturate(160%);
-  color: var(--ls-on-glass);
+  color: var(--screenshot-on-glass);
   font-size: 12.5px;
   font-weight: 500;
   letter-spacing: 0.01em;
@@ -233,9 +233,9 @@ body,
   z-index: 21;
   padding: 3px 8px;
   border-radius: 6px;
-  background: var(--ls-glass);
+  background: var(--screenshot-glass);
   backdrop-filter: blur(12px);
-  color: var(--ls-on-glass);
+  color: var(--screenshot-on-glass);
   font-size: 11.5px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   pointer-events: none;
@@ -280,11 +280,11 @@ body,
   display: flex;
   align-items: center;
   padding: 6px 8px;
-  border: 1px solid var(--ls-glass-border);
-  border-radius: var(--ls-radius);
-  background: var(--ls-glass);
+  border: 1px solid var(--screenshot-glass-border);
+  border-radius: var(--screenshot-radius);
+  background: var(--screenshot-glass);
   backdrop-filter: blur(22px) saturate(170%);
-  box-shadow: var(--ls-shadow);
+  box-shadow: var(--screenshot-shadow);
   cursor: default;
   width: max-content;
   max-width: calc(100vw - 16px);
@@ -317,7 +317,7 @@ body,
   justify-content: center;
   width: 32px;
   height: 32px;
-  color: var(--ls-on-glass-dim);
+  color: var(--screenshot-on-glass-dim);
   padding: 0;
   transition:
     background 0.12s ease,
@@ -330,12 +330,12 @@ body,
 }
 
 .tb-btn.ant-btn-text:not(:disabled):hover {
-  background: var(--ls-glass-hover);
-  color: var(--ls-on-glass);
+  background: var(--screenshot-glass-hover);
+  color: var(--screenshot-on-glass);
 }
 
 .tb-btn.ant-btn.is-active {
-  background: var(--ls-accent-soft);
+  background: var(--screenshot-accent-soft);
   color: #c7c9ff;
 }
 
@@ -385,7 +385,7 @@ body,
   border: 1px solid rgba(255, 255, 255, 0.3);
   border-radius: 10px;
   background: #050506;
-  box-shadow: var(--ls-shadow);
+  box-shadow: var(--screenshot-shadow);
   color: #fff;
   pointer-events: none;
 }
@@ -499,12 +499,12 @@ body,
   min-height: 42px;
   padding: 6px 10px;
   overflow-x: auto;
-  border: 1px solid var(--ls-glass-border);
-  border-radius: var(--ls-radius);
-  background: var(--ls-glass);
+  border: 1px solid var(--screenshot-glass-border);
+  border-radius: var(--screenshot-radius);
+  background: var(--screenshot-glass);
   backdrop-filter: blur(22px) saturate(170%);
-  box-shadow: var(--ls-shadow-sm);
-  color: var(--ls-on-glass-dim);
+  box-shadow: var(--screenshot-shadow-sm);
+  color: var(--screenshot-on-glass-dim);
   font-size: 14px;
   font-weight: 500;
   white-space: nowrap;
@@ -562,7 +562,7 @@ body,
   transform: scale(1.14);
   box-shadow:
     0 0 0 2px rgba(18, 18, 26, 0.9),
-    0 0 0 3.5px var(--ls-accent);
+    0 0 0 3.5px var(--screenshot-accent);
 }
 
 .color-swatch:disabled {
@@ -581,11 +581,11 @@ body,
   min-width: 160px;
   max-width: min(420px, calc(100vw - 24px));
   padding: 8px;
-  border: 1px solid var(--ls-panel-border);
-  border-radius: var(--ls-radius);
-  background: var(--ls-panel);
+  border: 1px solid var(--screenshot-panel-border);
+  border-radius: var(--screenshot-radius);
+  background: var(--screenshot-panel);
   backdrop-filter: blur(20px);
-  box-shadow: var(--ls-shadow);
+  box-shadow: var(--screenshot-shadow);
   user-select: none;
   resize: both;
   overflow: auto;
@@ -645,7 +645,7 @@ body,
   height: 20px;
   border-radius: 6px;
   background: rgba(99, 102, 241, 0.08);
-  color: var(--ls-ink-dim);
+  color: var(--screenshot-ink-dim);
   font-size: 10.5px;
   letter-spacing: 0.02em;
   cursor: grab;
@@ -664,28 +664,28 @@ body,
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: var(--ls-ink-dim);
+  color: var(--screenshot-ink-dim);
   font-size: 11px;
 }
 .text-editor__toolbar select,
 .text-editor__advanced input:not([type="color"]):not([type="range"]) {
   max-width: 78px;
-  border: 1px solid var(--ls-panel-border);
+  border: 1px solid var(--screenshot-panel-border);
   border-radius: 4px;
   background: #fff;
-  color: var(--ls-ink);
+  color: var(--screenshot-ink);
 }
 .text-editor__toolbar button {
   border: 0;
   border-radius: 5px;
   padding: 4px 6px;
   background: rgba(15, 17, 26, 0.07);
-  color: var(--ls-ink);
+  color: var(--screenshot-ink);
   font-size: 11px;
   cursor: pointer;
 }
 .text-editor__toolbar button.is-active {
-  background: var(--ls-accent);
+  background: var(--screenshot-accent);
   color: #fff;
 }
 .text-editor__advanced {
@@ -719,7 +719,7 @@ body,
   border: none;
   border-radius: 6px;
   background: rgba(15, 17, 26, 0.05);
-  color: var(--ls-ink-dim);
+  color: var(--screenshot-ink-dim);
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
@@ -733,7 +733,7 @@ body,
 }
 
 .text-editor__size-btn.is-active {
-  background: var(--ls-accent);
+  background: var(--screenshot-accent);
   color: #fff;
 }
 
@@ -749,15 +749,15 @@ body,
 .text-editor__colors .color-swatch.is-active {
   box-shadow:
     0 0 0 2px #fff,
-    0 0 0 3.5px var(--ls-accent);
+    0 0 0 3.5px var(--screenshot-accent);
 }
 
 .text-editor__input {
   width: 100%;
   box-sizing: border-box;
   padding: 7px 9px;
-  border: 1px solid var(--ls-panel-border);
-  border-radius: var(--ls-radius-sm);
+  border: 1px solid var(--screenshot-panel-border);
+  border-radius: var(--screenshot-radius-sm);
   background: #fff;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-weight: 700;
@@ -807,8 +807,8 @@ body,
 }
 
 .text-editor__input:focus {
-  border-color: var(--ls-accent);
-  box-shadow: 0 0 0 3px var(--ls-accent-soft);
+  border-color: var(--screenshot-accent);
+  box-shadow: 0 0 0 3px var(--screenshot-accent-soft);
 }
 
 .text-editor__actions {
@@ -821,12 +821,12 @@ body,
 
 .settings-btn {
   border: none;
-  border-radius: var(--ls-radius-sm);
+  border-radius: var(--screenshot-radius-sm);
   padding: 7px 14px;
   font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
-  background: var(--ls-accent);
+  background: var(--screenshot-accent);
   color: #fff;
   transition:
     background 0.12s ease,
@@ -834,7 +834,7 @@ body,
 }
 
 .settings-btn:hover:not(:disabled) {
-  background: var(--ls-accent-strong);
+  background: var(--screenshot-accent-strong);
 }
 
 .settings-btn:disabled {
@@ -844,7 +844,7 @@ body,
 
 .settings-btn--ghost {
   background: rgba(15, 17, 26, 0.06);
-  color: var(--ls-ink);
+  color: var(--screenshot-ink);
 }
 
 .settings-btn--ghost:hover:not(:disabled) {
@@ -858,7 +858,7 @@ body,
   min-height: 100vh;
   padding: 26px 24px;
   background: #fbfbfc;
-  color: var(--ls-ink);
+  color: var(--screenshot-ink);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   text-align: center;
   cursor: default;
@@ -874,7 +874,7 @@ body,
 .shortcut-panel__hint {
   margin: 0 0 18px;
   font-size: 12.5px;
-  color: var(--ls-ink-dim);
+  color: var(--screenshot-ink-dim);
   line-height: 1.5;
 }
 
@@ -884,8 +884,8 @@ body,
   justify-content: center;
   min-height: 58px;
   margin-bottom: 18px;
-  border: 1px solid var(--ls-panel-border);
-  border-radius: var(--ls-radius);
+  border: 1px solid var(--screenshot-panel-border);
+  border-radius: var(--screenshot-radius);
   background: #fff;
   font-size: 21px;
   font-weight: 600;
@@ -896,8 +896,8 @@ body,
 }
 
 .shortcut-panel__display.is-recording {
-  border-color: var(--ls-accent);
-  box-shadow: 0 0 0 4px var(--ls-accent-soft);
+  border-color: var(--screenshot-accent);
+  box-shadow: 0 0 0 4px var(--screenshot-accent-soft);
 }
 
 .shortcut-panel .settings-btn {
@@ -907,13 +907,13 @@ body,
 .settings-error {
   margin: 12px 0 0;
   font-size: 12px;
-  color: var(--ls-danger);
+  color: var(--screenshot-danger);
 }
 
 .settings-success {
   margin: 12px 0 0;
   font-size: 12px;
-  color: var(--ls-accent);
+  color: var(--screenshot-accent);
 }
 
 /* Native Tauri pinned-image window */

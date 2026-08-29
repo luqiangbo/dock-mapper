@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { Alert, App as AntApp, Button, Card, Input, Select, Tabs, Typography } from "antd";
-import type { ScreenshotConfig } from "../types";
+import { listen } from "@tauri-apps/api/event";
+import { Alert, App as AntApp, Button, Card, Input, Select, Tabs, Tag, Typography } from "antd";
+import type { ScreenshotConfig, ShortcutRuntimeStatus } from "../types";
 import styles from "./components.module.scss";
 import { shortcutFromKeyEvent } from "../utils/shortcut";
 import ScreenshotHistory from "./ScreenshotHistory";
+import { errorMessage, MAIN_EVENTS, screenshotSettingsApi } from "../api/commands";
+import { resetShortcutConfig, shortcutStatusDisplay } from "../utils/shortcutStatus";
 
 const { Text } = Typography;
 
@@ -20,41 +22,90 @@ export default function ScreenshotSettings({
   const { notification } = AntApp.useApp();
   const [config, setConfig] = useState<ScreenshotConfig | null>(null);
   const [saving, setSaving] = useState(false);
+  const [shortcutStatuses, setShortcutStatuses] = useState<ShortcutRuntimeStatus[]>([]);
+
+  const refreshShortcutStatuses = () =>
+    screenshotSettingsApi
+      .shortcutStatuses()
+      .then(setShortcutStatuses)
+      .catch(() => setShortcutStatuses([]));
 
   useEffect(() => {
-    void invoke<ScreenshotConfig>("get_screenshot_config")
-      .then(setConfig)
+    void Promise.all([screenshotSettingsApi.get(), screenshotSettingsApi.shortcutStatuses()])
+      .then(([nextConfig, statuses]) => {
+        setConfig(nextConfig);
+        setShortcutStatuses(statuses);
+      })
       .catch((error) =>
-        notification.error({ message: "读取截图设置失败", description: String(error) }),
+        notification.error({ message: "读取截图设置失败", description: errorMessage(error) }),
       );
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen(MAIN_EVENTS.shortcutStatusChanged, () => void refreshShortcutStatuses()).then(
+      (off) => {
+        if (disposed) off();
+        else unlisten = off;
+      },
+    );
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, [notification]);
 
   const save = async (next: ScreenshotConfig) => {
     setSaving(true);
     try {
-      const saved = await invoke<ScreenshotConfig>("update_screenshot_config", {
-        screenshotConfig: next,
-      });
+      const saved = await screenshotSettingsApi.update(next);
       setConfig(saved);
+      await refreshShortcutStatuses();
       notification.success({ message: "截图设置已保存" });
     } catch (error) {
-      notification.error({ message: "保存截图设置失败", description: String(error) });
+      notification.error({ message: "保存截图设置失败", description: errorMessage(error) });
     } finally {
       setSaving(false);
     }
   };
 
+  const resetShortcuts = async () => {
+    if (!config) return;
+    setSaving(true);
+    try {
+      const result = await resetShortcutConfig(config, screenshotSettingsApi.resetShortcuts);
+      setConfig(result.config);
+      await refreshShortcutStatuses();
+      if (result.error) throw result.error;
+      notification.success({ message: "已恢复默认截图快捷键" });
+    } catch (error) {
+      await refreshShortcutStatuses();
+      notification.error({ message: "恢复默认快捷键失败", description: errorMessage(error) });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const shortcutStatus = (actionId: ShortcutRuntimeStatus["actionId"]) => {
+    const status = shortcutStatuses.find((item) => item.actionId === actionId);
+    const display = shortcutStatusDisplay(status);
+    return (
+      <span className={styles.shortcutStatus}>
+        <Tag color={display.color}>{display.label}</Tag>
+        {display.detail ? <span className={styles.shortcutError}>{display.detail}</span> : null}
+      </span>
+    );
+  };
+
   const chooseDirectory = async () => {
     if (!config) return;
-    const directory = await invoke<string | null>("choose_screenshot_save_directory");
+    const directory = await screenshotSettingsApi.chooseSaveDirectory();
     if (directory) await save({ ...config, save_directory: directory });
   };
 
   const start = async () => {
     try {
-      await invoke("start_screenshot");
+      await screenshotSettingsApi.start();
     } catch (error) {
-      notification.error({ message: "启动截图失败", description: String(error) });
+      notification.error({ message: "启动截图失败", description: errorMessage(error) });
     }
   };
 
@@ -70,7 +121,7 @@ export default function ScreenshotSettings({
             label: "截图设置",
             children: (
               <>
-                <Card className={styles.surfaceCard} title="LiteSnap 截图">
+                <Card className={styles.surfaceCard} title="截图">
                   <div className={styles.settingsGroup}>
                     <div className={styles.settingRow}>
                       <div className={styles.settingCopy}>
@@ -84,11 +135,16 @@ export default function ScreenshotSettings({
                       </Button>
                     </div>
                     <div className={`${styles.settingRow} ${styles.shortcutSection}`}>
-                      <div className={styles.settingCopy}>
-                        <Text strong>全局快捷键</Text>
-                        <span className={styles.description}>
-                          点击输入框后按下新的组合键；注册或保存失败时会自动恢复旧快捷键。
-                        </span>
+                      <div className={styles.shortcutHeader}>
+                        <div className={styles.settingCopy}>
+                          <Text strong>全局快捷键</Text>
+                          <span className={styles.description}>
+                            点击输入框后按下新的组合键；注册或保存失败时会自动恢复旧快捷键。
+                          </span>
+                        </div>
+                        <Button disabled={saving || !config} onClick={() => void resetShortcuts()}>
+                          恢复默认
+                        </Button>
                       </div>
                       {config && (
                         <div className={styles.shortcutList}>
@@ -97,18 +153,21 @@ export default function ScreenshotSettings({
                               <Text>区域截图</Text>
                               <span className={styles.description}>唤起截图浮层并选择截图区域</span>
                             </div>
-                            <Input
-                              aria-label="截图快捷键"
-                              value={config.shortcut}
-                              readOnly
-                              disabled={saving}
-                              className={styles.shortcutInput}
-                              onKeyDown={(event) => {
-                                event.preventDefault();
-                                const shortcut = shortcutFromKeyEvent(event.nativeEvent);
-                                if (shortcut) void save({ ...config, shortcut });
-                              }}
-                            />
+                            <div className={styles.shortcutBinding}>
+                              {shortcutStatus("capture")}
+                              <Input
+                                aria-label="截图快捷键"
+                                value={config.shortcut}
+                                readOnly
+                                disabled={saving}
+                                className={styles.shortcutInput}
+                                onKeyDown={(event) => {
+                                  event.preventDefault();
+                                  const shortcut = shortcutFromKeyEvent(event.nativeEvent);
+                                  if (shortcut) void save({ ...config, shortcut });
+                                }}
+                              />
+                            </div>
                           </div>
                           <div className={styles.shortcutItem}>
                             <div className={styles.shortcutCopy}>
@@ -117,36 +176,42 @@ export default function ScreenshotSettings({
                                 将最近一次确认的截图置顶到屏幕
                               </span>
                             </div>
-                            <Input
-                              aria-label="贴图快捷键"
-                              value={config.pin_shortcut}
-                              readOnly
-                              disabled={saving}
-                              className={styles.shortcutInput}
-                              onKeyDown={(event) => {
-                                event.preventDefault();
-                                const pin_shortcut = shortcutFromKeyEvent(event.nativeEvent);
-                                if (pin_shortcut) void save({ ...config, pin_shortcut });
-                              }}
-                            />
+                            <div className={styles.shortcutBinding}>
+                              {shortcutStatus("pin_recent")}
+                              <Input
+                                aria-label="贴图快捷键"
+                                value={config.pin_shortcut}
+                                readOnly
+                                disabled={saving}
+                                className={styles.shortcutInput}
+                                onKeyDown={(event) => {
+                                  event.preventDefault();
+                                  const pin_shortcut = shortcutFromKeyEvent(event.nativeEvent);
+                                  if (pin_shortcut) void save({ ...config, pin_shortcut });
+                                }}
+                              />
+                            </div>
                           </div>
                           <div className={styles.shortcutItem}>
                             <div className={styles.shortcutCopy}>
                               <Text>打开截图历史</Text>
                               <span className={styles.description}>显示主窗口并切换到截图历史</span>
                             </div>
-                            <Input
-                              aria-label="截图历史快捷键"
-                              value={config.history_shortcut}
-                              readOnly
-                              disabled={saving}
-                              className={styles.shortcutInput}
-                              onKeyDown={(event) => {
-                                event.preventDefault();
-                                const history_shortcut = shortcutFromKeyEvent(event.nativeEvent);
-                                if (history_shortcut) void save({ ...config, history_shortcut });
-                              }}
-                            />
+                            <div className={styles.shortcutBinding}>
+                              {shortcutStatus("open_history")}
+                              <Input
+                                aria-label="截图历史快捷键"
+                                value={config.history_shortcut}
+                                readOnly
+                                disabled={saving}
+                                className={styles.shortcutInput}
+                                onKeyDown={(event) => {
+                                  event.preventDefault();
+                                  const history_shortcut = shortcutFromKeyEvent(event.nativeEvent);
+                                  if (history_shortcut) void save({ ...config, history_shortcut });
+                                }}
+                              />
+                            </div>
                           </div>
                           <div className={styles.shortcutItem}>
                             <div className={styles.shortcutCopy}>
@@ -155,19 +220,22 @@ export default function ScreenshotSettings({
                                 隐藏或恢复最近创建且仍存在的贴图
                               </span>
                             </div>
-                            <Input
-                              aria-label="贴图显隐快捷键"
-                              value={config.toggle_pin_shortcut}
-                              readOnly
-                              disabled={saving}
-                              className={styles.shortcutInput}
-                              onKeyDown={(event) => {
-                                event.preventDefault();
-                                const toggle_pin_shortcut = shortcutFromKeyEvent(event.nativeEvent);
-                                if (toggle_pin_shortcut)
-                                  void save({ ...config, toggle_pin_shortcut });
-                              }}
-                            />
+                            <div className={styles.shortcutBinding}>
+                              {shortcutStatus("toggle_latest_pin")}
+                              <Input
+                                aria-label="贴图显隐快捷键"
+                                value={config.toggle_pin_shortcut}
+                                readOnly
+                                disabled={saving}
+                                className={styles.shortcutInput}
+                                onKeyDown={(event) => {
+                                  event.preventDefault();
+                                  const toggle_pin_shortcut = shortcutFromKeyEvent(event.nativeEvent);
+                                  if (toggle_pin_shortcut)
+                                    void save({ ...config, toggle_pin_shortcut });
+                                }}
+                              />
+                            </div>
                           </div>
                         </div>
                       )}

@@ -80,6 +80,7 @@ function TaskbarWidget() {
     upload_speed: 0,
     download_speed: 0,
     memory_usage: 0,
+    network_available: true,
   });
   const [scheme, setScheme] = useState<MemoryScheme>("capsule");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -120,12 +121,20 @@ function TaskbarWidget() {
     };
   }, [syncWidth]);
 
-  const upload = formatSpeedParts(status.upload_speed);
-  const download = formatSpeedParts(status.download_speed);
+  const upload = status.network_available
+    ? formatSpeedParts(status.upload_speed)
+    : { value: "—", unit: "" };
+  const download = status.network_available
+    ? formatSpeedParts(status.download_speed)
+    : { value: "—", unit: "" };
 
   return (
     <div className="widget-container" ref={containerRef}>
-      <div className="net-speed" aria-label="实时网速">
+      <div
+        className="net-speed"
+        aria-label={status.network_available ? "实时网速" : "所选网卡不可用"}
+        title={status.network_available ? undefined : "所选网卡不可用"}
+      >
         <div className="speed-row">
           <CaretUpFilled className="speed-arrow up-arrow" aria-hidden="true" />
           <span className="speed-value">{upload.value}</span>

@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { Selection } from "../store";
 import type { OcrTextBlock, WindowCandidate } from "../api";
-import { useStore } from "../store";
 import { useI18n } from "../i18n";
 import type { ScreenshotConfig } from "../../../types";
 import AnnotationToolbar, { STROKE_COLORS, type AnnotTool } from "./AnnotationToolbar";
@@ -17,15 +15,18 @@ import {
 import ToolOptionsBar from "./ToolOptionsBar";
 import { useOcr } from "../hooks/useOcr";
 import { RequestGeneration } from "../hooks/requestGeneration";
-import { useCaptureLifecycle } from "../hooks/useCaptureLifecycle";
+import { useCaptureLifecycle, type Selection } from "../hooks/useCaptureLifecycle";
 import { useEditorSceneState } from "../hooks/useEditorSceneState";
 import { useOverlayKeyboard } from "../hooks/useOverlayKeyboard";
 import { ObjectMutationTransaction, useEditorHistory } from "../hooks/useCanvasHistory";
 import {
+  calculateSelectionCrop,
   HANDLE_CURSORS,
+  mapCropPoint,
   moveRect,
   RESIZE_HANDLES,
   resizeRect,
+  type SelectionCrop,
   type ResizeHandle,
 } from "./selectionGeometry";
 import {
@@ -48,10 +49,11 @@ import { resizeTextBox, TEXT_RESIZE_HANDLES, type TextResizeHandle } from "./tex
 import { NativeInputGate, type NativeInputOwner } from "./nativeInputGate";
 import { isTextObjectInteractive, wrapTextLines } from "./textLayout";
 import { calculatePickerPosition, resolveScreenPoint } from "./pickerGeometry";
-import { runImageAction } from "../utils/imageActions";
+import { useCommittedImageAction } from "../hooks/useCommittedImageAction";
 import {
   annotationBounds,
   cloneRasterAnnotations,
+  renderRasterOverlay,
   renderRasterScene,
   resizeAnnotation,
   simplifyScenePoints,
@@ -63,7 +65,6 @@ import {
   appendNumberObject,
   clampNumberCenter,
   isNumberObjectInteractive,
-  translateNumberObjects,
   type NumberObject,
 } from "./numberObjects";
 import { findWindowCandidate } from "./windowCandidates";
@@ -282,18 +283,15 @@ function selectionToImageCrop(
   rect: Selection,
   image: HTMLImageElement,
   heightOverride?: number,
-): { sx: number; sy: number; sw: number; sh: number } {
-  const { scaleX, scaleY } = syncImageScale(image);
-  const logicalH = heightOverride ?? rect.height;
-  let sx = Math.floor(rect.x * scaleX);
-  let sy = Math.floor(rect.y * scaleY);
-  let sw = Math.ceil((rect.x + rect.width) * scaleX) - sx;
-  let sh = Math.ceil((rect.y + logicalH) * scaleY) - sy;
-  sx = Math.max(0, Math.min(sx, image.naturalWidth - 1));
-  sy = Math.max(0, Math.min(sy, image.naturalHeight - 1));
-  sw = Math.max(1, Math.min(sw, image.naturalWidth - sx));
-  sh = Math.max(1, Math.min(sh, image.naturalHeight - sy));
-  return { sx, sy, sw, sh };
+): SelectionCrop {
+  return calculateSelectionCrop(
+    rect,
+    image.naturalWidth,
+    image.naturalHeight,
+    window.innerWidth,
+    window.innerHeight,
+    heightOverride,
+  );
 }
 
 function ScreenshotOverlay(): React.JSX.Element {
@@ -372,8 +370,7 @@ function ScreenshotOverlay(): React.JSX.Element {
     origin: Selection;
     // Pixels captured when the drag began, so shrinking then re-growing the
     // region restores annotations instead of losing them.
-    baseSx: number;
-    baseSy: number;
+    baseCrop: SelectionCrop;
     baseTextObjects: TextObject[];
     baseNumberObjects: NumberObject[];
     baseRasterAnnotations: RasterAnnotation[];
@@ -398,6 +395,9 @@ function ScreenshotOverlay(): React.JSX.Element {
     restoreEditing,
     fail,
     reset,
+    selection,
+    setSelection,
+    selectionRef,
   } = useCaptureLifecycle();
   const {
     tool,
@@ -454,8 +454,6 @@ function ScreenshotOverlay(): React.JSX.Element {
   });
   objectStateRef.current = { rasterAnnotations, textObjects, numberObjects };
 
-  const selection = useStore((s) => s.selection);
-  const setSelection = useStore((s) => s.setSelection);
   const restoreObjectSnapshot = useCallback((snapshot: ObjectSnapshot) => {
     const restored = cloneObjectSnapshot(snapshot);
     setTextObjects(restored.textObjects);
@@ -687,12 +685,22 @@ function ScreenshotOverlay(): React.JSX.Element {
       ctx.fillRect(0, 0, width, height);
       if (rect && rect.width > 0 && rect.height > 0) {
         const visibleHeight = holeHeight ?? rect.height;
-        const { sx, sy, sw, sh } = selectionToImageCrop(rect, image, visibleHeight);
-        ctx.drawImage(image, sx, sy, sw, sh, sx, sy, sw, sh);
+        const crop = selectionToImageCrop(rect, image, visibleHeight);
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(crop.sourceX, crop.sourceY, crop.sourceWidth, crop.sourceHeight);
+        ctx.clip();
+        ctx.drawImage(image, 0, 0, width, height);
+        ctx.restore();
         if (showStroke) {
           ctx.strokeStyle = "#6366f1";
           ctx.lineWidth = 2;
-          ctx.strokeRect(sx + 1, sy + 1, sw - 2, sh - 2);
+          ctx.strokeRect(
+            crop.sourceX + 1,
+            crop.sourceY + 1,
+            Math.max(0, crop.sourceWidth - 2),
+            Math.max(0, crop.sourceHeight - 2),
+          );
         }
       }
     },
@@ -776,10 +784,20 @@ function ScreenshotOverlay(): React.JSX.Element {
     const frozenImage = fullImageRef.current;
     // 始终从冻结原图重新裁切，避免矩形、画笔、文字等标注影响 OCR。
     if (frozenImage && selection) {
-      const { sx, sy, sw, sh } = selectionToImageCrop(selection, frozenImage);
-      source.width = sw;
-      source.height = sh;
-      ctx.drawImage(frozenImage, sx, sy, sw, sh, 0, 0, sw, sh);
+      const crop = selectionToImageCrop(selection, frozenImage);
+      source.width = crop.outputWidth;
+      source.height = crop.outputHeight;
+      ctx.drawImage(
+        frozenImage,
+        crop.sourceX,
+        crop.sourceY,
+        crop.sourceWidth,
+        crop.sourceHeight,
+        0,
+        0,
+        crop.outputWidth,
+        crop.outputHeight,
+      );
     } else if (canvas) {
       source.width = canvas.width;
       source.height = canvas.height;
@@ -796,53 +814,14 @@ function ScreenshotOverlay(): React.JSX.Element {
     return new Uint8Array(await blob.arrayBuffer());
   }, [selection]);
 
-  const persistHistory = useCallback(async (resultPng: Uint8Array): Promise<void> => {
-    let resultImageId: string | null = null;
-    try {
-      resultImageId = await window.api.uploadImage(resultPng);
-      await window.api.createScreenshotHistory(resultImageId);
-      resultImageId = null;
-    } catch (historyError) {
-      if (resultImageId) await window.api.releaseImage(resultImageId).catch(() => undefined);
-      console.error("保存截图历史失败", historyError);
-    }
-  }, []);
-
-  const runCommittedImageAction = useCallback(
-    (consumeImage: (imageId: string) => Promise<unknown>, fallbackError: string) => {
-      const action = ++pendingAction.current;
-      return runImageAction({
-        exportPng: async () => {
-          const png = await exportPng();
-          if (action !== pendingAction.current) throw new Error("截图操作已取消");
-          return png;
-        },
-        uploadImage: window.api.uploadImage,
-        consumeImage: async (imageId) => {
-          if (action !== pendingAction.current) {
-            await window.api.releaseImage(imageId);
-            return false;
-          }
-          beginCommit();
-          const result = await consumeImage(imageId);
-          if (result === false && action === pendingAction.current) restoreEditing();
-          return result;
-        },
-        releaseImage: window.api.releaseImage,
-        onCommitted: persistHistory,
-        setBusy: (value) => {
-          if (action === pendingAction.current) setBusy(value);
-        },
-        onError: (message) => {
-          if (action === pendingAction.current) {
-            fail(message, "editing");
-          }
-        },
-        fallbackError,
-      });
-    },
-    [beginCommit, exportPng, fail, persistHistory, restoreEditing],
-  );
+  const runCommittedImageAction = useCommittedImageAction({
+    pendingAction,
+    exportPng,
+    beginCommit,
+    restoreEditing,
+    setBusy,
+    fail,
+  });
 
   const {
     panel: ocrPanel,
@@ -882,12 +861,13 @@ function ScreenshotOverlay(): React.JSX.Element {
     (left: number, top: number): { canvasX: number; canvasY: number } => {
       const canvas = shotRef.current;
       if (!canvas || !selection) return { canvasX: 0, canvasY: 0 };
-      const scale = canvas.width / Math.max(1, selection.width);
+      const scaleX = canvas.width / Math.max(1, selection.width);
+      const scaleY = canvas.height / Math.max(1, selection.height);
       const viewport = shotViewportRef.current;
       const scrollTop = viewport?.scrollTop ?? 0;
       return {
-        canvasX: (left - selection.x) * scale,
-        canvasY: (top - selection.y + scrollTop) * scale,
+        canvasX: (left - selection.x) * scaleX,
+        canvasY: (top - selection.y + scrollTop) * scaleY,
       };
     },
     [selection],
@@ -950,11 +930,12 @@ function ScreenshotOverlay(): React.JSX.Element {
     (obj: TextObject) => {
       const canvas = shotRef.current;
       if (!canvas || !selection) return;
-      const scale = canvas.width / Math.max(1, selection.width);
+      const scaleX = canvas.width / Math.max(1, selection.width);
+      const scaleY = canvas.height / Math.max(1, selection.height);
       const viewport = shotViewportRef.current;
       const scrollTop = viewport?.scrollTop ?? 0;
-      const textLeft = selection.x + obj.canvasX / scale;
-      const textTop = selection.y + obj.canvasY / scale - scrollTop;
+      const textLeft = selection.x + obj.canvasX / scaleX;
+      const textTop = selection.y + obj.canvasY / scaleY - scrollTop;
       setSelectedTextId(obj.id);
       setTextDraft(obj.text);
       setTextEditor({
@@ -1089,22 +1070,31 @@ function ScreenshotOverlay(): React.JSX.Element {
           setError("Editor canvas missing");
           return;
         }
-        const { sx, sy, sw, sh } = selectionToImageCrop(clamped, image);
+        const crop = selectionToImageCrop(clamped, image);
 
-        canvas.width = sw;
-        canvas.height = sh;
+        canvas.width = crop.outputWidth;
+        canvas.height = crop.outputHeight;
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
         const base = document.createElement("canvas");
-        base.width = sw;
-        base.height = sh;
+        base.width = crop.outputWidth;
+        base.height = crop.outputHeight;
         const baseContext = base.getContext("2d");
         if (!baseContext) return;
         baseContext.imageSmoothingEnabled = false;
-        baseContext.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
+        baseContext.drawImage(
+          image,
+          crop.sourceX,
+          crop.sourceY,
+          crop.sourceWidth,
+          crop.sourceHeight,
+          0,
+          0,
+          crop.outputWidth,
+          crop.outputHeight,
+        );
         shotBaseRef.current = base;
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(base, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
         resetHistory();
         setShotReady(true);
         setError(null);
@@ -1120,7 +1110,7 @@ function ScreenshotOverlay(): React.JSX.Element {
     const context = canvas?.getContext("2d");
     if (!canvas || !base || !context) return;
     const scale = canvas.width / Math.max(1, selection?.width ?? canvas.width);
-    renderRasterScene(
+    renderRasterOverlay(
       context,
       base,
       rasterPreview ? [...rasterAnnotations, rasterPreview] : rasterAnnotations,
@@ -1139,39 +1129,65 @@ function ScreenshotOverlay(): React.JSX.Element {
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
-      const { sx, sy, sw, sh } = selectionToImageCrop(next, image);
-      canvas.width = sw;
-      canvas.height = sh;
-      const dx = drag.baseSx - sx;
-      const dy = drag.baseSy - sy;
-      const base = document.createElement("canvas");
-      base.width = sw;
-      base.height = sh;
+      const crop = selectionToImageCrop(next, image);
+      if (canvas.width !== crop.outputWidth) canvas.width = crop.outputWidth;
+      if (canvas.height !== crop.outputHeight) canvas.height = crop.outputHeight;
+      const base = shotBaseRef.current ?? document.createElement("canvas");
+      if (base.width !== crop.outputWidth) base.width = crop.outputWidth;
+      if (base.height !== crop.outputHeight) base.height = crop.outputHeight;
       const baseContext = base.getContext("2d");
       if (!baseContext) return;
       baseContext.imageSmoothingEnabled = false;
-      baseContext.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
+      baseContext.drawImage(
+        image,
+        crop.sourceX,
+        crop.sourceY,
+        crop.sourceWidth,
+        crop.sourceHeight,
+        0,
+        0,
+        crop.outputWidth,
+        crop.outputHeight,
+      );
       shotBaseRef.current = base;
       ctx.imageSmoothingEnabled = false;
       const translatedRaster = drag.baseRasterAnnotations.map((annotation) => ({
         ...annotation,
-        points: annotation.points.map((point) => ({ x: point.x + dx, y: point.y + dy })),
+        points: annotation.points.map((point) => mapCropPoint(point, drag.baseCrop, crop)),
       }));
       setRasterAnnotations(translatedRaster);
-      renderRasterScene(ctx, base, translatedRaster, sw / Math.max(1, next.width));
+      renderRasterOverlay(
+        ctx,
+        base,
+        translatedRaster,
+        crop.outputWidth / Math.max(1, next.width),
+      );
 
       setTextObjects(
-        drag.baseTextObjects.map((item) => ({
-          ...item,
-          canvasX: item.canvasX + dx,
-          canvasY: item.canvasY + dy,
-        })),
+        drag.baseTextObjects.map((item) => {
+          const point = mapCropPoint(
+            { x: item.canvasX, y: item.canvasY },
+            drag.baseCrop,
+            crop,
+          );
+          return { ...item, canvasX: point.x, canvasY: point.y };
+        }),
       );
-      setNumberObjects(translateNumberObjects(drag.baseNumberObjects, dx, dy));
+      setNumberObjects(
+        drag.baseNumberObjects.map((item) => {
+          const point = mapCropPoint(
+            { x: item.canvasX, y: item.canvasY },
+            drag.baseCrop,
+            crop,
+          );
+          return { ...item, canvasX: point.x, canvasY: point.y };
+        }),
+      );
 
+      paintBackground(next, next.height, 0, true);
       setSelection(next);
     },
-    [setSelection],
+    [paintBackground, setSelection],
   );
 
   const beginRegionDrag = useCallback(
@@ -1179,15 +1195,14 @@ function ScreenshotOverlay(): React.JSX.Element {
       const image = fullImageRef.current;
       const canvas = shotRef.current;
       if (!image || !canvas || !selection) return;
-      const { sx, sy } = selectionToImageCrop(selection, image);
+      const crop = selectionToImageCrop(selection, image);
 
       regionDragRef.current = {
         handle,
         startX: event.clientX,
         startY: event.clientY,
         origin: selection,
-        baseSx: sx,
-        baseSy: sy,
+        baseCrop: crop,
         baseTextObjects: textObjects,
         baseNumberObjects: numberObjects,
         baseRasterAnnotations: cloneRasterAnnotations(rasterAnnotations),
@@ -1251,7 +1266,8 @@ function ScreenshotOverlay(): React.JSX.Element {
     const processMove = (event: PointerEvent): void => {
       const canvas = shotRef.current;
       if (!canvas || !selection) return;
-      const scale = canvas.width / Math.max(1, selection.width);
+      const scaleX = canvas.width / Math.max(1, selection.width);
+      const scaleY = canvas.height / Math.max(1, selection.height);
 
       const regionDrag = regionDragRef.current;
       if (regionDrag) {
@@ -1267,8 +1283,8 @@ function ScreenshotOverlay(): React.JSX.Element {
 
       const rasterTransform = rasterTransformRef.current;
       if (rasterTransform && rasterTransform.pointerId === event.pointerId) {
-        const dx = (event.clientX - rasterTransform.startX) * scale;
-        const dy = (event.clientY - rasterTransform.startY) * scale;
+        const dx = (event.clientX - rasterTransform.startX) * scaleX;
+        const dy = (event.clientY - rasterTransform.startY) * scaleY;
         const next =
           rasterTransform.mode === "move"
             ? translateAnnotation(rasterTransform.origin, dx, dy, canvas.width, canvas.height)
@@ -1293,8 +1309,8 @@ function ScreenshotOverlay(): React.JSX.Element {
 
       const textDrag = textDragRef.current;
       if (textDrag && textDrag.pointerId === event.pointerId) {
-        const dx = (event.clientX - textDrag.startX) * scale;
-        const dy = (event.clientY - textDrag.startY) * scale;
+        const dx = (event.clientX - textDrag.startX) * scaleX;
+        const dy = (event.clientY - textDrag.startY) * scaleY;
         const canvasX = Math.max(0, Math.min(textDrag.originCanvasX + dx, textDrag.maxCanvasX));
         const canvasY = Math.max(0, Math.min(textDrag.originCanvasY + dy, textDrag.maxCanvasY));
         if (canvasX !== textDrag.originCanvasX || canvasY !== textDrag.originCanvasY)
@@ -1334,8 +1350,8 @@ function ScreenshotOverlay(): React.JSX.Element {
       }
       const editorDrag = textEditorDragRef.current;
       if (editorDrag) {
-        const dx = (event.clientX - editorDrag.startX) * scale;
-        const dy = (event.clientY - editorDrag.startY) * scale;
+        const dx = (event.clientX - editorDrag.startX) * scaleX;
+        const dy = (event.clientY - editorDrag.startY) * scaleY;
         setTextEditor((current) =>
           current
             ? {
@@ -1348,8 +1364,8 @@ function ScreenshotOverlay(): React.JSX.Element {
       }
       const numberDrag = numberDragRef.current;
       if (numberDrag && numberDrag.pointerId === event.pointerId) {
-        const dx = (event.clientX - numberDrag.startX) * scale;
-        const dy = (event.clientY - numberDrag.startY) * scale;
+        const dx = (event.clientX - numberDrag.startX) * scaleX;
+        const dy = (event.clientY - numberDrag.startY) * scaleY;
         const center = clampNumberCenter(
           numberDrag.originCanvasX + dx,
           numberDrag.originCanvasY + dy,
@@ -1506,13 +1522,13 @@ function ScreenshotOverlay(): React.JSX.Element {
     if (!dragging || phase !== "selecting") return;
     setDragging(false);
     pendingWindowSelection.current = null;
-    const current = useStore.getState().selection;
+    const current = selectionRef.current;
     if (current && current.width >= MIN_SIZE && current.height >= MIN_SIZE) {
       enterEditMode(clampSelection(current));
     } else {
       setSelection(null);
     }
-  }, [dragging, phase, enterEditMode, setSelection]);
+  }, [dragging, phase, enterEditMode, setSelection, selectionRef]);
 
   const toLocal = (event: { clientX: number; clientY: number }): { x: number; y: number } => {
     const canvas = shotRef.current;
@@ -1533,13 +1549,20 @@ function ScreenshotOverlay(): React.JSX.Element {
       const point = toLocal(event);
       const imageX = Math.max(
         0,
-        Math.min(image.naturalWidth - 1, Math.floor(crop.sx + (point.x / canvas.width) * crop.sw)),
+        Math.min(
+          image.naturalWidth - 1,
+          Math.floor(
+            crop.sourceX + (point.x / canvas.width) * crop.sourceWidth,
+          ),
+        ),
       );
       const imageY = Math.max(
         0,
         Math.min(
           image.naturalHeight - 1,
-          Math.floor(crop.sy + (point.y / canvas.height) * crop.sh),
+          Math.floor(
+            crop.sourceY + (point.y / canvas.height) * crop.sourceHeight,
+          ),
         ),
       );
       const sampler = colorSampleCanvas.current ?? document.createElement("canvas");
@@ -2227,14 +2250,16 @@ function ScreenshotOverlay(): React.JSX.Element {
           })}
           {numberObjects.map((item) => {
             const canvas = shotRef.current;
-            const scale = canvas ? canvas.width / Math.max(1, selection.width) : 1;
+            const scaleX = canvas ? canvas.width / Math.max(1, selection.width) : 1;
+            const scaleY = canvas ? canvas.height / Math.max(1, selection.height) : 1;
+            const displayScale = (scaleX + scaleY) / 2;
             return (
               <div
                 key={item.id}
                 className={`number-object${isNumberObjectInteractive(tool) ? " is-interactive" : ""}${selectedNumberId === item.id && isNumberObjectInteractive(tool) ? " is-selected" : ""}`}
                 style={{
-                  left: item.canvasX / scale,
-                  top: item.canvasY / scale,
+                  left: item.canvasX / scaleX,
+                  top: item.canvasY / scaleY,
                   width: item.style.size,
                   height: item.style.size,
                   backgroundColor: item.style.backgroundColor,
@@ -2255,7 +2280,7 @@ function ScreenshotOverlay(): React.JSX.Element {
                     startY: event.clientY,
                     originCanvasX: item.canvasX,
                     originCanvasY: item.canvasY,
-                    radius: Math.max(12, (item.style.size * scale) / 2),
+                    radius: Math.max(12, (item.style.size * displayScale) / 2),
                     changed: false,
                   };
                   beginObjectMutation();
@@ -2268,15 +2293,16 @@ function ScreenshotOverlay(): React.JSX.Element {
           {textEditor &&
             (() => {
               const canvas = shotRef.current;
-              const scale = canvas ? canvas.width / Math.max(1, selection.width) : 1;
+              const scaleX = canvas ? canvas.width / Math.max(1, selection.width) : 1;
+              const scaleY = canvas ? canvas.height / Math.max(1, selection.height) : 1;
               return (
                 <div
                   className="inline-text-editor"
                   style={{
-                    left: textEditor.canvasX / scale,
-                    top: textEditor.canvasY / scale,
-                    width: (textEditor.width * textEditor.transformScale) / scale,
-                    minHeight: (textEditor.height * textEditor.transformScale) / scale,
+                    left: textEditor.canvasX / scaleX,
+                    top: textEditor.canvasY / scaleY,
+                    width: (textEditor.width * textEditor.transformScale) / scaleX,
+                    minHeight: (textEditor.height * textEditor.transformScale) / scaleY,
                   }}
                   onMouseDown={(event) => event.stopPropagation()}
                 >
@@ -2314,10 +2340,10 @@ function ScreenshotOverlay(): React.JSX.Element {
                           current
                             ? {
                                 ...current,
-                                width: (rect.width * scale) / current.transformScale,
+                                width: (rect.width * scaleX) / current.transformScale,
                                 height: Math.max(
                                   current.height,
-                                  (rect.height * scale) / current.transformScale,
+                                  (rect.height * scaleY) / current.transformScale,
                                 ),
                               }
                             : current,

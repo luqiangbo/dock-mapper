@@ -7,7 +7,7 @@ export default defineConfig({
   source: {
     entry: {
       index: "./src/main-entry.tsx",
-      litesnap: "./src/litesnap-entry.tsx",
+      screenshot: "./src/screenshot-entry.tsx",
       widget: "./src/widget-entry.tsx",
     },
   },
@@ -16,7 +16,7 @@ export default defineConfig({
       if (entryName === "widget") {
         return "./widget.html";
       }
-      return entryName === "litesnap" ? "./litesnap.html" : "./index.html";
+      return entryName === "screenshot" ? "./screenshot.html" : "./index.html";
     },
   },
   server: {

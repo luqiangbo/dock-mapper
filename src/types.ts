@@ -16,10 +16,13 @@ export interface SupportedKey {
 }
 
 export interface ScancodeMapStatus {
-  applied: boolean;
-  has_external_map: boolean;
-  requires_restart: boolean;
+  state: "not_applied" | "applied" | "draft_changed" | "system_changed";
   backup_available: boolean;
+}
+
+export interface ApplyScancodeMapResult {
+  outcome: "applied" | "confirmationRequired";
+  status: ScancodeMapStatus;
 }
 
 export interface ScreenshotConfig {
@@ -42,4 +45,27 @@ export interface SysStatus {
   upload_speed: number;
   download_speed: number;
   memory_usage: number;
+  network_available: boolean;
+}
+
+export interface RuntimeHealth {
+  screenshot: {
+    shortcuts: ShortcutRuntimeStatus[];
+    recentCaptureBackend: string | null;
+    recentCaptureMs: number | null;
+    captureP95Ms: number | null;
+    dxgiFallbackCount: number;
+    pinCount: number;
+  };
+  historyCount: number;
+  transientImageCount: number;
+  transientImageBytes: number;
+}
+
+export interface ShortcutRuntimeStatus {
+  actionId: "capture" | "pin_recent" | "open_history" | "toggle_latest_pin";
+  action: string;
+  shortcut: string;
+  registered: boolean;
+  error: string | null;
 }

@@ -26,4 +26,14 @@ describe("capture lifecycle", () => {
       INITIAL_CAPTURE_LIFECYCLE,
     );
   });
+
+  it("keeps the selection inside the same session reducer", () => {
+    const selection = { x: 12, y: 24, width: 320, height: 180 };
+    const selected = captureLifecycleReducer(INITIAL_CAPTURE_LIFECYCLE, {
+      type: "selection",
+      value: selection,
+    });
+    expect(selected.selection).toEqual(selection);
+    expect(captureLifecycleReducer(selected, { type: "reset" }).selection).toBeNull();
+  });
 });

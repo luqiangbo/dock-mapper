@@ -1,7 +1,10 @@
-use super::{handle_start_capture, pin_confirmed_image, toggle_latest_pin, AppState};
+use super::{
+    handle_start_capture, open_screenshot_history, pin_recent_screenshot, toggle_latest_pin,
+    AppState,
+};
 use crate::config::ScreenshotConfig;
 use std::collections::{HashMap, HashSet};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -20,7 +23,7 @@ impl ShortcutAction {
         Self::ToggleLatestPin,
     ];
 
-    fn label(self) -> &'static str {
+    pub(super) fn label(self) -> &'static str {
         match self {
             Self::Capture => "区域截图",
             Self::PinRecent => "最近截图贴图",
@@ -28,6 +31,31 @@ impl ShortcutAction {
             Self::ToggleLatestPin => "显隐最近贴图",
         }
     }
+
+    fn id(self) -> &'static str {
+        match self {
+            Self::Capture => "capture",
+            Self::PinRecent => "pin_recent",
+            Self::OpenHistory => "open_history",
+            Self::ToggleLatestPin => "toggle_latest_pin",
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+pub(super) struct ShortcutRegistryState {
+    registered: HashMap<ShortcutAction, String>,
+    errors: HashMap<ShortcutAction, String>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShortcutRuntimeStatus {
+    action_id: &'static str,
+    action: &'static str,
+    shortcut: String,
+    registered: bool,
+    error: Option<String>,
 }
 
 fn tauri_shortcut(value: &str) -> String {
@@ -74,56 +102,48 @@ pub(super) fn validate_bindings(config: &ScreenshotConfig) -> Result<(), String>
 fn dispatch(app: &AppHandle, action: ShortcutAction) {
     match action {
         ShortcutAction::Capture => handle_start_capture(app),
-        ShortcutAction::PinRecent => {
-            if let Err(error) = pin_confirmed_image(app) {
-                let _ = rfd::MessageDialog::new()
-                    .set_title("DockMapper 截图")
-                    .set_description(error)
-                    .set_level(rfd::MessageLevel::Info)
-                    .show();
-            }
-        }
-        ShortcutAction::OpenHistory => {
-            let Some(window) = app.get_webview_window("main") else {
-                tracing::warn!(target: "dock_mapper::shortcut", "主窗口不存在，无法打开截图历史");
-                return;
-            };
-            let _ = window.unminimize();
-            let _ = window.show();
-            let _ = app.emit_to(
-                "main",
-                "navigate-main",
-                serde_json::json!({ "page": "screenshot", "tab": "history" }),
-            );
-            let _ = window.set_focus();
-        }
+        ShortcutAction::PinRecent => pin_recent_screenshot(app),
+        ShortcutAction::OpenHistory => open_screenshot_history(app),
         ShortcutAction::ToggleLatestPin => toggle_latest_pin(app),
     }
 }
 
 fn register_action(app: &AppHandle, action: ShortcutAction, shortcut: &str) -> Result<(), String> {
     let native_shortcut = tauri_shortcut(shortcut);
-    app.global_shortcut()
+    if let Err(error) = app.global_shortcut()
         .on_shortcut(native_shortcut.as_str(), move |app, _, event| {
             if event.state() == ShortcutState::Pressed {
                 dispatch(app, action);
             }
         })
-        .map_err(|error| error.to_string())?;
-    app.state::<AppState>()
-        .registered_shortcuts
+    {
+        let detail = error.to_string();
+        tracing::warn!(target: "dock_mapper::shortcut", action = action.label(), shortcut, %detail, "注册全局快捷键失败");
+        app.state::<AppState>()
+            .shortcut_registry
+            .lock()
+            .map_err(|_| "快捷键状态已损坏".to_string())?
+            .errors
+            .insert(action, "已被其他应用占用或不受系统支持".into());
+        return Err(detail);
+    }
+    let state = app.state::<AppState>();
+    let mut registry = state
+        .shortcut_registry
         .lock()
-        .map_err(|_| "快捷键状态已损坏".to_string())?
-        .insert(action, shortcut.into());
+        .map_err(|_| "快捷键状态已损坏".to_string())?;
+    registry.registered.insert(action, shortcut.into());
+    registry.errors.remove(&action);
     Ok(())
 }
 
 fn unregister_action(app: &AppHandle, action: ShortcutAction) -> Result<(), String> {
     let current = app
         .state::<AppState>()
-        .registered_shortcuts
+        .shortcut_registry
         .lock()
         .map_err(|_| "快捷键状态已损坏".to_string())?
+        .registered
         .get(&action)
         .cloned();
     let Some(current) = current else {
@@ -133,9 +153,10 @@ fn unregister_action(app: &AppHandle, action: ShortcutAction) -> Result<(), Stri
         .unregister(tauri_shortcut(&current).as_str())
         .map_err(|error| error.to_string())?;
     app.state::<AppState>()
-        .registered_shortcuts
+        .shortcut_registry
         .lock()
         .map_err(|_| "快捷键状态已损坏".to_string())?
+        .registered
         .remove(&action);
     Ok(())
 }
@@ -143,20 +164,35 @@ fn unregister_action(app: &AppHandle, action: ShortcutAction) -> Result<(), Stri
 fn restore_actions(
     app: &AppHandle,
     actions: &[ShortcutAction],
-    snapshot: &HashMap<ShortcutAction, String>,
+    snapshot: &ShortcutRegistryState,
 ) -> Result<(), String> {
     for action in actions {
         let _ = unregister_action(app, *action);
     }
     let mut errors = Vec::new();
     for action in actions {
-        if let Some(shortcut) = snapshot.get(action) {
+        if let Some(shortcut) = snapshot.registered.get(action) {
             if let Err(error) = register_action(app, *action, shortcut) {
                 errors.push(format!("{}={error}", action.label()));
             }
         }
     }
     if errors.is_empty() {
+        let state = app.state::<AppState>();
+        let mut registry = state
+            .shortcut_registry
+            .lock()
+            .map_err(|_| "快捷键状态已损坏".to_string())?;
+        for action in actions {
+            match snapshot.errors.get(action) {
+                Some(error) => {
+                    registry.errors.insert(*action, error.clone());
+                }
+                None => {
+                    registry.errors.remove(action);
+                }
+            }
+        }
         Ok(())
     } else {
         Err(errors.join("；"))
@@ -180,7 +216,7 @@ pub(super) fn replace_changed(
     }
     let snapshot = app
         .state::<AppState>()
-        .registered_shortcuts
+        .shortcut_registry
         .lock()
         .map_err(|_| "快捷键状态已损坏".to_string())?
         .clone();
@@ -206,6 +242,71 @@ pub(super) fn replace_changed(
         }
     }
     Ok(())
+}
+
+pub(super) fn replace_all(app: &AppHandle, next: &ScreenshotConfig) -> Result<(), String> {
+    validate_bindings(next)?;
+    let snapshot = app
+        .state::<AppState>()
+        .shortcut_registry
+        .lock()
+        .map_err(|_| "快捷键状态已损坏".to_string())?
+        .clone();
+    let actions = ShortcutAction::ALL;
+    for action in actions {
+        if let Err(error) = unregister_action(app, action) {
+            let rollback = restore_actions(app, &actions, &snapshot).err();
+            return Err(match rollback {
+                Some(rollback) => format!("{error}；同时恢复旧快捷键失败：{rollback}"),
+                None => error,
+            });
+        }
+    }
+    let next_bindings = bindings(next).into_iter().collect::<HashMap<_, _>>();
+    for action in actions {
+        let shortcut = next_bindings
+            .get(&action)
+            .expect("all actions have bindings");
+        if let Err(error) = register_action(app, action, shortcut) {
+            let rollback = restore_actions(app, &actions, &snapshot).err();
+            return Err(match rollback {
+                Some(rollback) => format!("{error}；同时恢复旧快捷键失败：{rollback}"),
+                None => error,
+            });
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn statuses(
+    app: &AppHandle,
+    config: &ScreenshotConfig,
+) -> Result<Vec<ShortcutRuntimeStatus>, String> {
+    let state = app.state::<AppState>();
+    let registry = state
+        .shortcut_registry
+        .lock()
+        .map_err(|_| "快捷键状态已损坏".to_string())?;
+    Ok(statuses_from_registry(config, &registry))
+}
+
+fn statuses_from_registry(
+    config: &ScreenshotConfig,
+    registry: &ShortcutRegistryState,
+) -> Vec<ShortcutRuntimeStatus> {
+    bindings(config)
+        .into_iter()
+        .map(|(action, shortcut)| ShortcutRuntimeStatus {
+            action_id: action.id(),
+            action: action.label(),
+            registered: registry
+                .registered
+                .get(&action)
+                .is_some_and(|value| value == &shortcut),
+            error: registry.errors.get(&action).cloned(),
+            shortcut,
+        })
+        .collect()
 }
 
 pub(super) fn register_initial(app: &AppHandle, config: &ScreenshotConfig) {
@@ -244,5 +345,30 @@ mod tests {
         let config = ScreenshotConfig::default();
         validate_bindings(&config).unwrap();
         assert_eq!(bindings(&config).len(), 4);
+    }
+
+    #[test]
+    fn runtime_status_keeps_each_action_error_separate() {
+        let config = ScreenshotConfig::default();
+        let mut registry = ShortcutRegistryState::default();
+        registry
+            .registered
+            .insert(ShortcutAction::Capture, config.shortcut.clone());
+        registry
+            .errors
+            .insert(ShortcutAction::PinRecent, "已被其他应用占用".into());
+        let statuses = statuses_from_registry(&config, &registry);
+        let capture = statuses
+            .iter()
+            .find(|status| status.action_id == "capture")
+            .unwrap();
+        let pin = statuses
+            .iter()
+            .find(|status| status.action_id == "pin_recent")
+            .unwrap();
+        assert!(capture.registered);
+        assert_eq!(capture.error, None);
+        assert!(!pin.registered);
+        assert_eq!(pin.error.as_deref(), Some("已被其他应用占用"));
     }
 }

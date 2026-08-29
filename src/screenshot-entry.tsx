@@ -1,16 +1,16 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { ConfigProvider, theme as antdTheme } from "antd";
-import ScreenshotOverlay from "./screenshots/litesnap/components/ScreenshotOverlay";
-import PinImage from "./screenshots/litesnap/components/PinImage";
-import { I18nContext, getMessages } from "./screenshots/litesnap/i18n";
-import "./screenshots/litesnap/api";
-import "./screenshots/litesnap/assets/main.css";
+import ScreenshotOverlay from "./screenshots/screenshot/components/ScreenshotOverlay";
+import PinImage from "./screenshots/screenshot/components/PinImage";
+import { I18nContext, getMessages } from "./screenshots/screenshot/i18n";
+import "./screenshots/screenshot/api";
+import "./screenshots/screenshot/assets/main.css";
 
 const view = new URLSearchParams(window.location.search).get("view");
 const root = ReactDOM.createRoot(document.getElementById("root")!);
 
-function LiteSnapWindow() {
+function ScreenshotWindow() {
   const content = view === "pin" ? <PinImage /> : <ScreenshotOverlay />;
 
   return (
@@ -39,6 +39,6 @@ function LiteSnapWindow() {
 
 root.render(
   <React.StrictMode>
-    <LiteSnapWindow />
+    <ScreenshotWindow />
   </React.StrictMode>,
 );

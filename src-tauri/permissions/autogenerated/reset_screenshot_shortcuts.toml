@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reset-screenshot-shortcuts"
+description = "Enables the reset_screenshot_shortcuts command without any pre-configured scope."
+commands.allow = ["reset_screenshot_shortcuts"]
+
+[[permission]]
+identifier = "deny-reset-screenshot-shortcuts"
+description = "Denies the reset_screenshot_shortcuts command without any pre-configured scope."
+commands.deny = ["reset_screenshot_shortcuts"]

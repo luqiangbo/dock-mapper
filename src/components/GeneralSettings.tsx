@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   disable as disableAutostart,
@@ -13,6 +12,7 @@ import { Alert, App as AntApp, Button, Card, ColorPicker, Spin, Switch, Typograp
 import { ReloadOutlined } from "@ant-design/icons";
 import { useTheme } from "../ThemeContext";
 import styles from "./components.module.scss";
+import { errorMessage, generalSettingsApi } from "../api/commands";
 
 const { Text } = Typography;
 const REPOSITORY_URL = "https://github.com/luqiangbo/dock-mapper";
@@ -32,13 +32,14 @@ export default function GeneralSettings() {
     void isAutostartEnabled()
       .then(setAutoStart)
       .catch((error) =>
-        notification.error({ message: "读取开机启动状态失败", description: String(error) }),
+        notification.error({ message: "读取开机启动状态失败", description: errorMessage(error) }),
       )
       .finally(() => setAutoStartLoading(false));
-    void invoke<boolean>("get_minimize_to_tray")
+    void generalSettingsApi
+      .minimizeToTray()
       .then(setMinimizeToTray)
       .catch((error) =>
-        notification.error({ message: "读取托盘设置失败", description: String(error) }),
+        notification.error({ message: "读取托盘设置失败", description: errorMessage(error) }),
       )
       .finally(() => setMinimizeLoading(false));
     void getVersion()
@@ -54,7 +55,7 @@ export default function GeneralSettings() {
       setAutoStart(checked);
       notification.success({ message: checked ? "开机自启已开启" : "开机自启已关闭" });
     } catch (error) {
-      notification.error({ message: "操作失败", description: String(error) });
+      notification.error({ message: "操作失败", description: errorMessage(error) });
     } finally {
       setAutoStartLoading(false);
     }
@@ -63,10 +64,10 @@ export default function GeneralSettings() {
   const changeMinimize = useCallback(async (checked: boolean) => {
     setMinimizeLoading(true);
     try {
-      await invoke("set_minimize_to_tray", { enabled: checked });
+      await generalSettingsApi.setMinimizeToTray(checked);
       setMinimizeToTray(checked);
     } catch (error) {
-      notification.error({ message: "操作失败", description: String(error) });
+      notification.error({ message: "操作失败", description: errorMessage(error) });
     } finally {
       setMinimizeLoading(false);
     }
@@ -91,7 +92,7 @@ export default function GeneralSettings() {
         },
       });
     } catch (error) {
-      notification.error({ message: "检查更新失败", description: String(error) });
+      notification.error({ message: "检查更新失败", description: errorMessage(error) });
     } finally {
       setChecking(false);
     }
@@ -100,10 +101,10 @@ export default function GeneralSettings() {
   const exportDiagnostics = async () => {
     setExportingDiagnostics(true);
     try {
-      const path = await invoke<string | null>("export_diagnostics");
+      const path = await generalSettingsApi.exportDiagnostics();
       if (path) notification.success({ message: "诊断信息已导出", description: path });
     } catch (error) {
-      notification.error({ message: "导出诊断信息失败", description: String(error) });
+      notification.error({ message: "导出诊断信息失败", description: errorMessage(error) });
     } finally {
       setExportingDiagnostics(false);
     }
@@ -194,7 +195,7 @@ export default function GeneralSettings() {
         type="info"
         showIcon
         message="管理员权限说明"
-        description="仅在需要映射高权限窗口时使用管理员模式；开机自启默认使用当前用户权限。"
+        description="应用或恢复系统按键映射时会按需请求 Windows UAC；主应用始终保持普通用户权限。"
       />
     </div>
   );

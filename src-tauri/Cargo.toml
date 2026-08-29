@@ -48,7 +48,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 arboard = "3.6"
 base64 = "0.22"
 directories = "6"
-# LiteSnap 的截图拼接、PNG 编解码和像素级测试仍直接使用 0.24 API；OCR
+# 截图拼接、PNG 编解码和像素级测试仍直接使用 0.24 API；OCR
 # 后端则通过别名隔离在 image 0.25，避免类型冲突。
 image = "0.24"
 # OCR 后端的公开 API 使用 image 0.25；截图采集仍依赖 0.24，二者隔离。
@@ -57,6 +57,8 @@ quircs = "0.10"
 rfd = "0.15"
 screenshots = "0.8.10"
 tauri-plugin-global-shortcut = "2.3"
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
 paddleocr_rs_onnx = "=0.2.7"
 
 [patch.crates-io]

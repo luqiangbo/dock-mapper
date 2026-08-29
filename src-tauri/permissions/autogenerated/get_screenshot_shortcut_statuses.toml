@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-screenshot-shortcut-statuses"
+description = "Enables the get_screenshot_shortcut_statuses command without any pre-configured scope."
+commands.allow = ["get_screenshot_shortcut_statuses"]
+
+[[permission]]
+identifier = "deny-get-screenshot-shortcut-statuses"
+description = "Denies the get_screenshot_shortcut_statuses command without any pre-configured scope."
+commands.deny = ["get_screenshot_shortcut_statuses"]

@@ -215,6 +215,43 @@ $compact-radius: 10px;
   background: color-mix(in srgb, var(--glass-surface) 70%, transparent);
 }
 
+.shortcutHeader,
+.shortcutBinding {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shortcutHeader {
+  justify-content: space-between;
+}
+
+.shortcutBinding {
+  flex: 0 0 auto;
+  align-items: flex-start;
+
+  :global(.ant-tag) {
+    min-width: 54px;
+    margin: 0;
+    text-align: center;
+  }
+}
+
+.shortcutStatus {
+  display: flex;
+  max-width: 148px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+.shortcutError {
+  color: var(--ant-color-error);
+  font-size: 11px;
+  line-height: 1.25;
+  text-align: right;
+}
+
 .shortcutItem {
   display: flex;
   min-height: 58px;
@@ -297,15 +334,75 @@ $compact-radius: 10px;
 }
 
 .historyHeader {
+  align-items: flex-start;
+  flex-wrap: wrap;
   justify-content: space-between;
   padding: 12px 14px;
   @include glass.surface(var(--glass-surface), 14px);
 }
 
+.historyHeading {
+  display: flex;
+  min-width: 220px;
+  flex: 1 1 280px;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.historyToolbar {
+  display: flex;
+  flex: 1 1 620px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 12px;
+}
+
+.historyControl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+
+  :global(.ant-select) {
+    min-width: 112px;
+  }
+}
+
+.historyCount {
+  min-width: 42px;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .historyGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px;
+}
+
+.historyGridCompact {
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+
+  .historyPreview {
+    height: 108px;
+  }
+}
+
+.historyGridStandard {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+
+  .historyPreview {
+    height: 150px;
+  }
+}
+
+.historyGridLarge {
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+
+  .historyPreview {
+    height: 220px;
+  }
 }
 
 .historyCard {
@@ -317,7 +414,6 @@ $compact-radius: 10px;
 
 .historyPreview {
   display: grid;
-  height: 150px;
   place-items: center;
   overflow: hidden;
   background: color-mix(in srgb, var(--glass-surface) 72%, #000 28%);

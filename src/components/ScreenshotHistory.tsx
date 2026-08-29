@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   CopyOutlined,
@@ -9,9 +8,28 @@ import {
   StarFilled,
   StarOutlined,
 } from "@ant-design/icons";
-import { App as AntApp, Button, Empty, Image, Popconfirm, Spin, Tooltip, Typography } from "antd";
-import type { ScreenshotHistorySummary } from "../screenshots/litesnap/api";
-import { copyBinaryPayload } from "../screenshots/litesnap/utils/binaryPayload";
+import {
+  App as AntApp,
+  Button,
+  Empty,
+  Image,
+  Popconfirm,
+  Segmented,
+  Select,
+  Spin,
+  Tooltip,
+  Typography,
+} from "antd";
+import type { ScreenshotHistorySummary } from "../screenshots/screenshot/api";
+import { errorMessage, historyApi, MAIN_EVENTS } from "../api/commands";
+import {
+  loadScreenshotHistoryView,
+  saveScreenshotHistoryView,
+  selectScreenshotHistory,
+  type HistoryDensity,
+  type HistoryFilter,
+  type HistorySort,
+} from "./screenshotHistoryView";
 import styles from "./components.module.scss";
 
 const { Text } = Typography;
@@ -56,11 +74,12 @@ function HistoryImage({ id }: { id: string }) {
     if (!nearViewport) return;
     let disposed = false;
     let objectUrl = "";
-    void invoke<unknown>("get_screenshot_history_thumbnail", { id })
+    void historyApi
+      .thumbnail(id)
       .then((payload) => {
         if (disposed) return;
         objectUrl = URL.createObjectURL(
-          new Blob([copyBinaryPayload(payload)], { type: "image/png" }),
+          new Blob([payload], { type: "image/png" }),
         );
         thumbnailUrlRef.current = objectUrl;
         setThumbnailUrl(objectUrl);
@@ -78,11 +97,12 @@ function HistoryImage({ id }: { id: string }) {
   useEffect(() => {
     if (!previewOpen || originalUrlRef.current) return;
     let disposed = false;
-    void invoke<unknown>("get_screenshot_history_image", { id })
+    void historyApi
+      .image(id)
       .then((payload) => {
         if (disposed) return;
         const objectUrl = URL.createObjectURL(
-          new Blob([copyBinaryPayload(payload)], { type: "image/png" }),
+          new Blob([payload], { type: "image/png" }),
         );
         originalUrlRef.current = objectUrl;
         setOriginalUrl(objectUrl);
@@ -131,21 +151,25 @@ function HistoryImage({ id }: { id: string }) {
 export default function ScreenshotHistory() {
   const { notification } = AntApp.useApp();
   const [entries, setEntries] = useState<ScreenshotHistorySummary[]>([]);
+  const [view, setView] = useState(loadScreenshotHistoryView);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState<{ id: string; action: HistoryAction } | null>(null);
   const workingRef = useRef(false);
   const refreshGenerationRef = useRef(0);
   const refreshTimerRef = useRef<number | null>(null);
+  const visibleEntries = useMemo(() => selectScreenshotHistory(entries, view), [entries, view]);
+
+  useEffect(() => saveScreenshotHistoryView(view), [view]);
 
   const refresh = useCallback(async () => {
     const generation = ++refreshGenerationRef.current;
     setLoading(true);
     try {
-      const nextEntries = await invoke<ScreenshotHistorySummary[]>("list_screenshot_history");
+      const nextEntries = await historyApi.list();
       if (generation === refreshGenerationRef.current) setEntries(nextEntries);
     } catch (error) {
       if (generation === refreshGenerationRef.current) {
-        notification.error({ message: "读取截图历史失败", description: String(error) });
+        notification.error({ message: "读取截图历史失败", description: errorMessage(error) });
       }
     } finally {
       if (generation === refreshGenerationRef.current) setLoading(false);
@@ -164,7 +188,7 @@ export default function ScreenshotHistory() {
     void refresh();
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void listen("screenshot-history-changed", scheduleRefresh).then((off) => {
+    void listen(MAIN_EVENTS.historyChanged, scheduleRefresh).then((off) => {
       if (disposed) off();
       else unlisten = off;
     });
@@ -188,7 +212,7 @@ export default function ScreenshotHistory() {
       await task();
       if (success) notification.success({ message: success });
     } catch (error) {
-      notification.error({ message: "截图历史操作失败", description: String(error) });
+      notification.error({ message: "截图历史操作失败", description: errorMessage(error) });
     } finally {
       workingRef.current = false;
       setWorking(null);
@@ -198,13 +222,51 @@ export default function ScreenshotHistory() {
   return (
     <div className={styles.historyPanel}>
       <div className={styles.historyHeader}>
-        <div>
+        <div className={styles.historyHeading}>
           <Text strong>本地截图历史</Text>
           <span className={styles.description}>
             未收藏记录最多保留 100 条且不超过 30 天；连续点击贴图可创建多个独立窗口。
           </span>
         </div>
-        <div className={styles.actionRow}>
+        <div className={styles.historyToolbar}>
+          <label className={styles.historyControl}>
+            <span>排序</span>
+            <Select<HistorySort>
+              value={view.sort}
+              onChange={(sort) => setView((current) => ({ ...current, sort }))}
+              options={[
+                { value: "newest", label: "最新优先" },
+                { value: "oldest", label: "最早优先" },
+                { value: "favorite", label: "收藏优先" },
+              ]}
+            />
+          </label>
+          <label className={styles.historyControl}>
+            <span>筛选</span>
+            <Select<HistoryFilter>
+              value={view.filter}
+              onChange={(filter) => setView((current) => ({ ...current, filter }))}
+              options={[
+                { value: "all", label: "全部" },
+                { value: "favorite", label: "仅收藏" },
+              ]}
+            />
+          </label>
+          <label className={styles.historyControl}>
+            <span>大小</span>
+            <Segmented<HistoryDensity>
+              value={view.density}
+              onChange={(density) => setView((current) => ({ ...current, density }))}
+              options={[
+                { value: "compact", label: "紧凑" },
+                { value: "standard", label: "标准" },
+                { value: "large", label: "大图" },
+              ]}
+            />
+          </label>
+          <Text type="secondary" className={styles.historyCount}>
+            {visibleEntries.length} 条
+          </Text>
           <Button
             icon={<ReloadOutlined />}
             loading={loading}
@@ -222,9 +284,19 @@ export default function ScreenshotHistory() {
         </div>
       ) : entries.length === 0 ? (
         <Empty description="完成复制、保存或贴图后，截图会出现在这里" />
+      ) : visibleEntries.length === 0 ? (
+        <Empty description="没有符合当前筛选条件的截图" />
       ) : (
-        <div className={styles.historyGrid}>
-          {entries.map((entry) => (
+        <div
+          className={`${styles.historyGrid} ${
+            view.density === "compact"
+              ? styles.historyGridCompact
+              : view.density === "large"
+                ? styles.historyGridLarge
+                : styles.historyGridStandard
+          }`}
+        >
+          {visibleEntries.map((entry) => (
             <article className={styles.historyCard} key={entry.id}>
               <div className={styles.historyPreview}>
                 <HistoryImage id={entry.id} />
@@ -253,7 +325,7 @@ export default function ScreenshotHistory() {
                       void run(
                         entry.id,
                         "copy",
-                        () => invoke("copy_screenshot_history", { id: entry.id }),
+                        () => historyApi.copy(entry.id),
                         "截图已复制",
                       )
                     }
@@ -274,7 +346,7 @@ export default function ScreenshotHistory() {
                       void run(
                         entry.id,
                         "pin",
-                        () => invoke("pin_screenshot_history", { id: entry.id }),
+                        () => historyApi.pin(entry.id),
                         "贴图已创建，可继续贴其他截图",
                       )
                     }
@@ -297,9 +369,9 @@ export default function ScreenshotHistory() {
                         entry.id,
                         "favorite",
                         async () => {
-                          const updated = await invoke<ScreenshotHistorySummary>(
-                            "set_screenshot_history_favorite",
-                            { id: entry.id, favorite: !entry.favorite },
+                          const updated = await historyApi.favorite(
+                            entry.id,
+                            !entry.favorite,
                           );
                           setEntries((current) =>
                             current.map((item) => (item.id === updated.id ? updated : item)),
@@ -319,7 +391,7 @@ export default function ScreenshotHistory() {
                       entry.id,
                       "delete",
                       async () => {
-                        await invoke("delete_screenshot_history", { id: entry.id });
+                        await historyApi.delete(entry.id);
                         setEntries((current) => current.filter((item) => item.id !== entry.id));
                       },
                       "截图历史已删除",

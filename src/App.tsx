@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -13,7 +12,6 @@ import {
   MoonOutlined,
   SettingOutlined,
   SunOutlined,
-  UserOutlined,
 } from "@ant-design/icons";
 import Dashboard from "./components/Dashboard";
 import KeyMapper from "./components/KeyMapper";
@@ -22,14 +20,17 @@ import GeneralSettings from "./components/GeneralSettings";
 import ScreenshotSettings from "./components/ScreenshotSettings";
 import { useTheme } from "./ThemeContext";
 import styles from "./App.module.scss";
+import { MAIN_EVENTS } from "./api/commands";
+import {
+  loadSidebarWidth,
+  saveSidebarWidth,
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH,
+} from "./utils/sidebarPreferences";
 
 const { Header, Content } = Layout;
 const { Text, Title } = Typography;
 const REPOSITORY_URL = "https://github.com/luqiangbo/dock-mapper";
-const SIDER_MIN_WIDTH = 168;
-const SIDER_MAX_WIDTH = 320;
-const SIDER_INITIAL_WIDTH = 208;
-
 type PageKey = "dashboard" | "keymapper" | "screenshot" | "widget" | "settings";
 type ScreenshotTabKey = "history" | "settings";
 
@@ -55,25 +56,13 @@ const PAGES: PageItem[] = [
 export default function App() {
   const [activePage, setActivePage] = useState<PageKey>("dashboard");
   const [screenshotTab, setScreenshotTab] = useState<ScreenshotTabKey>("history");
-  const [siderWidth, setSiderWidth] = useState(SIDER_INITIAL_WIDTH);
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
+  const [siderWidth, setSiderWidth] = useState(loadSidebarWidth);
   const { resolved, setMode } = useTheme();
-
-  useEffect(() => {
-    invoke<boolean>("check_is_admin")
-      .then((admin) => {
-        setIsAdmin(admin);
-        return getCurrentWindow().setTitle(
-          admin ? "DockMapper - 配置中心 [管理员]" : "DockMapper - 配置中心",
-        );
-      })
-      .catch(() => setIsAdmin(false));
-  }, []);
 
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void listen<MainNavigation>("navigate-main", ({ payload }) => {
+    void listen<MainNavigation>(MAIN_EVENTS.navigate, ({ payload }) => {
       if (payload.page === "screenshot") {
         setScreenshotTab(payload.tab ?? "history");
       }
@@ -87,6 +76,11 @@ export default function App() {
       unlisten?.();
     };
   }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => saveSidebarWidth(siderWidth), 120);
+    return () => window.clearTimeout(timer);
+  }, [siderWidth]);
 
   const currentPage = PAGES.find((page) => page.key === activePage) ?? PAGES[0];
   const page = useMemo(() => {
@@ -117,8 +111,8 @@ export default function App() {
       <Splitter.Panel
         className={styles.siderPanel}
         size={siderWidth}
-        min={SIDER_MIN_WIDTH}
-        max={SIDER_MAX_WIDTH}
+        min={SIDEBAR_MIN_WIDTH}
+        max={SIDEBAR_MAX_WIDTH}
       >
         <aside className={styles.sider}>
           <div className={styles.brand}>
@@ -150,22 +144,6 @@ export default function App() {
             </div>
             <div className={styles.dragRegion} data-tauri-drag-region />
             <div className={styles.headerActions}>
-              <Tooltip
-                title={
-                  isAdmin === null
-                    ? "正在检测权限"
-                    : isAdmin
-                      ? "管理员权限，映射可作用于高权限窗口"
-                      : "普通用户权限"
-                }
-              >
-                <Button
-                  aria-label={isAdmin ? "管理员权限" : "普通用户权限"}
-                  type="text"
-                  icon={<UserOutlined />}
-                  className={`${styles.statusButton} ${isAdmin ? styles.success : ""}`}
-                />
-              </Tooltip>
               <Tooltip title="打开 GitHub">
                 <Button
                   aria-label="打开 GitHub"

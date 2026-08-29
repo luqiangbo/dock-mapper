@@ -10,8 +10,8 @@
     "tauri": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tauri.ps1",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
-    "format": "oxfmt src index.html litesnap.html widget.html rsbuild.config.ts tsconfig.json package.json .oxfmtrc.json .oxlintrc.json",
-    "format:check": "oxfmt --check src index.html litesnap.html widget.html rsbuild.config.ts tsconfig.json package.json .oxfmtrc.json .oxlintrc.json",
+    "format": "oxfmt src index.html screenshot.html widget.html rsbuild.config.ts tsconfig.json package.json .oxfmtrc.json .oxlintrc.json",
+    "format:check": "oxfmt --check src index.html screenshot.html widget.html rsbuild.config.ts tsconfig.json package.json .oxfmtrc.json .oxlintrc.json",
     "test": "vitest run --passWithNoTests",
     "version:sync": "node .github/scripts/sync-version.mjs"
   },
@@ -25,8 +25,7 @@
     "antd": "6.6.1",
     "lucide-react": "1.33.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "zustand": "^5.0.14"
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
     "@rsbuild/core": "^2.1.13",

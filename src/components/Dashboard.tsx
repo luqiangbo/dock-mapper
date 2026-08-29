@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Button, Card, Spin, Typography } from "antd";
+import { Card, Spin, Typography } from "antd";
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
@@ -9,85 +8,79 @@ import {
   ExclamationCircleOutlined,
   KeyOutlined,
 } from "@ant-design/icons";
-import type { ScancodeMapStatus, SysStatus } from "../types";
+import type { RuntimeHealth, ScancodeMapStatus, SysStatus } from "../types";
+import { keyMappingApi, MAIN_EVENTS, runtimeApi } from "../api/commands";
 import { formatSpeed } from "../utils/format";
 import styles from "./components.module.scss";
 
 const { Text, Title } = Typography;
 
 export default function Dashboard() {
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [mapStatus, setMapStatus] = useState<ScancodeMapStatus | null>(null);
+  const [runtimeHealth, setRuntimeHealth] = useState<RuntimeHealth | null>(null);
   const [sysStatus, setSysStatus] = useState<SysStatus>({
     upload_speed: 0,
     download_speed: 0,
     memory_usage: 0,
+    network_available: true,
   });
 
   useEffect(() => {
-    void invoke<boolean>("check_is_admin")
-      .then(setIsAdmin)
-      .catch(() => setIsAdmin(false));
     const refreshMapStatus = () =>
-      invoke<ScancodeMapStatus>("get_scancode_map_status")
+      keyMappingApi
+        .status()
         .then(setMapStatus)
         .catch(() => setMapStatus(null));
     void refreshMapStatus();
+    const refreshRuntimeHealth = () =>
+      runtimeApi
+        .health()
+        .then(setRuntimeHealth)
+        .catch(() => setRuntimeHealth(null));
+    void refreshRuntimeHealth();
+    const healthTimer = window.setInterval(refreshRuntimeHealth, 5000);
 
-    const statusListener = listen<SysStatus>("sys-status-update", (event) => {
+    const statusListener = listen<SysStatus>(MAIN_EVENTS.systemStatus, (event) => {
       setSysStatus(event.payload);
     });
-    const mapListener = listen("scancode-map-changed", () => void refreshMapStatus());
+    const mapListener = listen(MAIN_EVENTS.scancodeMapChanged, () => void refreshMapStatus());
+    const shortcutListener = listen(
+      MAIN_EVENTS.shortcutStatusChanged,
+      () => void refreshRuntimeHealth(),
+    );
 
     return () => {
       void statusListener.then((unlisten) => unlisten());
       void mapListener.then((unlisten) => unlisten());
+      void shortcutListener.then((unlisten) => unlisten());
+      window.clearInterval(healthTimer);
     };
   }, []);
 
   const mappingLabel = !mapStatus
     ? "状态未知"
-    : mapStatus.requires_restart
-      ? "等待重启生效"
-      : mapStatus.applied
-        ? "已写入系统"
-        : mapStatus.has_external_map
-          ? "检测到外部映射"
+    : mapStatus.state === "applied"
+      ? "已写入系统"
+      : mapStatus.state === "draft_changed"
+        ? "草稿待应用"
+        : mapStatus.state === "system_changed"
+          ? "系统映射已变化"
           : "尚未应用";
   const mappingDescription = !mapStatus
     ? "无法读取系统扫描码映射状态。"
-    : mapStatus.has_external_map
-      ? "系统中存在其他工具写入的 Scancode Map，接管前会先备份。"
-      : mapStatus.applied
-        ? mapStatus.requires_restart
-          ? "映射已安全写入注册表，重新登录或重启 Windows 后生效。"
-          : "DockMapper 的 Scancode Map 已存在于系统注册表。"
-        : mapStatus.backup_available
-          ? "当前未应用 DockMapper 映射，可恢复接管前的系统映射。"
-          : "在按键映射页配置规则并应用到系统。";
+    : mapStatus.state === "system_changed"
+      ? "注册表与 DockMapper 最后一次写入的快照不一致，接管前会先备份当前值。"
+      : mapStatus.state === "draft_changed"
+        ? "系统仍保留上次写入的映射，当前规则草稿尚未重新应用。"
+        : mapStatus.state === "applied"
+          ? "DockMapper 当前规则已写入注册表；若尚未重新登录或重启，系统仍可能使用旧映射。"
+          : mapStatus.backup_available
+            ? "当前未应用 DockMapper 映射，可恢复接管前的系统映射。"
+            : "在按键映射页配置规则并应用到系统。";
 
   return (
     <div className={styles.page}>
       <section className={styles.overviewPanel}>
-        {!isAdmin && isAdmin !== null && (
-          <div className={styles.adminNotice} role="status">
-            <span className={styles.warningIcon}>
-              <ExclamationCircleOutlined />
-            </span>
-            <div className={styles.adminCopy}>
-              <strong>当前为普通用户权限</strong>
-              <Text type="secondary">应用或恢复系统 Scancode Map 时需要管理员权限。</Text>
-            </div>
-            <Button
-              className={styles.adminButton}
-              type="default"
-              onClick={() => void invoke("relaunch_as_admin")}
-            >
-              以管理员身份重启
-            </Button>
-          </div>
-        )}
-
         <div className={styles.overviewGrid}>
           <Card className={styles.glassCard}>
             <div className={styles.metric}>
@@ -95,8 +88,12 @@ export default function Dashboard() {
                 <ArrowUpOutlined />
               </span>
               <div>
-                <Text type="secondary">实时上传</Text>
-                <span className={styles.metricValue}>{formatSpeed(sysStatus.upload_speed)}</span>
+                <Text type="secondary">
+                  {sysStatus.network_available ? "实时上传" : "上传（网卡不可用）"}
+                </Text>
+                <span className={styles.metricValue}>
+                  {sysStatus.network_available ? formatSpeed(sysStatus.upload_speed) : "—"}
+                </span>
               </div>
             </div>
           </Card>
@@ -106,8 +103,12 @@ export default function Dashboard() {
                 <ArrowDownOutlined />
               </span>
               <div>
-                <Text type="secondary">实时下载</Text>
-                <span className={styles.metricValue}>{formatSpeed(sysStatus.download_speed)}</span>
+                <Text type="secondary">
+                  {sysStatus.network_available ? "实时下载" : "下载（网卡不可用）"}
+                </Text>
+                <span className={styles.metricValue}>
+                  {sysStatus.network_available ? formatSpeed(sysStatus.download_speed) : "—"}
+                </span>
               </div>
             </div>
           </Card>
@@ -139,8 +140,57 @@ export default function Dashboard() {
           {mapStatus === null ? (
             <Spin size="small" />
           ) : (
-            <span className={`${styles.status} ${mapStatus.applied ? styles.running : ""}`}>
+            <span
+              className={`${styles.status} ${mapStatus.state === "applied" ? styles.running : ""}`}
+            >
               {mappingLabel}
+            </span>
+          )}
+        </div>
+      </Card>
+
+      <Card className={styles.surfaceCard}>
+        <div className={styles.sectionHeader}>
+          <div className={styles.sectionIdentity}>
+            <span className={styles.surfaceIcon}>
+              <DashboardOutlined />
+            </span>
+            <div>
+              <Title level={5}>本地运行状态</Title>
+              {runtimeHealth ? (
+                <div>
+                  <Text type="secondary">
+                    {`快捷键：${runtimeHealth.screenshot.shortcuts
+                      .map(
+                        (item) =>
+                          `${item.action} ${item.shortcut} ${item.registered ? "已注册" : "失败"}`,
+                      )
+                      .join(" · ")}`}
+                  </Text>
+                  <br />
+                  <Text type="secondary">
+                    最近捕获 {runtimeHealth.screenshot.recentCaptureBackend ?? "暂无"}
+                    {runtimeHealth.screenshot.recentCaptureMs === null
+                      ? ""
+                      : ` ${runtimeHealth.screenshot.recentCaptureMs} ms`}
+                    {runtimeHealth.screenshot.captureP95Ms === null
+                      ? ""
+                      : ` · P95 ${runtimeHealth.screenshot.captureP95Ms} ms`}
+                    {` · DXGI 回退 ${runtimeHealth.screenshot.dxgiFallbackCount} 次 · 贴图 ${runtimeHealth.screenshot.pinCount} 张 · 历史 ${runtimeHealth.historyCount} 条 · 临时图片 ${runtimeHealth.transientImageCount} 张 / ${(runtimeHealth.transientImageBytes / 1024 / 1024).toFixed(1)} MiB`}
+                  </Text>
+                </div>
+              ) : (
+                <Text type="secondary">正在读取本地运行统计…</Text>
+              )}
+            </div>
+          </div>
+          {runtimeHealth === null ? (
+            <Spin size="small" />
+          ) : (
+            <span className={styles.status}>
+              {runtimeHealth.screenshot.shortcuts.every((item) => item.registered)
+                ? "运行正常"
+                : "部分快捷键不可用"}
             </span>
           )}
         </div>
@@ -154,16 +204,12 @@ export default function Dashboard() {
             </span>
             <div>
               <Title level={5}>权限状态</Title>
-              <Text type="secondary">管理员权限仅用于写入或恢复系统 Scancode Map。</Text>
+              <Text type="secondary">
+                应用或恢复映射时才会弹出 Windows UAC，主应用始终以普通权限运行。
+              </Text>
             </div>
           </div>
-          {isAdmin === null ? (
-            <Spin size="small" />
-          ) : (
-            <span className={`${styles.status} ${isAdmin ? styles.running : ""}`}>
-              {isAdmin ? "管理员权限" : "普通用户权限"}
-            </span>
-          )}
+          <span className={styles.status}>按需授权</span>
         </div>
       </Card>
     </div>

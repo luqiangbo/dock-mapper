@@ -5,7 +5,7 @@ use std::{
     io::{Cursor, Write},
     os::windows::ffi::OsStrExt,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use windows::{
@@ -35,6 +35,7 @@ pub struct ScreenshotHistorySummary {
 pub struct HistoryStore {
     root: PathBuf,
     generation: AtomicU64,
+    count: AtomicUsize,
     max_unfavorited: usize,
     max_age: Duration,
 }
@@ -44,12 +45,16 @@ impl HistoryStore {
         let store = Self {
             root,
             generation: AtomicU64::new(0),
+            count: AtomicUsize::new(0),
             max_unfavorited: DEFAULT_MAX_UNFAVORITED,
             max_age: DEFAULT_MAX_AGE,
         };
         fs::create_dir_all(&store.root)
             .map_err(|error| format!("创建截图历史目录失败：{error}"))?;
         store.remove_abandoned_temporary_entries();
+        store
+            .count
+            .store(store.read_manifests()?.len(), Ordering::Release);
         store.cleanup()?;
         Ok(store)
     }
@@ -89,6 +94,7 @@ impl HistoryStore {
             write_manifest(&temporary_dir.join(MANIFEST_FILE), &summary, false)?;
             fs::rename(&temporary_dir, &final_dir)
                 .map_err(|error| format!("提交截图历史失败：{error}"))?;
+            self.count.fetch_add(1, Ordering::AcqRel);
             Ok(summary)
         })();
 
@@ -102,8 +108,13 @@ impl HistoryStore {
 
     pub fn list(&self) -> Result<Vec<ScreenshotHistorySummary>, String> {
         let mut entries = self.read_manifests()?;
+        self.count.store(entries.len(), Ordering::Release);
         entries.sort_by(|left, right| right.created_at_ms.cmp(&left.created_at_ms));
         Ok(entries)
+    }
+
+    pub fn count(&self) -> usize {
+        self.count.load(Ordering::Acquire)
     }
 
     pub fn image(&self, id: &str) -> Result<Vec<u8>, String> {
@@ -148,6 +159,11 @@ impl HistoryStore {
             return Ok(false);
         }
         fs::remove_dir_all(path).map_err(|error| format!("删除截图历史失败：{error}"))?;
+        let _ = self
+            .count
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                Some(count.saturating_sub(1))
+            });
         Ok(true)
     }
 
@@ -414,6 +430,7 @@ mod tests {
         assert_eq!((created.width, created.height), (2, 3));
         assert_eq!(created.total_bytes, image.len() as u64);
         assert_eq!(store.list().unwrap().len(), 1);
+        assert_eq!(store.count(), 1);
         assert_eq!(store.image(&created.id).unwrap(), image);
         assert_eq!(png_dimensions(&store.thumbnail(&created.id).unwrap()).unwrap(), (2, 3));
         let entry = root.join(&created.id);
@@ -425,6 +442,19 @@ mod tests {
             created.id
         );
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cached_count_does_not_read_the_history_directory() {
+        let root = temporary_root("cached-count");
+        let moved = root.with_extension("moved");
+        let store = HistoryStore::new(root.clone()).unwrap();
+        store.create(&png()).unwrap();
+        assert_eq!(store.count(), 1);
+        fs::rename(&root, &moved).unwrap();
+        assert_eq!(store.count(), 1);
+        assert!(store.list().is_err());
+        let _ = fs::remove_dir_all(moved);
     }
 
     #[test]

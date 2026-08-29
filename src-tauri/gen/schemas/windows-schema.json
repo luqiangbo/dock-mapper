@@ -351,12 +351,6 @@
           "markdownDescription": "Enables the apply_scancode_map command without any pre-configured scope."
         },
         {
-          "description": "Enables the check_is_admin command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-check-is-admin",
-          "markdownDescription": "Enables the check_is_admin command without any pre-configured scope."
-        },
-        {
           "description": "Enables the check_screen_permission command without any pre-configured scope.",
           "type": "string",
           "const": "allow-check-screen-permission",
@@ -465,6 +459,12 @@
           "markdownDescription": "Enables the get_pin_options command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_runtime_health command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-runtime-health",
+          "markdownDescription": "Enables the get_runtime_health command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_scancode_map_status command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-scancode-map-status",
@@ -487,6 +487,12 @@
           "type": "string",
           "const": "allow-get-screenshot-history-thumbnail",
           "markdownDescription": "Enables the get_screenshot_history_thumbnail command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_screenshot_shortcut_statuses command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-screenshot-shortcut-statuses",
+          "markdownDescription": "Enables the get_screenshot_shortcut_statuses command without any pre-configured scope."
         },
         {
           "description": "Enables the get_supported_keys command without any pre-configured scope.",
@@ -549,12 +555,6 @@
           "markdownDescription": "Enables the refresh_widget_position command without any pre-configured scope."
         },
         {
-          "description": "Enables the relaunch_as_admin command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-relaunch-as-admin",
-          "markdownDescription": "Enables the relaunch_as_admin command without any pre-configured scope."
-        },
-        {
           "description": "Enables the release_image command without any pre-configured scope.",
           "type": "string",
           "const": "allow-release-image",
@@ -565,6 +565,12 @@
           "type": "string",
           "const": "allow-report-capture-rendered",
           "markdownDescription": "Enables the report_capture_rendered command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the reset_screenshot_shortcuts command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-reset-screenshot-shortcuts",
+          "markdownDescription": "Enables the reset_screenshot_shortcuts command without any pre-configured scope."
         },
         {
           "description": "Enables the restore_scancode_map command without any pre-configured scope.",
@@ -655,12 +661,6 @@
           "type": "string",
           "const": "deny-apply-scancode-map",
           "markdownDescription": "Denies the apply_scancode_map command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the check_is_admin command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-check-is-admin",
-          "markdownDescription": "Denies the check_is_admin command without any pre-configured scope."
         },
         {
           "description": "Denies the check_screen_permission command without any pre-configured scope.",
@@ -771,6 +771,12 @@
           "markdownDescription": "Denies the get_pin_options command without any pre-configured scope."
         },
         {
+          "description": "Denies the get_runtime_health command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-runtime-health",
+          "markdownDescription": "Denies the get_runtime_health command without any pre-configured scope."
+        },
+        {
           "description": "Denies the get_scancode_map_status command without any pre-configured scope.",
           "type": "string",
           "const": "deny-get-scancode-map-status",
@@ -793,6 +799,12 @@
           "type": "string",
           "const": "deny-get-screenshot-history-thumbnail",
           "markdownDescription": "Denies the get_screenshot_history_thumbnail command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_screenshot_shortcut_statuses command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-screenshot-shortcut-statuses",
+          "markdownDescription": "Denies the get_screenshot_shortcut_statuses command without any pre-configured scope."
         },
         {
           "description": "Denies the get_supported_keys command without any pre-configured scope.",
@@ -855,12 +867,6 @@
           "markdownDescription": "Denies the refresh_widget_position command without any pre-configured scope."
         },
         {
-          "description": "Denies the relaunch_as_admin command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-relaunch-as-admin",
-          "markdownDescription": "Denies the relaunch_as_admin command without any pre-configured scope."
-        },
-        {
           "description": "Denies the release_image command without any pre-configured scope.",
           "type": "string",
           "const": "deny-release-image",
@@ -871,6 +877,12 @@
           "type": "string",
           "const": "deny-report-capture-rendered",
           "markdownDescription": "Denies the report_capture_rendered command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the reset_screenshot_shortcuts command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-reset-screenshot-shortcuts",
+          "markdownDescription": "Denies the reset_screenshot_shortcuts command without any pre-configured scope."
         },
         {
           "description": "Denies the restore_scancode_map command without any pre-configured scope.",
@@ -3211,6 +3223,48 @@
           "type": "string",
           "const": "updater:deny-install",
           "markdownDescription": "Denies the install command without any pre-configured scope."
+        },
+        {
+          "description": "This permission set configures what kind of\noperations are available from the window state plugin.\n\n#### Granted Permissions\n\nAll operations are enabled by default.\n\n\n#### This default permission set includes:\n\n- `allow-filename`\n- `allow-restore-state`\n- `allow-save-window-state`",
+          "type": "string",
+          "const": "window-state:default",
+          "markdownDescription": "This permission set configures what kind of\noperations are available from the window state plugin.\n\n#### Granted Permissions\n\nAll operations are enabled by default.\n\n\n#### This default permission set includes:\n\n- `allow-filename`\n- `allow-restore-state`\n- `allow-save-window-state`"
+        },
+        {
+          "description": "Enables the filename command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-state:allow-filename",
+          "markdownDescription": "Enables the filename command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the restore_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-state:allow-restore-state",
+          "markdownDescription": "Enables the restore_state command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the save_window_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-state:allow-save-window-state",
+          "markdownDescription": "Enables the save_window_state command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the filename command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-state:deny-filename",
+          "markdownDescription": "Denies the filename command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the restore_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-state:deny-restore-state",
+          "markdownDescription": "Denies the restore_state command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the save_window_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "window-state:deny-save-window-state",
+          "markdownDescription": "Denies the save_window_state command without any pre-configured scope."
         }
       ]
     },

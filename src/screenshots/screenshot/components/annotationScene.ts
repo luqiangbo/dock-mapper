@@ -254,3 +254,17 @@ export function renderRasterScene(
   annotations.forEach((annotation) => drawRasterAnnotation(context, annotation, canvasScale, base));
   context.restore();
 }
+
+export function renderRasterOverlay(
+  context: CanvasRenderingContext2D,
+  base: HTMLCanvasElement,
+  annotations: RasterAnnotation[],
+  canvasScale: number,
+): void {
+  context.save();
+  context.globalAlpha = 1;
+  context.globalCompositeOperation = "source-over";
+  context.clearRect(0, 0, context.canvas.width, context.canvas.height);
+  annotations.forEach((annotation) => drawRasterAnnotation(context, annotation, canvasScale, base));
+  context.restore();
+}

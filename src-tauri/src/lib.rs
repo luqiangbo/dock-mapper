@@ -4,24 +4,28 @@ mod diagnostics;
 mod dxgi_capture;
 mod history;
 mod image_store;
-mod litesnap;
+mod key_mapping;
 mod ocr;
+mod runtime_health;
 mod scancode_mapper;
+mod screenshot;
 mod sys_monitor;
 mod taskbar;
+mod tray;
+mod widget;
 
 use serde::{Deserialize, Serialize};
 use std::{
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::AtomicBool,
+        Arc, Mutex,
+    },
 };
-use tauri::{
-    menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, State,
-};
+use tauri::{AppHandle, Emitter, Manager, State};
 
-const DEFAULT_WIDGET_WIDTH: f64 = 180.0;
+pub use widget::{MemoryScheme, WidgetConfig};
+pub use key_mapping::{ScancodeMapState, ScancodeMapStatus};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum KeyCode {
@@ -323,33 +327,6 @@ pub struct SupportedKey {
     pub group: &'static str,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MemoryScheme {
-    #[default]
-    Capsule,
-    Ring,
-    Gauge,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct WidgetConfig {
-    pub memory_scheme: MemoryScheme,
-    pub refresh_interval_secs: u8,
-    pub network_interface: Option<String>,
-}
-
-impl Default for WidgetConfig {
-    fn default() -> Self {
-        Self {
-            memory_scheme: MemoryScheme::Capsule,
-            refresh_interval_secs: 1,
-            network_interface: None,
-        }
-    }
-}
-
 pub struct AppState {
     pub config: Mutex<config::AppConfig>,
     pub images: image_store::ImageStore,
@@ -357,6 +334,7 @@ pub struct AppState {
     config_path: PathBuf,
     widget_width: Mutex<f64>,
     mutation_lock: Mutex<()>,
+    admin_operation_in_progress: AtomicBool,
 }
 
 #[tauri::command]
@@ -459,7 +437,7 @@ async fn copy_screenshot_history(state: State<'_, AppState>, id: String) -> Resu
     let history = Arc::clone(&state.history);
     run_history_task(move || {
         let data = history.image(&id)?;
-        litesnap::copy_png_bytes(&data)?;
+        screenshot::copy_png_bytes(&data)?;
         Ok(true)
     })
     .await
@@ -473,7 +451,7 @@ async fn pin_screenshot_history(
 ) -> Result<String, String> {
     let history = Arc::clone(&state.history);
     let data = run_history_task(move || history.image(&id)).await?;
-    litesnap::pin_external_image(app, data)
+    screenshot::pin_external_image(app, data)
 }
 
 fn persist(state: &AppState) -> Result<(), String> {
@@ -508,8 +486,8 @@ where
     Ok(())
 }
 
-fn commit_scancode_change(
-    state: &AppState,
+fn commit_scancode_change_at_path(
+    config_path: &std::path::Path,
     registry_before: Option<&[u8]>,
     registry_after: Option<&[u8]>,
     next_config: &config::AppConfig,
@@ -519,7 +497,7 @@ fn commit_scancode_change(
         registry_after,
         next_config,
         scancode_mapper::write,
-        |config| config::save(&state.config_path, config),
+        |config| config::save(config_path, config),
     )
 }
 
@@ -553,8 +531,7 @@ where
     Ok(())
 }
 
-#[tauri::command]
-fn get_supported_keys() -> Vec<SupportedKey> {
+fn supported_keys() -> Vec<SupportedKey> {
     const KEYS: &[KeyCode] = &[
         KeyCode::Disabled,
         KeyCode::CapsLock,
@@ -662,258 +639,6 @@ fn get_supported_keys() -> Vec<SupportedKey> {
 }
 
 #[tauri::command]
-fn get_key_mappings(state: State<'_, AppState>) -> Result<Vec<KeyMapping>, String> {
-    state
-        .config
-        .lock()
-        .map(|config| config.key_mappings.clone())
-        .map_err(|_| "配置状态已损坏".to_string())
-}
-
-#[tauri::command]
-fn sync_key_mappings(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    mappings: Vec<KeyMapping>,
-) -> Result<(), String> {
-    let _mutation = state
-        .mutation_lock
-        .lock()
-        .map_err(|_| "配置写入锁已损坏".to_string())?;
-    scancode_mapper::encode(&mappings)?;
-    let previous_config = {
-        let mut config = state
-            .config
-            .lock()
-            .map_err(|_| "配置状态已损坏".to_string())?;
-        let previous = config.clone();
-        config.key_mappings = mappings;
-        previous
-    };
-    if let Err(error) = persist(&state) {
-        *state
-            .config
-            .lock()
-            .map_err(|_| "配置状态已损坏".to_string())? = previous_config;
-        return Err(error);
-    }
-    app.emit("config-changed", ())
-        .map_err(|error| error.to_string())
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ScancodeMapStatus {
-    pub applied: bool,
-    pub has_external_map: bool,
-    pub requires_restart: bool,
-    pub backup_available: bool,
-}
-
-fn requires_scancode_takeover(
-    current: Option<&[u8]>,
-    desired: &[u8],
-    previously_applied: bool,
-) -> bool {
-    current.is_some() && current != Some(desired) && !previously_applied
-}
-
-fn required_scancode_backup(value: Option<&str>) -> Result<Option<Vec<u8>>, String> {
-    value
-        .ok_or_else(|| "没有可恢复的应用前映射".to_string())
-        .and_then(|backup| scancode_mapper::backup_decode(Some(backup)))
-}
-
-#[tauri::command]
-fn get_scancode_map_status(state: State<'_, AppState>) -> Result<ScancodeMapStatus, String> {
-    let config = state
-        .config
-        .lock()
-        .map_err(|_| "配置状态已损坏".to_string())?
-        .clone();
-    let desired = scancode_mapper::encode(&config.key_mappings)?;
-    let current = scancode_mapper::read()?;
-    let current_is_ours = current.as_deref() == Some(desired.as_slice());
-    Ok(ScancodeMapStatus {
-        applied: config.scancode_map_applied && current_is_ours,
-        has_external_map: current.is_some() && !current_is_ours,
-        requires_restart: config.scancode_map_applied,
-        backup_available: config.scancode_map_backup.is_some(),
-    })
-}
-
-#[tauri::command]
-fn apply_scancode_map(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    confirm_takeover: bool,
-) -> Result<ScancodeMapStatus, String> {
-    let span = tracing::info_span!(target: "dock_mapper::scancode", "apply_scancode_map");
-    let _entered = span.enter();
-    if !admin::is_elevated() {
-        return Err("写入系统键盘映射需要管理员权限".into());
-    }
-    let _mutation = state
-        .mutation_lock
-        .lock()
-        .map_err(|_| "配置写入锁已损坏".to_string())?;
-    let config = state
-        .config
-        .lock()
-        .map_err(|_| "配置状态已损坏".to_string())?;
-    let desired = scancode_mapper::encode(&config.key_mappings)?;
-    let current = scancode_mapper::read()?;
-    if requires_scancode_takeover(current.as_deref(), &desired, config.scancode_map_applied)
-        && !confirm_takeover
-    {
-        return Err("系统已存在其他工具写入的 Scancode Map；请确认备份后接管".into());
-    }
-    let mut next_config = config.clone();
-    if next_config.scancode_map_backup.is_none() {
-        next_config.scancode_map_backup =
-            Some(scancode_mapper::backup_encode(current.as_deref()).unwrap_or_default());
-    }
-    next_config.scancode_map_applied = true;
-    drop(config);
-    commit_scancode_change(&state, current.as_deref(), Some(&desired), &next_config)?;
-    let mapping_count = next_config.key_mappings.len();
-    *state
-        .config
-        .lock()
-        .map_err(|_| "配置状态已损坏".to_string())? = next_config;
-    tracing::info!(target: "dock_mapper::scancode", mapping_count, "Scancode Map applied");
-    let _ = app.emit("scancode-map-changed", ());
-    Ok(ScancodeMapStatus {
-        applied: true,
-        has_external_map: false,
-        requires_restart: true,
-        backup_available: true,
-    })
-}
-
-#[tauri::command]
-fn restore_scancode_map(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<ScancodeMapStatus, String> {
-    let span = tracing::info_span!(target: "dock_mapper::scancode", "restore_scancode_map");
-    let _entered = span.enter();
-    if !admin::is_elevated() {
-        return Err("恢复系统键盘映射需要管理员权限".into());
-    }
-    let _mutation = state
-        .mutation_lock
-        .lock()
-        .map_err(|_| "配置写入锁已损坏".to_string())?;
-    let config = state
-        .config
-        .lock()
-        .map_err(|_| "配置状态已损坏".to_string())?;
-    let backup = required_scancode_backup(config.scancode_map_backup.as_deref())?;
-    let current = scancode_mapper::read()?;
-    let mut next_config = config.clone();
-    next_config.scancode_map_applied = false;
-    drop(config);
-    commit_scancode_change(&state, current.as_deref(), backup.as_deref(), &next_config)?;
-    *state
-        .config
-        .lock()
-        .map_err(|_| "配置状态已损坏".to_string())? = next_config;
-    tracing::info!(target: "dock_mapper::scancode", "Scancode Map restored");
-    let _ = app.emit("scancode-map-changed", ());
-    Ok(ScancodeMapStatus {
-        applied: false,
-        has_external_map: false,
-        requires_restart: false,
-        backup_available: true,
-    })
-}
-
-#[tauri::command]
-fn refresh_widget_position(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    let width = *state
-        .widget_width
-        .lock()
-        .map_err(|_| "挂件宽度状态已损坏".to_string())?;
-    taskbar::refresh_widget_position(&app, width);
-    Ok(())
-}
-
-#[tauri::command]
-fn check_is_admin() -> bool {
-    admin::is_elevated()
-}
-
-#[tauri::command]
-fn relaunch_as_admin(app: AppHandle) -> Result<(), String> {
-    admin::relaunch_as_admin()?;
-    app.exit(0);
-    Ok(())
-}
-
-#[tauri::command]
-fn get_widget_config(state: State<'_, AppState>) -> Result<WidgetConfig, String> {
-    state
-        .config
-        .lock()
-        .map(|config| config.widget_config.clone())
-        .map_err(|_| "配置状态已损坏".to_string())
-}
-
-#[tauri::command]
-fn get_network_interfaces() -> Vec<String> {
-    let networks = sysinfo::Networks::new_with_refreshed_list();
-    let mut names = networks
-        .iter()
-        .map(|(name, _)| name.to_string())
-        .collect::<Vec<_>>();
-    names.sort();
-    names.dedup();
-    names
-}
-
-#[tauri::command]
-fn update_widget_config(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    mut config: WidgetConfig,
-) -> Result<WidgetConfig, String> {
-    let _mutation = state
-        .mutation_lock
-        .lock()
-        .map_err(|_| "配置写入锁已损坏".to_string())?;
-    config.refresh_interval_secs = config.refresh_interval_secs.clamp(1, 5);
-    let previous_config = {
-        let mut current = state
-            .config
-            .lock()
-            .map_err(|_| "配置状态已损坏".to_string())?;
-        let previous = current.clone();
-        current.widget_config = config.clone();
-        previous
-    };
-    if let Err(error) = persist(&state) {
-        *state
-            .config
-            .lock()
-            .map_err(|_| "配置状态已损坏".to_string())? = previous_config;
-        return Err(error);
-    }
-    if let Some(control) = app.try_state::<sys_monitor::SysMonitorControl>() {
-        control.set_interval(config.refresh_interval_secs);
-        control.set_network_interface(config.network_interface.clone());
-    }
-    let width = state
-        .widget_width
-        .lock()
-        .map(|value| *value)
-        .unwrap_or(DEFAULT_WIDGET_WIDTH);
-    taskbar::refresh_widget_position(&app, width);
-    app.emit("widget-config-changed", &config)
-        .map_err(|error| error.to_string())?;
-    Ok(config)
-}
-
-#[tauri::command]
 fn get_screenshot_config(state: State<'_, AppState>) -> Result<config::ScreenshotConfig, String> {
     state
         .config
@@ -926,6 +651,14 @@ fn get_screenshot_config(state: State<'_, AppState>) -> Result<config::Screensho
 fn update_screenshot_config(
     app: AppHandle,
     state: State<'_, AppState>,
+    screenshot_config: config::ScreenshotConfig,
+) -> Result<config::ScreenshotConfig, String> {
+    update_screenshot_config_impl(&app, &state, screenshot_config)
+}
+
+fn update_screenshot_config_impl(
+    app: &AppHandle,
+    state: &AppState,
     mut screenshot_config: config::ScreenshotConfig,
 ) -> Result<config::ScreenshotConfig, String> {
     let _mutation = state
@@ -940,18 +673,66 @@ fn update_screenshot_config(
         .clone();
     let mut next_config = previous_config.clone();
     next_config.screenshot_config = screenshot_config.clone();
-    commit_shortcut_change_with(
+    let result = commit_shortcut_change_with(
         &previous_config.screenshot_config,
         &screenshot_config,
         &next_config,
-        |previous, next| litesnap::update_shortcuts(&app, previous, next),
+        |previous, next| screenshot::update_shortcuts(app, previous, next),
         |config| config::save(&state.config_path, config),
-    )?;
+    );
+    let _ = app.emit("shortcut-status-changed", ());
+    result?;
     *state
         .config
         .lock()
         .map_err(|_| "配置状态已损坏".to_string())? = next_config;
     Ok(screenshot_config)
+}
+
+#[tauri::command]
+fn get_screenshot_shortcut_statuses(
+    app: AppHandle,
+) -> Result<Vec<screenshot::ShortcutRuntimeStatus>, String> {
+    screenshot::shortcut_statuses(&app)
+}
+
+#[tauri::command]
+fn reset_screenshot_shortcuts(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<config::ScreenshotConfig, String> {
+    let _mutation = state
+        .mutation_lock
+        .lock()
+        .map_err(|_| "配置写入锁已损坏".to_string())?;
+    let previous_config = state
+        .config
+        .lock()
+        .map_err(|_| "配置状态已损坏".to_string())?
+        .clone();
+    let mut next = previous_config.screenshot_config.clone();
+    let defaults = config::ScreenshotConfig::default();
+    next.shortcut = defaults.shortcut;
+    next.pin_shortcut = defaults.pin_shortcut;
+    next.history_shortcut = defaults.history_shortcut;
+    next.toggle_pin_shortcut = defaults.toggle_pin_shortcut;
+    let mut next_config = previous_config.clone();
+    next_config.screenshot_config = next.clone();
+    let result = screenshot::replace_all_shortcuts(&app, &next).and_then(|()| {
+        config::save(&state.config_path, &next_config).map_err(|save_error| {
+            match screenshot::replace_all_shortcuts(&app, &previous_config.screenshot_config) {
+                Ok(()) => save_error,
+                Err(rollback) => format!("{save_error}；同时恢复快捷键失败：{rollback}"),
+            }
+        })
+    });
+    let _ = app.emit("shortcut-status-changed", ());
+    result?;
+    *state
+        .config
+        .lock()
+        .map_err(|_| "配置状态已损坏".to_string())? = next_config;
+    Ok(next)
 }
 
 #[tauri::command]
@@ -993,20 +774,6 @@ fn export_diagnostics(
 }
 
 #[tauri::command]
-fn sync_widget_dynamic_width(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    width: f64,
-) -> Result<(), String> {
-    let width = taskbar::sync_dynamic_width(&app, width);
-    *state
-        .widget_width
-        .lock()
-        .map_err(|_| "挂件宽度状态已损坏".to_string())? = width;
-    Ok(())
-}
-
-#[tauri::command]
 fn get_minimize_to_tray(state: State<'_, AppState>) -> Result<bool, String> {
     state
         .config
@@ -1040,81 +807,39 @@ fn set_minimize_to_tray(state: State<'_, AppState>, enabled: bool) -> Result<(),
     Ok(())
 }
 
-fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    let show = MenuItemBuilder::with_id("show", "显示主窗口").build(app)?;
-    let capture = MenuItemBuilder::with_id("capture", "截图").build(app)?;
-    let separator = PredefinedMenuItem::separator(app)?;
-    let about = MenuItemBuilder::with_id("about", "关于 DockMapper").build(app)?;
-    let separator2 = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItemBuilder::with_id("quit", "退出").build(app)?;
-    let menu = MenuBuilder::new(app)
-        .item(&show)
-        .item(&capture)
-        .item(&separator)
-        .item(&about)
-        .item(&separator2)
-        .item(&quit)
-        .build()?;
-    let icon = app
-        .default_window_icon()
-        .cloned()
-        .ok_or("tauri.conf.json 未配置默认窗口图标")?;
-
-    TrayIconBuilder::new()
-        .icon(icon)
-        .tooltip("DockMapper — 任务栏工具")
-        .menu(&menu)
-        .on_menu_event(|app, event| match event.id().as_ref() {
-            "show" | "about" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
-            }
-            "capture" => {
-                litesnap::start_capture(app);
-            }
-            "quit" => app.exit(0),
-            _ => {}
-        })
-        .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = event
-            {
-                let app = tray.app_handle();
-                if let Some(window) = app.get_webview_window("main") {
-                    if window.is_visible().unwrap_or(false) {
-                        let _ = window.hide();
-                    } else {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
-                }
-            }
-        })
-        .build(app)?;
-    Ok(())
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if let Some(exit_code) = admin::helper_exit_code_from_args(std::env::args()) {
+        std::process::exit(exit_code);
+    }
+
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            screenshot::show_main_window(app);
+        }))
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_filter(|label| label == "main")
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::SIZE
+                        | tauri_plugin_window_state::StateFlags::POSITION
+                        | tauri_plugin_window_state::StateFlags::MAXIMIZED,
+                )
+                .build(),
+        )
         .register_uri_scheme_protocol("dockmapper-shot", |_, request| {
-            litesnap::serve_capture_uri(request)
+            screenshot::serve_capture_uri(request)
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .manage(litesnap::create_state())
+        .manage(screenshot::create_state())
         .setup(|app| {
             app.manage(diagnostics::initialize(app.handle())?);
             #[cfg(desktop)]
-            setup_tray(app)?;
+            tray::setup(app)?;
 
             let app_data_dir = app.path().app_data_dir()?;
             let config_path = app_data_dir.join("config.json");
@@ -1127,8 +852,9 @@ pub fn run() {
                 images: image_store::ImageStore::default(),
                 history,
                 config_path,
-                widget_width: Mutex::new(DEFAULT_WIDGET_WIDTH),
+                widget_width: Mutex::new(widget::DEFAULT_WIDTH),
                 mutation_lock: Mutex::new(()),
+                admin_operation_in_progress: AtomicBool::new(false),
             };
             app.manage(state);
             app.manage(sys_monitor::SysMonitorControl::new(
@@ -1136,7 +862,7 @@ pub fn run() {
                 monitor_interface,
             ));
             app.manage(ocr::OcrService::new(app.handle())?);
-            if let Err(error) = litesnap::initialize(app.handle()) {
+            if let Err(error) = screenshot::initialize(app.handle()) {
                 tracing::error!(target: "dock_mapper::shortcut", %error, "注册截图快捷键失败");
             }
 
@@ -1160,38 +886,18 @@ pub fn run() {
                 });
             }
 
-            let widget = app
-                .get_webview_window("taskbar_widget")
-                .ok_or("缺少 taskbar_widget 窗口")?;
-            #[cfg(target_os = "windows")]
-            taskbar::embed_widget_to_taskbar(&widget);
-            let widget_app = app.handle().clone();
-            widget.on_window_event(move |event| {
-                if matches!(
-                    event,
-                    tauri::WindowEvent::ScaleFactorChanged { .. }
-                        | tauri::WindowEvent::Focused(true)
-                ) {
-                    let width = widget_app
-                        .state::<AppState>()
-                        .widget_width
-                        .lock()
-                        .map(|value| *value)
-                        .unwrap_or(DEFAULT_WIDGET_WIDTH);
-                    taskbar::refresh_widget_position(&widget_app, width);
-                }
-            });
+            widget::setup_window(app)?;
 
             sys_monitor::start_sys_monitor(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            get_supported_keys,
-            get_key_mappings,
-            sync_key_mappings,
-            get_scancode_map_status,
-            apply_scancode_map,
-            restore_scancode_map,
+            key_mapping::get_supported_keys,
+            key_mapping::get_key_mappings,
+            key_mapping::sync_key_mappings,
+            key_mapping::get_scancode_map_status,
+            key_mapping::apply_scancode_map,
+            key_mapping::restore_scancode_map,
             upload_image,
             release_image,
             list_screenshot_history,
@@ -1202,39 +908,40 @@ pub fn run() {
             delete_screenshot_history,
             copy_screenshot_history,
             pin_screenshot_history,
-            litesnap::start_screenshot,
-            litesnap::close_overlay,
-            litesnap::show_capture_overlay,
-            litesnap::overlay_ready,
-            litesnap::get_full_screenshot,
-            litesnap::report_capture_rendered,
-            litesnap::check_screen_permission,
-            litesnap::copy_image,
-            litesnap::copy_text,
-            litesnap::save_image,
-            litesnap::pin_image,
-            litesnap::get_pin_image,
-            litesnap::pin_image_ready,
-            litesnap::get_pin_options,
-            litesnap::update_pin_options,
-            litesnap::copy_pin_image,
-            litesnap::save_pin_image,
-            litesnap::close_pin_window,
-            litesnap::scale_pin_window,
-            litesnap::open_url,
+            runtime_health::get_runtime_health,
+            screenshot::start_screenshot,
+            screenshot::close_overlay,
+            screenshot::show_capture_overlay,
+            screenshot::overlay_ready,
+            screenshot::get_full_screenshot,
+            screenshot::report_capture_rendered,
+            screenshot::check_screen_permission,
+            screenshot::output::copy_image,
+            screenshot::output::copy_text,
+            screenshot::output::save_image,
+            screenshot::pin_image,
+            screenshot::get_pin_image,
+            screenshot::pin_image_ready,
+            screenshot::get_pin_options,
+            screenshot::update_pin_options,
+            screenshot::output::copy_pin_image,
+            screenshot::output::save_pin_image,
+            screenshot::close_pin_window,
+            screenshot::scale_pin_window,
+            screenshot::open_url,
             get_screenshot_config,
             update_screenshot_config,
+            get_screenshot_shortcut_statuses,
+            reset_screenshot_shortcuts,
             choose_screenshot_save_directory,
             export_diagnostics,
             recognize_selection,
             decode_qr_selection,
-            refresh_widget_position,
-            check_is_admin,
-            relaunch_as_admin,
-            get_widget_config,
-            get_network_interfaces,
-            update_widget_config,
-            sync_widget_dynamic_width,
+            widget::refresh_widget_position,
+            widget::get_widget_config,
+            widget::get_network_interfaces,
+            widget::update_widget_config,
+            widget::sync_widget_dynamic_width,
             get_minimize_to_tray,
             set_minimize_to_tray,
         ])
@@ -1257,30 +964,6 @@ pub fn run() {
 mod transaction_tests {
     use super::*;
     use std::sync::Mutex;
-
-    #[test]
-    fn memory_scheme_only_accepts_current_string_values() {
-        assert_eq!(
-            serde_json::from_str::<MemoryScheme>(r#""capsule""#).unwrap(),
-            MemoryScheme::Capsule
-        );
-        assert!(serde_json::from_str::<MemoryScheme>("1").is_err());
-    }
-
-    #[test]
-    fn scancode_restore_requires_a_backup() {
-        assert_eq!(
-            required_scancode_backup(None).unwrap_err(),
-            "没有可恢复的应用前映射"
-        );
-    }
-
-    #[test]
-    fn external_scancode_map_requires_explicit_takeover() {
-        assert!(requires_scancode_takeover(Some(&[1, 2]), &[3, 4], false));
-        assert!(!requires_scancode_takeover(Some(&[3, 4]), &[3, 4], false));
-        assert!(!requires_scancode_takeover(Some(&[1, 2]), &[3, 4], true));
-    }
 
     #[test]
     fn shortcut_transaction_restores_previous_registration_when_save_fails() {

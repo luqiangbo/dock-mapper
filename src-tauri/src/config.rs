@@ -34,9 +34,10 @@ pub struct AppConfig {
     pub widget_config: WidgetConfig,
     pub minimize_to_tray: bool,
     pub screenshot_config: ScreenshotConfig,
-    /// 原始 Scancode Map 的 Base64 备份；仅在 DockMapper 首次接管时写入。
+    /// 接管前 Scancode Map 的 Base64 备份；外部修改后再次接管时会更新。
     pub scancode_map_backup: Option<String>,
-    pub scancode_map_applied: bool,
+    /// DockMapper 最后一次成功写入的 Scancode Map，用于区分草稿与外部修改。
+    pub applied_scancode_map: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,7 +74,7 @@ impl Default for AppConfig {
             minimize_to_tray: true,
             screenshot_config: ScreenshotConfig::default(),
             scancode_map_backup: None,
-            scancode_map_applied: false,
+            applied_scancode_map: None,
         }
     }
 }
@@ -94,6 +95,15 @@ pub fn load(path: &Path) -> AppConfig {
     });
     normalize_loaded_config(&mut config);
     config
+}
+
+pub fn load_for_mutation(path: &Path) -> Result<AppConfig, String> {
+    let backup_path = backup_path(path);
+    let mut config = read_config(path)
+        .or_else(|| read_config(&backup_path))
+        .ok_or_else(|| "主配置与备份均无法读取，已取消系统映射操作".to_string())?;
+    normalize_loaded_config(&mut config);
+    Ok(config)
 }
 
 fn read_config(path: &Path) -> Option<AppConfig> {
@@ -225,6 +235,7 @@ mod tests {
                 .as_nanos()
         ));
         let config = AppConfig {
+            applied_scancode_map: Some("AQIDBA==".into()),
             widget_config: WidgetConfig {
                 refresh_interval_secs: 4,
                 ..WidgetConfig::default()
@@ -243,6 +254,7 @@ mod tests {
         assert_eq!(loaded.key_mappings[0].id, "stable-id");
         assert!(!loaded.key_mappings[0].enabled);
         assert_eq!(loaded.widget_config.refresh_interval_secs, 4);
+        assert_eq!(loaded.applied_scancode_map.as_deref(), Some("AQIDBA=="));
         let _ = fs::remove_file(backup_path(&path));
         let _ = fs::remove_file(path);
     }
@@ -319,5 +331,21 @@ mod tests {
         normalize_loaded_config(&mut config);
         assert_eq!(config.screenshot_config.filename_prefix, "DockMapper");
         assert_eq!(config.screenshot_config.save_directory, None);
+    }
+
+    #[test]
+    fn mutation_load_refuses_missing_or_corrupt_configuration() {
+        let path = std::env::temp_dir().join(format!(
+            "dock-mapper-config-mutation-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        ));
+        assert!(load_for_mutation(&path).is_err());
+        fs::write(&path, "{corrupt").expect("write corrupt config");
+        assert!(load_for_mutation(&path).is_err());
+        let _ = fs::remove_file(path);
     }
 }

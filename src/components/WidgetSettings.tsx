@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { App as AntApp, Card, InputNumber, Select, Spin, Typography } from "antd";
 import type { WidgetConfig } from "../types";
 import styles from "./components.module.scss";
+import { errorMessage, widgetApi } from "../api/commands";
 
 const { Text } = Typography;
 
@@ -13,21 +13,26 @@ export default function WidgetSettings() {
   const { notification } = AntApp.useApp();
 
   useEffect(() => {
-    void invoke<WidgetConfig>("get_widget_config")
+    void widgetApi
+      .config()
       .then(setConfig)
       .catch((error) =>
-        notification.error({ message: "加载挂件配置失败", description: String(error) }),
+        notification.error({ message: "加载挂件配置失败", description: errorMessage(error) }),
       );
-    void invoke<string[]>("get_network_interfaces").then(setInterfaces).catch(() => setInterfaces([]));
+    const refreshInterfaces = () =>
+      widgetApi.networkInterfaces().then(setInterfaces).catch(() => setInterfaces([]));
+    void refreshInterfaces();
+    const timer = window.setInterval(() => void refreshInterfaces(), 30_000);
+    return () => window.clearInterval(timer);
   }, [notification]);
 
   const updateConfig = async (next: WidgetConfig) => {
     setSaving(true);
     try {
-      const saved = await invoke<WidgetConfig>("update_widget_config", { config: next });
+      const saved = await widgetApi.update(next);
       setConfig(saved);
     } catch (error) {
-      notification.error({ message: "同步失败", description: String(error) });
+      notification.error({ message: "同步失败", description: errorMessage(error) });
     } finally {
       setSaving(false);
     }
@@ -61,7 +66,11 @@ export default function WidgetSettings() {
           <div className={styles.settingRow}>
             <div className={styles.settingCopy}>
               <Text strong>网络接口</Text>
-              <span className={styles.description}>自动模式会忽略常见虚拟和回环网卡</span>
+              <span className={styles.description}>
+                {config.network_interface && !interfaces.includes(config.network_interface)
+                  ? "所选网卡当前不可用；恢复连接后会自动继续采样"
+                  : "自动模式会忽略常见虚拟和回环网卡"}
+              </span>
             </div>
             <Select
               value={config.network_interface ?? ""}
