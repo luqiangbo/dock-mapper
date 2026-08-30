@@ -19,14 +19,13 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
+      - uses: pnpm/setup@v1
         with:
-          node-version: 22
-          cache: pnpm
+          runtime: node@22
+          cache: true
+          install: false
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -75,14 +74,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
+      - uses: pnpm/setup@v1
         with:
-          node-version: 22
-          cache: pnpm
+          runtime: node@22
+          cache: true
+          install: false
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -113,6 +111,53 @@ jobs:
             -FilePath certificate/certificate.pfx `
             -CertStoreLocation Cert:\CurrentUser\My `
             -Password (ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force)
+
+      - name: Validate updater signing key
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        shell: pwsh
+        run: |
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
+            throw "TAURI_SIGNING_PRIVATE_KEY is not configured"
+          }
+
+          try {
+            $privateKeyBytes = [Convert]::FromBase64String($env:TAURI_SIGNING_PRIVATE_KEY)
+            $strictUtf8 = [Text.UTF8Encoding]::new($false, $true)
+            $privateKeyEnvelope = $strictUtf8.GetString($privateKeyBytes)
+          } catch {
+            throw "TAURI_SIGNING_PRIVATE_KEY must contain the complete dockmapper.key file"
+          }
+
+          if (-not $privateKeyEnvelope.StartsWith("untrusted comment: rsign encrypted secret key")) {
+            throw "TAURI_SIGNING_PRIVATE_KEY must contain the complete dockmapper.key file"
+          }
+
+          $probe = Join-Path $env:RUNNER_TEMP "dockmapper-updater-signing-probe.txt"
+          Set-Content -LiteralPath $probe -Value "DockMapper updater signing probe" -NoNewline
+          pnpm tauri signer sign $probe
+
+          try {
+            $tauriConfig = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+            $publicKeyBytes = [Convert]::FromBase64String($tauriConfig.plugins.updater.pubkey)
+            $publicKeyEnvelope = $strictUtf8.GetString($publicKeyBytes)
+            $publicKeyLines = $publicKeyEnvelope -split "`r?`n"
+            $publicKeyPayload = [Convert]::FromBase64String($publicKeyLines[1])
+
+            $signature = (Get-Content "$probe.sig" -Raw).Trim()
+            $signatureEnvelope = $strictUtf8.GetString([Convert]::FromBase64String($signature))
+            $signatureLines = $signatureEnvelope -split "`r?`n"
+            $signaturePayload = [Convert]::FromBase64String($signatureLines[1])
+          } catch {
+            throw "plugins.updater.pubkey must contain the complete dockmapper.key.pub file"
+          }
+
+          $publicKeyId = [Convert]::ToBase64String($publicKeyPayload[2..9])
+          $signatureKeyId = [Convert]::ToBase64String($signaturePayload[2..9])
+          if ($publicKeyId -cne $signatureKeyId) {
+            throw "TAURI_SIGNING_PRIVATE_KEY does not match plugins.updater.pubkey"
+          }
 
       - name: Build and upload draft release
         id: tauri

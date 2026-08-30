@@ -20,6 +20,20 @@
 | `WINDOWS_CERTIFICATE` | 可选，Windows 代码签名证书 Base64 |
 | `WINDOWS_CERTIFICATE_PASSWORD` | 可选，证书密码 |
 
+Updater 密钥必须使用 Tauri CLI 生成文件的**完整单行内容**，不要先做 Base64
+解码，也不要只复制解码后的密钥正文：
+
+```powershell
+$privateKey = (Get-Content -Raw "$env:USERPROFILE\.tauri\dockmapper.key").Trim()
+$privateKey | gh secret set TAURI_SIGNING_PRIVATE_KEY
+
+$publicKey = (Get-Content -Raw "$env:USERPROFILE\.tauri\dockmapper.key.pub").Trim()
+# 将 $publicKey 原样写入 src-tauri/tauri.conf.json 的 plugins.updater.pubkey
+```
+
+发布任务会在编译前执行一次临时文件签名，提前检查私钥内容和密码。私钥与公钥
+必须来自同一次 `tauri signer generate`，否则客户端无法验证后续更新。
+
 在仓库 `Settings → General → Releases` 启用 immutable releases。该设置会在 Draft
 正式发布后锁定 tag 与 Release assets。
 
@@ -28,12 +42,13 @@
 先同步三处版本号并提交：
 
 ```powershell
-pnpm version:sync 1.0.6
-git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
-git commit -m "chore: bump version to 1.0.6"
-git tag v1.0.6
+pnpm version:sync 1.1.2
+git add package.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json `
+  .github/workflows/release.yml docs/winget-publish-guide.md
+git commit -m "chore: bump version to 1.1.2"
+git tag v1.1.2
 git push origin main
-git push origin v1.0.6
+git push origin v1.1.2
 ```
 
 CI 按顺序执行：

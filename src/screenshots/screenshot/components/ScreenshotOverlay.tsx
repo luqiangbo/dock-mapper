@@ -4,12 +4,11 @@ import type { OcrTextBlock, WindowCandidate } from "../api";
 import { useI18n } from "../i18n";
 import type { ColorPaletteConfig, ScreenshotConfig } from "../../../types";
 import { paletteApi } from "../../../api/commands";
-import AnnotationToolbar, { STROKE_COLORS, type AnnotTool } from "./AnnotationToolbar";
+import AnnotationToolbar, { STROKE_COLORS } from "./AnnotationToolbar";
 import { loadImageFromUrl } from "../utils/imageLoad";
 import {
   fontFamily,
   TEXT_SIZES,
-  type TextEditorState,
   type TextObject,
   type TextSize,
 } from "./textTypes";
@@ -412,7 +411,6 @@ function ScreenshotOverlay(): React.JSX.Element {
     busy,
     shotReady,
     error,
-    setPhase,
     setBusy,
     setShotReady,
     setError,
