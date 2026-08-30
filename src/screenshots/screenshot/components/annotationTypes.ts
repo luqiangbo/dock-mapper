@@ -1,10 +1,31 @@
 import type { ScreenshotConfig } from "../../../types";
 
-export type ArrowStyle = "filled" | "outline" | "double";
+export type ArrowStyle =
+  | "filled"
+  | "outline"
+  | "double"
+  | "double-outline"
+  | "chevron"
+  | "double-chevron"
+  | "narrow"
+  | "start-dot"
+  | "start-dot-outline"
+  | "start-bar"
+  | "start-diamond"
+  | "start-tail";
 export const ARROW_STYLE_OPTIONS: ReadonlyArray<{ value: ArrowStyle; label: string }> = [
   { value: "filled", label: "实心箭头" },
   { value: "outline", label: "线框箭头" },
   { value: "double", label: "双向箭头" },
+  { value: "double-outline", label: "双向线框" },
+  { value: "chevron", label: "V 形" },
+  { value: "double-chevron", label: "双向 V 形" },
+  { value: "narrow", label: "细长三角" },
+  { value: "start-dot", label: "圆点起点" },
+  { value: "start-dot-outline", label: "空心圆起点" },
+  { value: "start-bar", label: "短线起点" },
+  { value: "start-diamond", label: "菱形起点" },
+  { value: "start-tail", label: "燕尾起点" },
 ];
 export type TextFont = "sans" | "serif" | "mono";
 

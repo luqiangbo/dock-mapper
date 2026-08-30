@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { ARROW_STYLE_OPTIONS } from "./annotationTypes";
+import type { ArrowStyle } from "./annotationTypes";
 import { calculateArrowGeometry, drawArrow } from "./arrowGeometry";
 
 function geometry(
   start: { x: number; y: number },
   end: { x: number; y: number },
-  style: "filled" | "outline" | "double" = "outline",
+  style: ArrowStyle = "outline",
   lineWidth = 2,
   canvasScale = 1,
 ) {
@@ -31,6 +32,7 @@ function mockContext() {
     beginPath: vi.fn(),
     moveTo: vi.fn(),
     lineTo: vi.fn(),
+    arc: vi.fn(),
     closePath: vi.fn(),
     stroke: vi.fn(),
     fill: vi.fn(),
@@ -103,11 +105,30 @@ describe("arrow geometry", () => {
     expect(double.fill).toHaveBeenCalledTimes(2);
   });
 
-  it("exposes only three plain Chinese select labels", () => {
-    expect(ARROW_STYLE_OPTIONS).toEqual([
+  it("exposes twelve selectable arrow styles while keeping the legacy three", () => {
+    expect(ARROW_STYLE_OPTIONS).toHaveLength(12);
+    expect(ARROW_STYLE_OPTIONS.slice(0, 3)).toEqual([
       { value: "filled", label: "实心箭头" },
       { value: "outline", label: "线框箭头" },
       { value: "double", label: "双向箭头" },
     ]);
+    expect(new Set(ARROW_STYLE_OPTIONS.map((option) => option.value)).size).toBe(12);
+  });
+
+  it.each(ARROW_STYLE_OPTIONS.map((option) => option.value))(
+    "draws finite geometry for %s",
+    (style) => {
+      const result = geometry({ x: 0, y: 0 }, { x: 9, y: 5 }, style, 8);
+      for (const value of [result.headLength, result.shaftStart.x, result.shaftStart.y, result.shaftEnd.x, result.shaftEnd.y])
+        expect(Number.isFinite(value)).toBe(true);
+    },
+  );
+
+  it("draws each additional endpoint marker without losing the arrow shaft", () => {
+    for (const style of ARROW_STYLE_OPTIONS.slice(3)) {
+      const context = mockContext();
+      drawArrow(context, { x: 0, y: 0 }, { x: 100, y: 0 }, style.value, 1, 1);
+      expect(context.stroke).toHaveBeenCalled();
+    }
   });
 });

@@ -89,16 +89,55 @@ function TaskbarWidget() {
   });
   const [metrics, setMetrics] = useState<WidgetMetricConfig[]>(FALLBACK_METRICS);
   const containerRef = useRef<HTMLDivElement>(null);
+  const widthSyncFrame = useRef<number | null>(null);
+  const pendingWidth = useRef<number | null>(null);
+  const lastRequestedWidth = useRef<number | null>(null);
+  const widthSyncInFlight = useRef(false);
+  const widthSyncDisposed = useRef(false);
 
-  const syncWidth = useCallback(() => {
-    if (containerRef.current) {
-      void invoke("sync_widget_dynamic_width", {
-        width: Math.ceil(containerRef.current.getBoundingClientRect().width),
-      }).catch((error) => console.error("任务栏挂件宽度同步失败", error));
-    }
+  const flushWidthSync = useCallback(() => {
+    widthSyncFrame.current = null;
+    if (widthSyncDisposed.current || widthSyncInFlight.current) return;
+
+    const width = pendingWidth.current;
+    pendingWidth.current = null;
+    if (width === null) return;
+    if (width === lastRequestedWidth.current) return;
+
+    lastRequestedWidth.current = width;
+    widthSyncInFlight.current = true;
+    void invoke("sync_widget_dynamic_width", { width })
+      .catch((error) => {
+        if (lastRequestedWidth.current === width) lastRequestedWidth.current = null;
+        console.error("任务栏挂件宽度同步失败", error);
+      })
+      .finally(() => {
+        widthSyncInFlight.current = false;
+        if (widthSyncDisposed.current) return;
+        if (pendingWidth.current === lastRequestedWidth.current) pendingWidth.current = null;
+        if (pendingWidth.current !== null && widthSyncFrame.current === null) {
+          widthSyncFrame.current = requestAnimationFrame(flushWidthSync);
+        }
+      });
   }, []);
 
+  const syncWidth = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const width = Math.ceil(container.getBoundingClientRect().width);
+    if (width === pendingWidth.current) return;
+    if (width === lastRequestedWidth.current) {
+      pendingWidth.current = null;
+      return;
+    }
+    pendingWidth.current = width;
+    if (!widthSyncInFlight.current && widthSyncFrame.current === null) {
+      widthSyncFrame.current = requestAnimationFrame(flushWidthSync);
+    }
+  }, [flushWidthSync]);
+
   useEffect(() => {
+    widthSyncDisposed.current = false;
     void invoke<WidgetConfig>("get_widget_config")
       .then((config) => setMetrics(config.metrics))
       .catch((error) => console.error("任务栏挂件配置读取失败", error));
@@ -119,6 +158,10 @@ function TaskbarWidget() {
     const positionTimer = window.setInterval(() => void invoke("refresh_widget_position"), 15000);
 
     return () => {
+      widthSyncDisposed.current = true;
+      if (widthSyncFrame.current !== null) cancelAnimationFrame(widthSyncFrame.current);
+      widthSyncFrame.current = null;
+      pendingWidth.current = null;
       void statusListener.then((unlisten) => unlisten());
       void configListener.then((unlisten) => unlisten());
       observer.disconnect();

@@ -5,13 +5,16 @@ export function findWindowCandidate(
   x: number,
   y: number,
 ): WindowCandidate | undefined {
-  return candidates
-    .filter(
-      (item) =>
-        x >= item.x &&
-        x <= item.x + item.width &&
-        y >= item.y &&
-        y <= item.y + item.height,
+  let topmost: WindowCandidate | undefined;
+  for (const item of candidates) {
+    if (
+      x < item.x ||
+      x > item.x + item.width ||
+      y < item.y ||
+      y > item.y + item.height
     )
-    .sort((left, right) => left.zIndex - right.zIndex)[0];
+      continue;
+    if (!topmost || item.zIndex < topmost.zIndex) topmost = item;
+  }
+  return topmost;
 }

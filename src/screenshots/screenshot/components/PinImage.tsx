@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow, PhysicalSize } from "@tauri-apps/api/window";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { copyBinaryPayload } from "../utils/binaryPayload";
 
 interface PinOptions {
@@ -16,10 +16,10 @@ export default function PinImage(): React.JSX.Element {
   const [options, setOptions] = useState<PinOptions>({ opacity: 1, locked: false });
   const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const imageUrlRef = useRef("");
-  const aspectRatio = useRef(1);
-  const correctingSize = useRef(false);
-  const userResizing = useRef(false);
-  const resizeIdleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scaleFrame = useRef<number | null>(null);
+  const pendingScale = useRef<{ factor: number; anchorX: number; anchorY: number } | null>(null);
+  const scaleInFlight = useRef(false);
+  const scaleDisposed = useRef(false);
 
   useEffect(() => {
     let disposed = false;
@@ -71,55 +71,14 @@ export default function PinImage(): React.JSX.Element {
   }, [pinId]);
 
   useEffect(() => {
-    const appWindow = getCurrentWindow();
-    let disposed = false;
-    let unlisten: (() => void) | undefined;
-
-    void appWindow
-      .onResized(({ payload: size }) => {
-        // Native code also resizes this prewarmed window whenever a new image
-        // is pinned. Only project sizes back to the image ratio while the user
-        // is actively dragging the resize handle; otherwise the previous
-        // image's ratio can overwrite the new screenshot's exact dimensions.
-        if (disposed || !userResizing.current || correctingSize.current || aspectRatio.current <= 0)
-          return;
-
-        if (resizeIdleTimer.current) clearTimeout(resizeIdleTimer.current);
-        resizeIdleTimer.current = setTimeout(() => {
-          userResizing.current = false;
-          resizeIdleTimer.current = null;
-        }, 180);
-
-        // Project the freely-resized native window back onto the image's
-        // aspect ratio. This remains smooth for corner and edge resizing and
-        // prevents object-fit letterboxing from making the image and window
-        // sizes disagree.
-        const ratio = aspectRatio.current;
-        const projectedHeight = (ratio * size.width + size.height) / (ratio * ratio + 1);
-        const nextHeight = Math.max(projectedHeight, 60, 60 / ratio);
-        const nextWidth = ratio * nextHeight;
-
-        if (Math.abs(nextWidth - size.width) <= 1 && Math.abs(nextHeight - size.height) <= 1)
-          return;
-        correctingSize.current = true;
-        const corrected = new PhysicalSize(Math.round(nextWidth), Math.round(nextHeight));
-        void appWindow.setSize(corrected).finally(() => {
-          correctingSize.current = false;
-        });
-      })
-      .then((off) => {
-        if (disposed) off();
-        else unlisten = off;
-      });
-
+    scaleDisposed.current = false;
     return () => {
-      disposed = true;
-      unlisten?.();
-      if (resizeIdleTimer.current) clearTimeout(resizeIdleTimer.current);
-      resizeIdleTimer.current = null;
-      userResizing.current = false;
+      scaleDisposed.current = true;
+      if (scaleFrame.current !== null) cancelAnimationFrame(scaleFrame.current);
+      scaleFrame.current = null;
+      pendingScale.current = null;
     };
-  }, []);
+  }, [pinId]);
 
   const startDragging = (event: React.PointerEvent<HTMLDivElement>): void => {
     if (menuPosition && !(event.target as HTMLElement).closest(".pin-menu")) {
@@ -159,16 +118,43 @@ export default function PinImage(): React.JSX.Element {
     }
   };
 
+  const flushScale = (): void => {
+    scaleFrame.current = null;
+    if (scaleDisposed.current || scaleInFlight.current || !pendingScale.current) return;
+
+    const request = pendingScale.current;
+    pendingScale.current = null;
+    scaleInFlight.current = true;
+    void invoke("scale_pin_window", {
+      id: pinId,
+      anchorX: request.anchorX,
+      anchorY: request.anchorY,
+      factor: request.factor,
+    })
+      .catch((error) => {
+        if (!scaleDisposed.current)
+          setLoadError(`贴图缩放失败：${error instanceof Error ? error.message : String(error)}`);
+      })
+      .finally(() => {
+        scaleInFlight.current = false;
+        if (!scaleDisposed.current && pendingScale.current && scaleFrame.current === null)
+          scaleFrame.current = requestAnimationFrame(flushScale);
+      });
+  };
+
   const scaleAtPointer = (event: React.WheelEvent<HTMLDivElement>): void => {
     event.preventDefault();
     const bounds = event.currentTarget.getBoundingClientRect();
-    const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
-    void invoke("scale_pin_window", {
-      id: pinId,
+    const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? Math.max(1, bounds.height) : 1);
+    const factor = Math.exp((-delta * Math.log(1.12)) / 100);
+    const current = pendingScale.current;
+    pendingScale.current = {
+      factor: Math.min(4, Math.max(0.25, (current?.factor ?? 1) * factor)),
       anchorX: (event.clientX - bounds.left) / Math.max(1, bounds.width),
       anchorY: (event.clientY - bounds.top) / Math.max(1, bounds.height),
-      factor,
-    });
+    };
+    if (!scaleInFlight.current && scaleFrame.current === null)
+      scaleFrame.current = requestAnimationFrame(flushScale);
   };
 
   return (
@@ -189,9 +175,7 @@ export default function PinImage(): React.JSX.Element {
           src={imageUrl}
           draggable={false}
           style={{ opacity: options.opacity }}
-          onLoad={(event) => {
-            const image = event.currentTarget;
-            aspectRatio.current = image.naturalWidth / Math.max(1, image.naturalHeight);
+          onLoad={() => {
             setLoadError("");
             void invoke("pin_image_ready", { id: pinId }).catch((error) => {
               setLoadError(
@@ -250,23 +234,6 @@ export default function PinImage(): React.JSX.Element {
       >
         ×
       </button>
-      {!options.locked && <button
-        type="button"
-        className="pin-resize"
-        aria-label="Resize"
-        title="Resize"
-        onPointerDown={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          userResizing.current = true;
-          if (resizeIdleTimer.current) clearTimeout(resizeIdleTimer.current);
-          void getCurrentWindow()
-            .startResizeDragging("SouthEast")
-            .catch(() => {
-              userResizing.current = false;
-            });
-        }}
-      />}
     </div>
   );
 }

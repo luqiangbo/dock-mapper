@@ -299,6 +299,26 @@ export default function ScreenshotSettings({
                         </div>
                         <div className={styles.settingRow}>
                           <div className={styles.settingCopy}>
+                            <Text strong>截图尺寸单位</Text>
+                            <span className={styles.description}>
+                              控制截图浮层尺寸面板的默认单位；PNG 导出始终使用实际像素。
+                            </span>
+                          </div>
+                          <Select
+                            value={config.capture_size_unit}
+                            disabled={saving}
+                            style={{ width: 140 }}
+                            options={[
+                              { value: "px", label: "PX（导出像素）" },
+                              { value: "dip", label: "DIP（逻辑尺寸）" },
+                            ]}
+                            onChange={(capture_size_unit) =>
+                              void save({ ...config, capture_size_unit })
+                            }
+                          />
+                        </div>
+                        <div className={styles.settingRow}>
+                          <div className={styles.settingCopy}>
                             <Text strong>文件名前缀</Text>
                             <span className={styles.description}>
                               保存文件名格式：前缀-时间戳.png

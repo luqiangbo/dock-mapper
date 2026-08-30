@@ -36,6 +36,7 @@ export interface ScreenshotConfig {
   save_directory: string | null;
   filename_prefix: string;
   color_copy_format: "hex" | "rgb" | "hsl" | "hsv" | "css";
+  capture_size_unit: "px" | "dip";
 }
 
 export interface WidgetConfig {

@@ -21,6 +21,19 @@ pub enum ColorCopyFormat {
     Css,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CaptureSizeUnit {
+    Px,
+    Dip,
+}
+
+impl Default for CaptureSizeUnit {
+    fn default() -> Self {
+        Self::Px
+    }
+}
+
 /// Persisted colour swatches are deliberately small and canonical.  Keeping
 /// them in the existing JSON transaction means they remain available offline
 /// without introducing a second storage backend.
@@ -62,6 +75,9 @@ pub struct ScreenshotConfig {
     pub save_directory: Option<String>,
     pub filename_prefix: String,
     pub color_copy_format: ColorCopyFormat,
+    /// The size unit preferred by the capture overlay. PNG export is always
+    /// physical pixels; DIP is only an editing/display convenience.
+    pub capture_size_unit: CaptureSizeUnit,
 }
 
 impl Default for ScreenshotConfig {
@@ -75,6 +91,7 @@ impl Default for ScreenshotConfig {
             save_directory: None,
             filename_prefix: "DockMapper".into(),
             color_copy_format: ColorCopyFormat::Hex,
+            capture_size_unit: CaptureSizeUnit::Px,
         }
     }
 }
@@ -404,6 +421,28 @@ mod tests {
         normalize_loaded_config(&mut config);
         assert_eq!(config.screenshot_config.filename_prefix, "DockMapper");
         assert_eq!(config.screenshot_config.save_directory, None);
+    }
+
+    #[test]
+    fn screenshot_size_unit_defaults_to_px_for_existing_config() {
+        let config: ScreenshotConfig = serde_json::from_str(
+            r#"{"shortcut":"Control+1","color_copy_format":"hex"}"#,
+        )
+        .expect("old screenshot config remains readable");
+        assert_eq!(config.capture_size_unit, CaptureSizeUnit::Px);
+    }
+
+    #[test]
+    fn screenshot_size_unit_round_trips_through_config_json() {
+        let config = ScreenshotConfig {
+            capture_size_unit: CaptureSizeUnit::Dip,
+            ..ScreenshotConfig::default()
+        };
+        let restored: ScreenshotConfig = serde_json::from_str(
+            &serde_json::to_string(&config).expect("serialize screenshot config"),
+        )
+        .expect("deserialize screenshot config");
+        assert_eq!(restored.capture_size_unit, CaptureSizeUnit::Dip);
     }
 
     #[test]

@@ -11,6 +11,7 @@ const config: ScreenshotConfig = {
   save_directory: null,
   filename_prefix: "DockMapper",
   color_copy_format: "hex",
+  capture_size_unit: "px",
 };
 
 describe("shortcut status presentation", () => {

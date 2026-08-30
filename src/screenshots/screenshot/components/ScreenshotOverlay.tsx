@@ -30,11 +30,18 @@ import {
   type SelectionCrop,
   type ResizeHandle,
 } from "./selectionGeometry";
-import SelectionSizePanel, { SELECTION_SIZE_PANEL_SIZE } from "./SelectionSizePanel";
+import SelectionSizePanel, { SELECTION_SIZE_PANEL_SIZE, type AspectPreset } from "./SelectionSizePanel";
 import {
   calculateSelectionSizePanelPosition,
-  getOutputSizeLimits,
-  resizeSelectionToOutputSize,
+  fitSelectionToAspectRatio,
+  getSelectionSize,
+  getSelectionSizeLimits,
+  normalizeAspectRatio,
+  resizeSelectionToSize,
+  resizeSelectionWithAspectRatio,
+  selectWithAspectRatio,
+  type AspectRatio,
+  type CaptureSizeUnit,
   type OutputSize,
 } from "./selectionSizeGeometry";
 import {
@@ -323,13 +330,24 @@ function ScreenshotOverlay(): React.JSX.Element {
   const pickerZoomRef = useRef<HTMLCanvasElement>(null);
   const origin = useRef({ x: 0, y: 0 });
   const pendingWindowSelection = useRef<Selection | null>(null);
+  const backgroundMoveFrame = useRef<number | null>(null);
+  const pendingBackgroundPoint = useRef<NativeCanvasPoint | null>(null);
+  const draggingRef = useRef(false);
   const annotationGestureRef = useRef<ActiveAnnotationGesture | null>(null);
+  const annotationPreviewFrame = useRef<number | null>(null);
+  const annotationPreviewScale = useRef(1);
+  const pickerSampleFrame = useRef<number | null>(null);
+  const pendingPickerPoint = useRef<NativeCanvasPoint | null>(null);
   const nativeInputGateRef = useRef(new NativeInputGate());
   const nativeCanvasHandlersRef = useRef<NativeCanvasHandlers | null>(null);
   const pendingAction = useRef(0);
   const qrRequest = useRef(new RequestGeneration());
   const palettePendingMutations = useRef(0);
   const paletteMutationTail = useRef<Promise<void>>(Promise.resolve());
+  const screenshotConfigRef = useRef<ScreenshotConfig | null>(null);
+  const screenshotConfigMutationTail = useRef<Promise<void>>(Promise.resolve());
+  const screenshotConfigRevision = useRef(0);
+  const screenshotConfigPendingMutations = useRef(0);
   // 递增令牌使得选区变化、关闭或新截图后的迟到 OCR 结果立即失效。
   const imageScaleRef = useRef({ scaleX: 1, scaleY: 1 });
   const lastTextFontSize = useRef<TextSize>(TEXT_SIZES[1]);
@@ -448,6 +466,10 @@ function ScreenshotOverlay(): React.JSX.Element {
   const [paletteBusy, setPaletteBusy] = useState(false);
   const [pickerCopied, setPickerCopied] = useState(false);
   const [pickerFormat, setPickerFormat] = useState<ColorCopyFormat>("hex");
+  const [captureSizeUnit, setCaptureSizeUnit] = useState<CaptureSizeUnit>("px");
+  const [screenshotConfigSaving, setScreenshotConfigSaving] = useState(false);
+  const [aspectPreset, setAspectPreset] = useState<AspectPreset>("free");
+  const [aspectRatio, setAspectRatio] = useState<AspectRatio | null>(null);
   const [qrContents, setQrContents] = useState<string[] | null>(null);
   const [activeOcrBlock, setActiveOcrBlock] = useState<OcrTextBlock | null>(null);
   const [arrowStyle, setArrowStyle] = useState<ArrowStyle>("filled");
@@ -459,6 +481,22 @@ function ScreenshotOverlay(): React.JSX.Element {
   const [secondaryToolbarSize, setSecondaryToolbarSize] = useState<ToolbarSize>(EMPTY_TOOLBAR_SIZE);
   const [compactToolbar, setCompactToolbar] = useState(() => window.innerWidth < 680);
   const [toolbarPopupOpen, setToolbarPopupOpen] = useState(false);
+
+  useEffect(
+    () => () => {
+      if (backgroundMoveFrame.current !== null) cancelAnimationFrame(backgroundMoveFrame.current);
+      if (annotationPreviewFrame.current !== null)
+        cancelAnimationFrame(annotationPreviewFrame.current);
+      if (pickerSampleFrame.current !== null) cancelAnimationFrame(pickerSampleFrame.current);
+      backgroundMoveFrame.current = null;
+      annotationPreviewFrame.current = null;
+      pickerSampleFrame.current = null;
+      pendingBackgroundPoint.current = null;
+      pendingPickerPoint.current = null;
+    },
+    [],
+  );
+
   const objectStateRef = useRef<ObjectSnapshot>({
     rasterAnnotations: [],
     textObjects: [],
@@ -534,9 +572,15 @@ function ScreenshotOverlay(): React.JSX.Element {
   useEffect(() => {
     const gesture = annotationGestureRef.current;
     if (gesture) {
+      if (annotationPreviewFrame.current !== null) cancelAnimationFrame(annotationPreviewFrame.current);
+      annotationPreviewFrame.current = null;
       annotationGestureRef.current = null;
       setRasterPreview(null);
     }
+    if (pickerSampleFrame.current !== null) cancelAnimationFrame(pickerSampleFrame.current);
+    pickerSampleFrame.current = null;
+    pendingPickerPoint.current = null;
+    if (tool !== "picker") setPickerSample(null);
     nativeInputGateRef.current.reset();
   }, [tool, selection?.x, selection?.y, selection?.width, selection?.height]);
 
@@ -662,17 +706,58 @@ function ScreenshotOverlay(): React.JSX.Element {
     [setError],
   );
 
+  const updateScreenshotConfig = useCallback(
+    async (changes: Partial<ScreenshotConfig>, failureMessage: string): Promise<boolean> => {
+      const revision = ++screenshotConfigRevision.current;
+      screenshotConfigPendingMutations.current += 1;
+      setScreenshotConfigSaving(true);
+      const mutation = screenshotConfigMutationTail.current.then(async () => {
+        const current = screenshotConfigRef.current ?? await window.api.getScreenshotConfig();
+        const next = await window.api.updateScreenshotConfig({ ...current, ...changes });
+        screenshotConfigRef.current = next;
+        if (revision === screenshotConfigRevision.current) {
+          setPickerFormat(next.color_copy_format);
+          setCaptureSizeUnit(next.capture_size_unit);
+        }
+      });
+      screenshotConfigMutationTail.current = mutation.then(() => undefined, () => undefined);
+      try {
+        await mutation;
+        return true;
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        setError(`${failureMessage}：${message}`);
+        return false;
+      } finally {
+        screenshotConfigPendingMutations.current -= 1;
+        if (screenshotConfigPendingMutations.current === 0) setScreenshotConfigSaving(false);
+      }
+    },
+    [setError],
+  );
+
   useEffect(() => {
+    const revision = screenshotConfigRevision.current;
     void window.api
       .getScreenshotConfig()
       .then((config) => {
+        if (revision !== screenshotConfigRevision.current) return;
+        screenshotConfigRef.current = config;
         setPickerFormat(config.color_copy_format);
+        setCaptureSizeUnit(config.capture_size_unit);
       })
       .catch((cause) => {
-        setError(`取色复制格式读取失败：${cause instanceof Error ? cause.message : String(cause)}`);
+        setError(`截图配置读取失败：${cause instanceof Error ? cause.message : String(cause)}`);
       });
     void loadPalette();
   }, [loadPalette, setError]);
+
+  useEffect(() => {
+    if (phase === "capturing") {
+      setAspectPreset("free");
+      setAspectRatio(null);
+    }
+  }, [phase]);
 
   const copyPickerSample = useCallback(async (sample: PickerSample) => {
     try {
@@ -758,15 +843,22 @@ function ScreenshotOverlay(): React.JSX.Element {
     const image = fullImageRef.current;
     if (!selection || !image || selection.width <= 0 || selection.height <= 0) return null;
     const viewport = { width: window.innerWidth, height: window.innerHeight };
-    const crop = selectionToImageCrop(selection, image);
     return {
-      size: { width: crop.outputWidth, height: crop.outputHeight },
-      limits: getOutputSizeLimits(
+      size: getSelectionSize(
         selection,
         image.naturalWidth,
         image.naturalHeight,
         viewport.width,
         viewport.height,
+        captureSizeUnit,
+      ),
+      limits: getSelectionSizeLimits(
+        selection,
+        image.naturalWidth,
+        image.naturalHeight,
+        viewport.width,
+        viewport.height,
+        captureSizeUnit,
       ),
       position: calculateSelectionSizePanelPosition(
         selection,
@@ -1336,16 +1428,19 @@ function ScreenshotOverlay(): React.JSX.Element {
     (requested: Partial<OutputSize>) => {
       const image = fullImageRef.current;
       const baseline = createRecropBaseline();
-      if (!canAdjustRegion || !image || !selection || !baseline) return;
-      const next = resizeSelectionToOutputSize(
+      if (!canAdjustRegion || !image || !selection || !baseline) return false;
+      const next = resizeSelectionToSize(
         selection,
         requested,
+        captureSizeUnit,
         image.naturalWidth,
         image.naturalHeight,
         window.innerWidth,
         window.innerHeight,
+        aspectRatio,
       );
-      if (!next || (next.width === selection.width && next.height === selection.height)) return;
+      if (!next) return false;
+      if (next.width === selection.width && next.height === selection.height) return true;
 
       resetHistory();
       cancelObjectMutation();
@@ -1353,6 +1448,7 @@ function ScreenshotOverlay(): React.JSX.Element {
       setSelectedNumberId(null);
       setSelectedRasterId(null);
       recropSelection(next, baseline);
+      return true;
     },
     [
       canAdjustRegion,
@@ -1361,6 +1457,79 @@ function ScreenshotOverlay(): React.JSX.Element {
       recropSelection,
       resetHistory,
       selection,
+      aspectRatio,
+      captureSizeUnit,
+    ],
+  );
+
+  const changeAspectPreset = useCallback(
+    (preset: AspectPreset, custom?: AspectRatio) => {
+      const image = fullImageRef.current;
+      if (!selection || !image) return;
+      if (preset === "free") {
+        setAspectPreset("free");
+        setAspectRatio(null);
+        return;
+      }
+      if (preset === "custom" && !custom) {
+        setAspectPreset("custom");
+        setAspectRatio(null);
+        return;
+      }
+      const currentCrop = selectionToImageCrop(selection, image);
+      const presets: Record<Exclude<AspectPreset, "free" | "current" | "custom">, AspectRatio> = {
+        "1:1": { width: 1, height: 1 },
+        "4:3": { width: 4, height: 3 },
+        "16:9": { width: 16, height: 9 },
+        "9:16": { width: 9, height: 16 },
+      };
+      const nextRatio =
+        preset === "current"
+          ? normalizeAspectRatio(currentCrop.outputWidth, currentCrop.outputHeight)
+          : preset === "custom"
+            ? custom && normalizeAspectRatio(custom.width, custom.height)
+            : presets[preset];
+      if (!nextRatio) {
+        setError("自定义比例必须是大于零的数字");
+        return;
+      }
+      if (preset === "current") {
+        setAspectPreset(preset);
+        setAspectRatio(nextRatio);
+        return;
+      }
+      const fitted = fitSelectionToAspectRatio(
+        selection,
+        nextRatio,
+        image.naturalWidth,
+        image.naturalHeight,
+        window.innerWidth,
+        window.innerHeight,
+      );
+      if (!fitted) {
+        setError("当前选区无法容纳该比例");
+        return;
+      }
+      setAspectPreset(preset);
+      setAspectRatio(nextRatio);
+      if (fitted.width !== selection.width || fitted.height !== selection.height) {
+        const baseline = createRecropBaseline();
+        if (!baseline) return;
+        resetHistory();
+        cancelObjectMutation();
+        setSelectedTextId(null);
+        setSelectedNumberId(null);
+        setSelectedRasterId(null);
+        recropSelection(fitted, baseline);
+      }
+    },
+    [
+      cancelObjectMutation,
+      createRecropBaseline,
+      recropSelection,
+      resetHistory,
+      selection,
+      setError,
     ],
   );
 
@@ -1422,7 +1591,19 @@ function ScreenshotOverlay(): React.JSX.Element {
         recropSelection(
           regionDrag.handle === "move"
             ? moveRect(regionDrag.origin, dx, dy)
-            : resizeRect(regionDrag.origin, regionDrag.handle, dx, dy),
+            : aspectRatio && !["n", "e", "s", "w"].includes(regionDrag.handle)
+              ? resizeSelectionWithAspectRatio(
+                  regionDrag.origin,
+                  regionDrag.handle as "nw" | "ne" | "sw" | "se",
+                  dx,
+                  dy,
+                  aspectRatio,
+                  fullImageRef.current?.naturalWidth ?? window.innerWidth,
+                  fullImageRef.current?.naturalHeight ?? window.innerHeight,
+                  window.innerWidth,
+                  window.innerHeight,
+                )
+              : resizeRect(regionDrag.origin, regionDrag.handle, dx, dy),
           regionDrag,
         );
         return;
@@ -1585,19 +1766,7 @@ function ScreenshotOverlay(): React.JSX.Element {
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
     };
-  }, [selection, recropSelection, screenToCanvas, commitObjectMutation]);
-
-  const onBgMouseDown = useCallback(
-    (event: React.MouseEvent<HTMLCanvasElement>) => {
-      if (phase !== "selecting" || busy) return;
-      setDragging(true);
-      const point = clampPoint(event.clientX, event.clientY);
-      origin.current = point;
-      pendingWindowSelection.current = hoveredWindow;
-      setSelection(hoveredWindow ?? { x: point.x, y: point.y, width: 0, height: 0 });
-    },
-    [phase, busy, hoveredWindow, setSelection],
-  );
+  }, [aspectRatio, selection, recropSelection, screenToCanvas, commitObjectMutation]);
 
   useEffect(() => {
     const repeatLastSelection = (event: KeyboardEvent): void => {
@@ -1641,32 +1810,80 @@ function ScreenshotOverlay(): React.JSX.Element {
     return () => window.removeEventListener("keydown", adjustWindowSelection);
   }, [busy, enterEditMode, hoveredWindow, phase]);
 
+  const flushBackgroundMove = useCallback(() => {
+    if (backgroundMoveFrame.current !== null) {
+      cancelAnimationFrame(backgroundMoveFrame.current);
+      backgroundMoveFrame.current = null;
+    }
+    const pending = pendingBackgroundPoint.current;
+    pendingBackgroundPoint.current = null;
+    if (!pending || phase !== "selecting") return;
+
+    const point = clampPoint(pending.clientX, pending.clientY);
+    if (!draggingRef.current) {
+      const candidate = findWindowCandidate(windowCandidates, point.x, point.y);
+      const next = candidate
+        ? { x: candidate.x, y: candidate.y, width: candidate.width, height: candidate.height }
+        : null;
+      setHoveredWindow((current) => {
+        if (
+          current?.x === next?.x &&
+          current?.y === next?.y &&
+          current?.width === next?.width &&
+          current?.height === next?.height
+        )
+          return current;
+        return next;
+      });
+      return;
+    }
+
+    const distance = Math.hypot(point.x - origin.current.x, point.y - origin.current.y);
+    if (distance <= 3 && pendingWindowSelection.current) return;
+    pendingWindowSelection.current = null;
+    setSelection(
+      aspectRatio
+        ? selectWithAspectRatio(
+            origin.current,
+            point,
+            aspectRatio,
+            fullImageRef.current?.naturalWidth ?? window.innerWidth,
+            fullImageRef.current?.naturalHeight ?? window.innerHeight,
+            window.innerWidth,
+            window.innerHeight,
+          )
+        : clampSelection(normalizeRect(origin.current.x, origin.current.y, point.x, point.y)),
+    );
+  }, [aspectRatio, phase, setSelection, windowCandidates]);
+
+  const onBgMouseDown = useCallback(
+    (event: React.MouseEvent<HTMLCanvasElement>) => {
+      if (phase !== "selecting" || busy) return;
+      flushBackgroundMove();
+      draggingRef.current = true;
+      setDragging(true);
+      const point = clampPoint(event.clientX, event.clientY);
+      origin.current = point;
+      pendingWindowSelection.current = hoveredWindow;
+      setSelection(hoveredWindow ?? { x: point.x, y: point.y, width: 0, height: 0 });
+    },
+    [busy, flushBackgroundMove, hoveredWindow, phase, setSelection],
+  );
+
   const onBgMouseMove = useCallback(
     (event: React.MouseEvent<HTMLCanvasElement>) => {
-      const point = clampPoint(event.clientX, event.clientY);
-      if (!dragging) {
-        if (phase !== "selecting") return;
-        const candidate = findWindowCandidate(windowCandidates, point.x, point.y);
-        setHoveredWindow(
-          candidate
-            ? { x: candidate.x, y: candidate.y, width: candidate.width, height: candidate.height }
-            : null,
-        );
-        return;
+      pendingBackgroundPoint.current = { clientX: event.clientX, clientY: event.clientY };
+      if (backgroundMoveFrame.current === null) {
+        backgroundMoveFrame.current = requestAnimationFrame(flushBackgroundMove);
       }
-      if (phase !== "selecting") return;
-      const distance = Math.hypot(point.x - origin.current.x, point.y - origin.current.y);
-      if (distance <= 3 && pendingWindowSelection.current) return;
-      pendingWindowSelection.current = null;
-      setSelection(
-        clampSelection(normalizeRect(origin.current.x, origin.current.y, point.x, point.y)),
-      );
     },
-    [dragging, phase, setSelection, windowCandidates],
+    [flushBackgroundMove],
   );
 
   const onBgMouseUp = useCallback(() => {
-    if (!dragging || phase !== "selecting") return;
+    flushBackgroundMove();
+    if (!draggingRef.current || phase !== "selecting") return;
+    draggingRef.current = false;
     setDragging(false);
     pendingWindowSelection.current = null;
     const current = selectionRef.current;
@@ -1675,7 +1892,7 @@ function ScreenshotOverlay(): React.JSX.Element {
     } else {
       setSelection(null);
     }
-  }, [dragging, phase, enterEditMode, setSelection, selectionRef]);
+  }, [enterEditMode, flushBackgroundMove, phase, setSelection, selectionRef]);
 
   const toLocal = (event: { clientX: number; clientY: number }): { x: number; y: number } => {
     const canvas = shotRef.current;
@@ -1745,6 +1962,30 @@ function ScreenshotOverlay(): React.JSX.Element {
     [selection],
   );
 
+  const cancelPickerSample = useCallback(() => {
+    if (pickerSampleFrame.current !== null) cancelAnimationFrame(pickerSampleFrame.current);
+    pickerSampleFrame.current = null;
+    pendingPickerPoint.current = null;
+  }, []);
+
+  const flushPickerSample = useCallback(() => {
+    pickerSampleFrame.current = null;
+    const pending = pendingPickerPoint.current;
+    pendingPickerPoint.current = null;
+    if (tool === "picker" && pending) samplePickerColor(pending);
+  }, [samplePickerColor, tool]);
+
+  const queuePickerSample = useCallback(
+    (event: NativeCanvasPoint) => {
+      if (tool !== "picker") return;
+      pendingPickerPoint.current = { clientX: event.clientX, clientY: event.clientY };
+      if (pickerSampleFrame.current === null) {
+        pickerSampleFrame.current = requestAnimationFrame(flushPickerSample);
+      }
+    },
+    [flushPickerSample, tool],
+  );
+
   const beginNativeCanvasInput = useCallback(
     (
       owner: NativeInputOwner,
@@ -1770,6 +2011,7 @@ function ScreenshotOverlay(): React.JSX.Element {
         return false;
       }
       if (tool === "picker") {
+        cancelPickerSample();
         const sample = samplePickerColor(event);
         if (sample) {
           setStrokeColor(`#${sample.hex}`);
@@ -1865,6 +2107,7 @@ function ScreenshotOverlay(): React.JSX.Element {
       mosaicBlock,
       canAdjustRegion,
       beginRegionDrag,
+      cancelPickerSample,
       samplePickerColor,
       copyPickerSample,
       textEditor,
@@ -1872,6 +2115,29 @@ function ScreenshotOverlay(): React.JSX.Element {
       commitText,
       selectedTextId,
     ],
+  );
+
+  const flushAnnotationPreview = useCallback(() => {
+    annotationPreviewFrame.current = null;
+    const gesture = annotationGestureRef.current;
+    const canvas = shotRef.current;
+    if (!gesture || !canvas) return;
+    setRasterPreview(rasterFromGesture(gesture, annotationPreviewScale.current));
+  }, []);
+
+  const cancelAnnotationPreview = useCallback(() => {
+    if (annotationPreviewFrame.current !== null) cancelAnimationFrame(annotationPreviewFrame.current);
+    annotationPreviewFrame.current = null;
+  }, []);
+
+  const queueAnnotationPreview = useCallback(
+    (scale: number) => {
+      annotationPreviewScale.current = scale;
+      if (annotationPreviewFrame.current === null) {
+        annotationPreviewFrame.current = requestAnimationFrame(flushAnnotationPreview);
+      }
+    },
+    [flushAnnotationPreview],
   );
 
   const moveNativeCanvasInput = useCallback(
@@ -1889,15 +2155,17 @@ function ScreenshotOverlay(): React.JSX.Element {
       appendGesturePoint(gesture, point);
       if (!gesture.changed) return;
 
-      setRasterPreview(rasterFromGesture(gesture, scale));
+      queueAnnotationPreview(scale);
     },
-    [phase, selection],
+    [phase, queueAnnotationPreview, selection],
   );
 
   const finishNativeCanvasInput = useCallback(
     (owner: NativeInputOwner) => {
       const gesture = annotationGestureRef.current;
       if (!shouldHandlePointer(gesture, owner.id)) return;
+      flushAnnotationPreview();
+      cancelAnnotationPreview();
       annotationGestureRef.current = null;
       const canvas = shotRef.current;
       const scale = canvas ? canvas.width / Math.max(1, selection?.width ?? canvas.width) : 1;
@@ -1909,16 +2177,17 @@ function ScreenshotOverlay(): React.JSX.Element {
         setSelectedRasterId(preview.id);
       }
     },
-    [pushCurrentObjects, selection?.width],
+    [cancelAnnotationPreview, flushAnnotationPreview, pushCurrentObjects, selection?.width],
   );
 
   const cancelNativeCanvasInput = useCallback((owner: NativeInputOwner) => {
     const gesture = annotationGestureRef.current;
     if (!shouldHandlePointer(gesture, owner.id)) return;
+    cancelAnnotationPreview();
     resolveAnnotationGesture(gesture, true);
     setRasterPreview(null);
     annotationGestureRef.current = null;
-  }, []);
+  }, [cancelAnnotationPreview]);
 
   nativeCanvasHandlersRef.current = {
     begin: beginNativeCanvasInput,
@@ -1926,10 +2195,13 @@ function ScreenshotOverlay(): React.JSX.Element {
     finish: finishNativeCanvasInput,
     cancel: cancelNativeCanvasInput,
     sample: (event) => {
-      if (tool === "picker") samplePickerColor(event);
+      queuePickerSample(event);
     },
     clearSample: () => {
-      if (tool === "picker") setPickerSample(null);
+      if (tool === "picker") {
+        cancelPickerSample();
+        setPickerSample(null);
+      }
     },
   };
 
@@ -2192,16 +2464,10 @@ function ScreenshotOverlay(): React.JSX.Element {
       objectStyleChangedRef.current = false;
     }
     if (changes.pickerFormat !== undefined) {
-      setPickerFormat(changes.pickerFormat);
-      void window.api
-        .getScreenshotConfig()
-        .then((config) =>
-          window.api.updateScreenshotConfig({
-            ...config,
-            color_copy_format: changes.pickerFormat!,
-          }),
-        )
-        .catch(() => undefined);
+      void updateScreenshotConfig(
+        { color_copy_format: changes.pickerFormat },
+        "取色复制格式保存失败",
+      );
     }
   };
 
@@ -2526,7 +2792,7 @@ function ScreenshotOverlay(): React.JSX.Element {
 
       {canAdjustRegion &&
         selection &&
-        RESIZE_HANDLES.map((handle) => {
+        RESIZE_HANDLES.filter((handle) => !aspectRatio || !["n", "e", "s", "w"].includes(handle)).map((handle) => {
           const left = handle.includes("w")
             ? selection.x
             : handle.includes("e")
@@ -2560,8 +2826,16 @@ function ScreenshotOverlay(): React.JSX.Element {
           size={selectionSizePanel.size}
           limits={selectionSizePanel.limits}
           position={selectionSizePanel.position}
+          unit={captureSizeUnit}
+          aspectPreset={aspectPreset}
+          aspectRatio={aspectRatio}
           showInputs={phase === "editing"}
           editable={canAdjustRegion}
+          savingUnit={screenshotConfigSaving}
+          onUnitChange={(unit) => {
+            void updateScreenshotConfig({ capture_size_unit: unit }, "截图尺寸单位保存失败");
+          }}
+          onAspectChange={changeAspectPreset}
           onCommit={applySelectionOutputSize}
         />
       )}

@@ -287,7 +287,7 @@ fn build_pin_window(
     .decorations(false)
     .transparent(true)
     .shadow(true)
-    .resizable(true)
+    .resizable(false)
     .always_on_top(true)
     .visible(false)
     .build()
@@ -717,12 +717,8 @@ pub fn update_pin_options(
     }
     runtime.options.insert(id.clone(), options);
     drop(runtime);
-    let window = app
-        .get_webview_window(&id)
+    app.get_webview_window(&id)
         .ok_or_else(|| "贴图窗口不存在".to_string())?;
-    window
-        .set_resizable(!locked)
-        .map_err(|error| error.to_string())?;
     Ok(options)
 }
 

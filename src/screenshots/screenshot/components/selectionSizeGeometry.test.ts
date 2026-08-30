@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import { calculateSelectionCrop, mapCropPoint } from "./selectionGeometry";
 import {
   calculateSelectionSizePanelPosition,
+  fitSelectionToAspectRatio,
+  getSelectionSize,
   getOutputSizeLimits,
+  resizeSelectionToSize,
   resizeSelectionToOutputSize,
+  resizeSelectionWithAspectRatio,
 } from "./selectionSizeGeometry";
 
 describe("selection size geometry", () => {
@@ -79,5 +83,39 @@ describe("selection size geometry", () => {
         { width: 1920, height: 1080 },
       ),
     ).toEqual({ left: 40, top: 88 });
+  });
+
+  it.each([1.25, 1.5, 2])("converts PX and DIP with independent %sx DPI scales", (scale) => {
+    const selection = { x: 100, y: 80, width: 240, height: 160 };
+    expect(getSelectionSize(selection, 1920 * scale, 1080 * (scale + 0.25), 1920, 1080, "dip"))
+      .toEqual({ width: 240, height: 160 });
+    expect(getSelectionSize(selection, 1920 * scale, 1080 * (scale + 0.25), 1920, 1080, "px"))
+      .toEqual({ width: Math.round(240 * scale), height: Math.round(160 * (scale + 0.25)) });
+  });
+
+  it("fits a physical-pixel ratio at fixed top-left under uneven DPI", () => {
+    const selection = { x: 100, y: 100, width: 600, height: 400 };
+    const fitted = fitSelectionToAspectRatio(selection, { width: 16, height: 9 }, 2880, 2160, 1920, 1080);
+    expect(fitted).not.toBeNull();
+    const crop = calculateSelectionCrop(fitted!, 2880, 2160, 1920, 1080);
+    expect(crop.outputWidth / crop.outputHeight).toBeCloseTo(16 / 9, 2);
+    expect(fitted).toMatchObject({ x: 100, y: 100 });
+  });
+
+  it("keeps a locked corner resize inside the viewport and above the minimum", () => {
+    const resized = resizeSelectionWithAspectRatio(
+      { x: 1800, y: 950, width: 80, height: 80 }, "se", 600, 600,
+      { width: 1, height: 1 }, 2880, 1620, 1920, 1080,
+    );
+    expect(resized.x + resized.width).toBeLessThanOrEqual(1920);
+    expect(resized.y + resized.height).toBeLessThanOrEqual(1080);
+    expect(resized.width).toBeGreaterThanOrEqual(8);
+  });
+
+  it("uses DIP input with fixed top-left and rejects a derived size beyond its boundary", () => {
+    const selection = { x: 100, y: 100, width: 300, height: 200 };
+    expect(resizeSelectionToSize(selection, { width: 320.5 }, "dip", 2880, 1620, 1920, 1080))
+      .toMatchObject({ x: 100, y: 100, width: 320.5 });
+    expect(resizeSelectionToSize(selection, { width: 1900 }, "dip", 2880, 1620, 1920, 1080)).toBeNull();
   });
 });

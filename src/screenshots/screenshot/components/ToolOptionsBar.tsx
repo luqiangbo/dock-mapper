@@ -117,6 +117,26 @@ function Choice({
   );
 }
 
+function ArrowStylePreview({ style, label }: { style: ArrowStyle; label: string }): React.JSX.Element {
+  const doubleEnded = style === "double" || style === "double-outline" || style === "double-chevron";
+  const outline = style === "outline" || style === "double-outline";
+  const chevron = style === "chevron" || style === "double-chevron";
+  return (
+    <span className="arrow-style-option">
+      <svg viewBox="0 0 44 14" aria-hidden="true">
+        <path d="M4 7h31" />
+        {chevron ? <path d="M35 3l5 4-5 4" /> : <path className={outline ? "is-outline" : ""} d="M40 7 34 3v8z" />}
+        {doubleEnded && (chevron ? <path d="M9 3 4 7l5 4" /> : <path className={outline ? "is-outline" : ""} d="M4 7 10 3v8z" />)}
+        {style === "start-dot" || style === "start-dot-outline" ? <circle className={style === "start-dot-outline" ? "is-outline" : ""} cx="5" cy="7" r="2.5" /> : null}
+        {style === "start-bar" ? <path d="M5 3v8" /> : null}
+        {style === "start-diamond" ? <path d="m5 3 3 4-3 4-3-4z" /> : null}
+        {style === "start-tail" ? <path d="m8 3-4 4 4 4" /> : null}
+      </svg>
+      <span>{label}</span>
+    </span>
+  );
+}
+
 function PaletteGroup({
   label,
   colors,
@@ -246,7 +266,10 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
           <Choice
             label="样式"
             value={settings.arrowStyle}
-            options={[...ARROW_STYLE_OPTIONS]}
+            options={ARROW_STYLE_OPTIONS.map((option) => ({
+              ...option,
+              label: <ArrowStylePreview style={option.value} label={option.label} />,
+            }))}
             name="arrow-style"
             change={(value) => onChange({ arrowStyle: value as ArrowStyle })}
             popup={popup}

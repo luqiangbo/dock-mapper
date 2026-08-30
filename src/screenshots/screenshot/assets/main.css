@@ -234,10 +234,9 @@ body,
   z-index: 21;
   display: flex;
   align-items: center;
-  width: 184px;
-  height: 40px;
-  gap: 4px;
-  padding: 4px 6px;
+  width: 370px;
+  height: 38px;
+  padding: 3px 4px;
   border: 1px solid var(--screenshot-glass-border);
   border-radius: 6px;
   background: var(--screenshot-glass);
@@ -251,16 +250,66 @@ body,
 .selection-size-panel label {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 0;
 }
 
-.selection-size-panel label > span {
-  color: color-mix(in srgb, var(--screenshot-on-glass) 76%, transparent);
-  white-space: nowrap;
+.selection-size-panel__row,
+.selection-size-panel__controls,
+.selection-size-panel__dimensions {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.selection-size-panel__row {
+  justify-content: flex-start;
+  width: 100%;
+  gap: 2px;
+}
+
+.selection-size-panel__controls,
+.selection-size-panel__dimensions {
+  gap: 1px;
+}
+
+.selection-size-panel__controls > .ant-select:first-child {
+  flex: 0 0 65px;
+  width: 65px;
+}
+
+.selection-size-panel__controls > .ant-select:nth-child(2) {
+  flex: 0 0 65px;
+  width: 65px;
+}
+
+.selection-size-panel__dimensions {
+  flex: 0 0 auto;
+}
+
+.selection-size-panel__custom-ratio {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 1px;
+}
+
+.selection-size-panel__custom-ratio .ant-input-number {
+  width: 30px;
+}
+
+.selection-size-panel .ant-select-selector {
+  border-color: color-mix(in srgb, var(--screenshot-glass-border) 78%, transparent) !important;
+  background: rgba(15, 23, 42, 0.25) !important;
+}
+
+.selection-size-panel .ant-select-selection-item {
+  color: var(--screenshot-on-glass) !important;
+  font-family: inherit;
+  font-size: 11px;
 }
 
 .selection-size-panel .ant-input-number {
-  width: 59px;
+  width: 70px;
   min-width: 0;
   border-color: color-mix(in srgb, var(--screenshot-glass-border) 78%, transparent);
   background: rgba(15, 23, 42, 0.25);
@@ -285,6 +334,7 @@ body,
 
 .selection-size-panel--readonly {
   justify-content: center;
+  align-items: center;
   pointer-events: none;
   font-size: 11.5px;
 }
@@ -615,6 +665,32 @@ body,
 
 .tool-options__hint {
   opacity: 0.72;
+}
+
+.arrow-style-option {
+  display: inline-flex;
+  align-items: center;
+  min-width: 126px;
+  gap: 7px;
+}
+
+.arrow-style-option svg {
+  width: 44px;
+  height: 14px;
+  overflow: visible;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.arrow-style-option path:not(.is-outline),
+.arrow-style-option circle:not(.is-outline) {
+  fill: currentColor;
+}
+
+.arrow-style-option .is-outline {
+  fill: none;
 }
 
 .palette-strip {
@@ -1145,36 +1221,9 @@ body,
   z-index: 2;
 }
 
-.pin-resize {
-  position: absolute;
-  right: 2px;
-  bottom: 2px;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: nwse-resize;
-  opacity: 0;
-  z-index: 2;
-}
-
-.pin-resize::after {
-  content: "";
-  position: absolute;
-  right: 2px;
-  bottom: 2px;
-  width: 8px;
-  height: 8px;
-  border-right: 2px solid rgba(255, 255, 255, 0.9);
-  border-bottom: 2px solid rgba(255, 255, 255, 0.9);
-  filter: drop-shadow(0 1px 2px rgba(10, 12, 24, 0.7));
-}
-
 .pin-wrap:hover .pin-close,
 .pin-close:focus-visible,
-.pin-wrap:hover .pin-resize,
-.pin-resize:focus-visible {
+.pin-close:focus-visible {
   opacity: 1;
 }
 

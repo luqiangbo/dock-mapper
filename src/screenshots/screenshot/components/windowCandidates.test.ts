@@ -11,4 +11,12 @@ describe("window candidate selection", () => {
     expect(findWindowCandidate(candidates, 75, 75)?.id).toBe("front");
     expect(findWindowCandidate(candidates, -1, -1)).toBeUndefined();
   });
+
+  it("keeps the first candidate when overlapping windows share a z-order", () => {
+    const candidates: WindowCandidate[] = [
+      { id: "first", x: 0, y: 0, width: 200, height: 200, zIndex: 1 },
+      { id: "second", x: 20, y: 20, width: 160, height: 160, zIndex: 1 },
+    ];
+    expect(findWindowCandidate(candidates, 80, 80)?.id).toBe("first");
+  });
 });
