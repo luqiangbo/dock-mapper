@@ -7,7 +7,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import type { ScreenshotConfig } from "../../../types";
+import type { ColorPaletteConfig, ScreenshotConfig } from "../../../types";
 import { STROKE_COLORS, type AnnotTool } from "./AnnotationToolbar";
 import {
   ARROW_STYLE_OPTIONS,
@@ -22,6 +22,10 @@ interface Props {
   settings: ToolSettings;
   onChange: (changes: Partial<ToolSettings>) => void;
   onPopupOpenChange: (open: boolean) => void;
+  palette?: ColorPaletteConfig;
+  paletteBusy?: boolean;
+  onPaletteCopy?: (color: string) => void;
+  onPaletteFavorite?: (color: string, favorite: boolean) => void;
   style?: CSSProperties;
 }
 const WIDTHS = [2, 3, 4, 6, 8].map((value) => ({ value, label: `${value}px` }));
@@ -51,13 +55,24 @@ function Color({
   name,
   change,
   popup,
+  palette,
 }: {
   label: string;
   value: string;
   name: string;
   change: (value: string) => void;
   popup: (key: string, open: boolean) => void;
+  palette?: ColorPaletteConfig;
 }) {
+  const presets = [
+    PRESETS[0],
+    ...(palette?.favorites.length
+      ? [{ label: "收藏", colors: palette.favorites.slice(0, 5) }]
+      : []),
+    ...(palette?.recent.length
+      ? [{ label: "最近吸取", colors: palette.recent.slice(0, 5) }]
+      : []),
+  ];
   return (
     <Group label={label}>
       <ColorPicker
@@ -65,7 +80,7 @@ function Color({
         value={value}
         disabledAlpha
         disabledFormat
-        presets={PRESETS}
+        presets={presets}
         placement="bottom"
         onOpenChange={(open) => popup(name, open)}
         onChange={(color) => change(normalizeHexColor(color.toHexString()))}
@@ -101,8 +116,72 @@ function Choice({
     </Group>
   );
 }
+
+function PaletteGroup({
+  label,
+  colors,
+  favorites,
+  busy,
+  onCopy,
+  onFavorite,
+}: {
+  label: string;
+  colors: string[];
+  favorites: string[];
+  busy?: boolean;
+  onCopy?: (color: string) => void;
+  onFavorite?: (color: string, favorite: boolean) => void;
+}): React.JSX.Element {
+  return (
+    <Group label={label}>
+      <span className="palette-strip" aria-label={`${label}颜色`}>
+        {colors.length === 0 ? (
+          <span className="palette-strip__empty">—</span>
+        ) : (
+          colors.slice(0, 5).map((color) => {
+            const saved = favorites.includes(color);
+            return (
+              <span className="palette-strip__item" key={color}>
+                <button
+                  type="button"
+                  className="palette-strip__swatch"
+                  style={{ backgroundColor: color }}
+                  title={`复制 ${color}`}
+                  aria-label={`复制 ${color}`}
+                  disabled={busy}
+                  onClick={() => onCopy?.(color)}
+                />
+                <button
+                  type="button"
+                  className={`palette-strip__star${saved ? " is-saved" : ""}`}
+                  title={saved ? "取消收藏" : "收藏颜色"}
+                  aria-label={saved ? `取消收藏 ${color}` : `收藏 ${color}`}
+                  disabled={busy}
+                  onClick={() => onFavorite?.(color, !saved)}
+                >
+                  {saved ? "★" : "☆"}
+                </button>
+              </span>
+            );
+          })
+        )}
+      </span>
+    </Group>
+  );
+}
+
 const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar(
-  { tool, settings, onChange, onPopupOpenChange, style },
+  {
+    tool,
+    settings,
+    onChange,
+    onPopupOpenChange,
+    palette = { recent: [], favorites: [] },
+    paletteBusy,
+    onPaletteCopy,
+    onPaletteFavorite,
+    style,
+  },
   ref,
 ) {
   const opened = useRef(new Set<string>());
@@ -122,6 +201,7 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
       name={`${tool}-color`}
       change={(strokeColor) => onChange({ strokeColor })}
       popup={popup}
+      palette={palette}
     />
   );
   const width = (
@@ -141,7 +221,7 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
   return (
     <div
       ref={ref}
-      className="tool-options"
+      className={`tool-options${tool === "picker" ? " tool-options--picker" : ""}`}
       style={style}
       onPointerDown={(e) => e.stopPropagation()}
     >
@@ -279,6 +359,7 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             name="text-color"
             change={(color) => onChange({ textStyle: { ...settings.textStyle, color } })}
             popup={popup}
+            palette={palette}
           />
           <Choice
             label="描边"
@@ -302,21 +383,38 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
                 onChange({ textStyle: { ...settings.textStyle, strokeColor } })
               }
               popup={popup}
+              palette={palette}
             />
           )}
         </>
       )}
       {tool === "picker" && (
-        <Choice
-          label="复制格式"
-          value={settings.pickerFormat}
-          options={FORMATS}
-          name="picker-format"
-          change={(value) =>
-            onChange({ pickerFormat: value as ScreenshotConfig["color_copy_format"] })
-          }
-          popup={popup}
-        />
+        <>
+          <Choice
+            label="复制格式"
+            value={settings.pickerFormat}
+            options={FORMATS}
+            name="picker-format"
+            change={(value) => onChange({ pickerFormat: value as ScreenshotConfig["color_copy_format"] })}
+            popup={popup}
+          />
+          <PaletteGroup
+            label="收藏"
+            colors={palette.favorites}
+            favorites={palette.favorites}
+            busy={paletteBusy}
+            onCopy={onPaletteCopy}
+            onFavorite={onPaletteFavorite}
+          />
+          <PaletteGroup
+            label="最近"
+            colors={palette.recent}
+            favorites={palette.favorites}
+            busy={paletteBusy}
+            onCopy={onPaletteCopy}
+            onFavorite={onPaletteFavorite}
+          />
+        </>
       )}
       {tool === "number" && (
         <>
@@ -328,6 +426,7 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
               onChange({ numberStyle: { ...settings.numberStyle, backgroundColor } })
             }
             popup={popup}
+            palette={palette}
           />
           <Color
             label="文字"
@@ -337,6 +436,7 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
               onChange({ numberStyle: { ...settings.numberStyle, textColor } })
             }
             popup={popup}
+            palette={palette}
           />
           <Choice
             label="尺寸"

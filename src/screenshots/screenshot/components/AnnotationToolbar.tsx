@@ -54,7 +54,6 @@ interface AnnotationToolbarProps {
   confirmDisabled?: boolean;
   ocrDisabled?: boolean;
   ocrRunning?: boolean;
-  pickerColor?: string;
   onToolChange: (tool: AnnotTool) => void;
   onUndo: () => void;
   onRedo?: () => void;
@@ -79,7 +78,6 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
       confirmDisabled,
       ocrDisabled,
       ocrRunning,
-      pickerColor,
       onToolChange,
       onUndo,
       onRedo,
@@ -208,9 +206,6 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
             >
               <ListOrdered {...iconProps} />
             </TooltipButton>
-            {pickerColor && (
-              <span className="picker-color-chip" style={{ backgroundColor: pickerColor }} />
-            )}
           </div>
 
           {!compact && (

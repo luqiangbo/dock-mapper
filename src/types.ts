@@ -1,5 +1,7 @@
 export type KeyCode = string & { readonly __keyCode: unique symbol };
 export type MemoryScheme = "capsule" | "ring" | "gauge";
+export type UsageScheme = MemoryScheme;
+export type WidgetMetricKind = "network" | "cpu" | "memory" | "battery";
 export type ThemeMode = "light" | "dark" | "system";
 
 export interface KeyMapping {
@@ -30,6 +32,7 @@ export interface ScreenshotConfig {
   pin_shortcut: string;
   history_shortcut: string;
   toggle_pin_shortcut: string;
+  quick_ocr_shortcut: string;
   save_directory: string | null;
   filename_prefix: string;
   color_copy_format: "hex" | "rgb" | "hsl" | "hsv" | "css";
@@ -37,8 +40,20 @@ export interface ScreenshotConfig {
 
 export interface WidgetConfig {
   memory_scheme: MemoryScheme;
+  metrics: WidgetMetricConfig[];
   refresh_interval_secs: number;
   network_interface: string | null;
+}
+
+export interface WidgetMetricConfig {
+  kind: WidgetMetricKind;
+  enabled: boolean;
+  usage_scheme: UsageScheme;
+}
+
+export interface ColorPaletteConfig {
+  recent: string[];
+  favorites: string[];
 }
 
 export interface SysStatus {
@@ -46,6 +61,8 @@ export interface SysStatus {
   download_speed: number;
   memory_usage: number;
   network_available: boolean;
+  cpu_usage?: number;
+  battery?: { percentage: number; charging: boolean } | null;
 }
 
 export interface RuntimeHealth {
@@ -63,7 +80,7 @@ export interface RuntimeHealth {
 }
 
 export interface ShortcutRuntimeStatus {
-  actionId: "capture" | "pin_recent" | "open_history" | "toggle_latest_pin";
+  actionId: "capture" | "pin_recent" | "open_history" | "toggle_latest_pin" | "quick_ocr";
   action: string;
   shortcut: string;
   registered: boolean;

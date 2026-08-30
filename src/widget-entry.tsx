@@ -3,9 +3,14 @@ import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { CaretDownFilled, CaretUpFilled } from "@ant-design/icons";
-import type { MemoryScheme, SysStatus, WidgetConfig } from "./types";
+import type { MemoryScheme, SysStatus, WidgetConfig, WidgetMetricConfig } from "./types";
 import { formatSpeedParts } from "./utils/format";
 import "./widget.scss";
+
+const FALLBACK_METRICS: WidgetMetricConfig[] = [
+  { kind: "network", enabled: true, usage_scheme: "capsule" },
+  { kind: "memory", enabled: true, usage_scheme: "capsule" },
+];
 
 function memoryColor(usage: number): string {
   if (usage < 70) return "#35c985";
@@ -13,14 +18,14 @@ function memoryColor(usage: number): string {
   return "#ff5d67";
 }
 
-function CapsuleIndicator({ usage }: { usage: number }) {
+function CapsuleIndicator({ usage, label = "RAM" }: { usage: number; label?: string }) {
   const color = memoryColor(usage);
   const urgency = usage >= 90 ? " led-flash" : usage >= 70 ? " led-breathe" : "";
   return (
     <div className="capsule-indicator">
       <span className={`led-dot${urgency}`} style={{ "--led-color": color } as CSSProperties} />
       <span className="capsule-label" aria-label={`内存占用 ${usage.toFixed(0)}%`}>
-        RAM {usage.toFixed(0)}%
+        {label} {usage.toFixed(0)}%
       </span>
     </div>
   );
@@ -69,10 +74,10 @@ function GaugeIndicator({ usage }: { usage: number }) {
   );
 }
 
-function MemoryIndicator({ usage, scheme }: { usage: number; scheme: MemoryScheme }) {
+function MemoryIndicator({ usage, scheme, label }: { usage: number; scheme: MemoryScheme; label?: string }) {
   if (scheme === "ring") return <RingIndicator usage={usage} />;
   if (scheme === "gauge") return <GaugeIndicator usage={usage} />;
-  return <CapsuleIndicator usage={usage} />;
+  return <CapsuleIndicator usage={usage} label={label} />;
 }
 
 function TaskbarWidget() {
@@ -82,27 +87,27 @@ function TaskbarWidget() {
     memory_usage: 0,
     network_available: true,
   });
-  const [scheme, setScheme] = useState<MemoryScheme>("capsule");
+  const [metrics, setMetrics] = useState<WidgetMetricConfig[]>(FALLBACK_METRICS);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const syncWidth = useCallback(() => {
     if (containerRef.current) {
       void invoke("sync_widget_dynamic_width", {
-        width: containerRef.current.scrollWidth,
-      });
+        width: Math.ceil(containerRef.current.getBoundingClientRect().width),
+      }).catch((error) => console.error("任务栏挂件宽度同步失败", error));
     }
   }, []);
 
   useEffect(() => {
     void invoke<WidgetConfig>("get_widget_config")
-      .then((config) => setScheme(config.memory_scheme))
-      .catch(() => undefined);
+      .then((config) => setMetrics(config.metrics))
+      .catch((error) => console.error("任务栏挂件配置读取失败", error));
 
     const statusListener = listen<SysStatus>("sys-status-update", (event) => {
       setStatus(event.payload);
     });
     const configListener = listen<WidgetConfig>("widget-config-changed", (event) => {
-      setScheme(event.payload.memory_scheme);
+      setMetrics(event.payload.metrics);
     });
 
     const observer = new ResizeObserver(syncWidth);
@@ -128,25 +133,24 @@ function TaskbarWidget() {
     ? formatSpeedParts(status.download_speed)
     : { value: "—", unit: "" };
 
+  const enabled = metrics.filter((metric) => metric.enabled).filter((metric) => {
+    if (metric.kind === "battery") return status.battery != null;
+    if (metric.kind === "cpu") return status.cpu_usage != null;
+    return true;
+  });
   return (
     <div className="widget-container" ref={containerRef}>
-      <div
-        className="net-speed"
-        aria-label={status.network_available ? "实时网速" : "所选网卡不可用"}
-        title={status.network_available ? undefined : "所选网卡不可用"}
-      >
-        <div className="speed-row">
-          <CaretUpFilled className="speed-arrow up-arrow" aria-hidden="true" />
-          <span className="speed-value">{upload.value}</span>
-          <span className="speed-unit">{upload.unit}</span>
-        </div>
-        <div className="speed-row">
-          <CaretDownFilled className="speed-arrow down-arrow" aria-hidden="true" />
-          <span className="speed-value">{download.value}</span>
-          <span className="speed-unit">{download.unit}</span>
-        </div>
-      </div>
-      <MemoryIndicator usage={status.memory_usage} scheme={scheme} />
+      {enabled.map((metric) => {
+        if (metric.kind === "network") {
+          return <div key={metric.kind} className="net-speed" aria-label="实时网速">
+            <div className="speed-row"><CaretUpFilled className="speed-arrow up-arrow" aria-hidden="true" /><span className="speed-value">{upload.value}</span><span className="speed-unit">{upload.unit}</span></div>
+            <div className="speed-row"><CaretDownFilled className="speed-arrow down-arrow" aria-hidden="true" /><span className="speed-value">{download.value}</span><span className="speed-unit">{download.unit}</span></div>
+          </div>;
+        }
+        const usage = metric.kind === "memory" ? status.memory_usage : metric.kind === "cpu" ? status.cpu_usage ?? 0 : status.battery?.percentage ?? 0;
+        const label = metric.kind === "memory" ? "RAM" : metric.kind === "cpu" ? "CPU" : "BAT";
+        return <MemoryIndicator key={metric.kind} usage={usage} scheme={metric.usage_scheme} label={label} />;
+      })}
     </div>
   );
 }

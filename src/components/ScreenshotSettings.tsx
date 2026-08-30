@@ -150,6 +150,27 @@ export default function ScreenshotSettings({
                         <div className={styles.shortcutList}>
                           <div className={styles.shortcutItem}>
                             <div className={styles.shortcutCopy}>
+                              <Text>快速 OCR</Text>
+                              <span className={styles.description}>框选后松开鼠标即识别并复制文本</span>
+                            </div>
+                            <div className={styles.shortcutBinding}>
+                              {shortcutStatus("quick_ocr")}
+                              <Input
+                                aria-label="快速 OCR 快捷键"
+                                value={config.quick_ocr_shortcut}
+                                readOnly
+                                disabled={saving}
+                                className={styles.shortcutInput}
+                                onKeyDown={(event) => {
+                                  event.preventDefault();
+                                  const quick_ocr_shortcut = shortcutFromKeyEvent(event.nativeEvent);
+                                  if (quick_ocr_shortcut) void save({ ...config, quick_ocr_shortcut });
+                                }}
+                              />
+                            </div>
+                          </div>
+                          <div className={styles.shortcutItem}>
+                            <div className={styles.shortcutCopy}>
                               <Text>区域截图</Text>
                               <span className={styles.description}>唤起截图浮层并选择截图区域</span>
                             </div>

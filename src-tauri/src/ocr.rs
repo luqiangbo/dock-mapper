@@ -101,7 +101,7 @@ fn validate_png(png: Vec<u8>) -> Result<Vec<u8>, String> {
     Ok(png)
 }
 
-fn resize_for_onnx(image: ocr_image::DynamicImage) -> ocr_image::DynamicImage {
+fn resize_for_onnx(image: image::DynamicImage) -> image::DynamicImage {
     let longest = image.width().max(image.height());
     if longest <= MAX_IMAGE_EDGE {
         return image;
@@ -113,7 +113,7 @@ fn resize_for_onnx(image: ocr_image::DynamicImage) -> ocr_image::DynamicImage {
     image.resize(
         (image.width() as f64 * scale).round().max(1.0) as u32,
         (image.height() as f64 * scale).round().max(1.0) as u32,
-        ocr_image::imageops::FilterType::Lanczos3,
+        image::imageops::FilterType::Lanczos3,
     )
 }
 
@@ -211,7 +211,7 @@ fn recognize_with_engine(engine: &mut OcrEngine, png: Vec<u8>) -> Result<OcrText
     let png = validate_png(png)?;
     let started = Instant::now();
     let decode_started = Instant::now();
-    let image = ocr_image::load_from_memory(&png)
+    let image = image::load_from_memory(&png)
         .map_err(|error| format!("读取 ONNX OCR 图片失败：{error}"))?;
     let original_width = image.width();
     let original_height = image.height();
@@ -270,10 +270,13 @@ fn recognize_with_engine(engine: &mut OcrEngine, png: Vec<u8>) -> Result<OcrText
     })
 }
 
-struct OcrJob {
+enum OcrJob {
+    Recognize {
     generation: u64,
     png: Vec<u8>,
     reply: oneshot::Sender<Result<OcrTextResult, String>>,
+    },
+    Prepare,
 }
 
 pub struct OcrService {
@@ -294,33 +297,40 @@ impl OcrService {
             .name("dockmapper-ocr".into())
             .spawn(move || {
                 let mut engine: Option<Result<OcrEngine, String>> = None;
+                let mut last_used = Instant::now();
                 loop {
-                    let job = match receiver.recv_timeout(Duration::from_secs(2)) {
+                    let job = match receiver.recv_timeout(Duration::from_secs(30)) {
                         Ok(job) => job,
                         Err(RecvTimeoutError::Timeout) => {
-                            if engine.is_none() {
-                                let initialized = Instant::now();
-                                engine = Some(load_engine(&root));
-                                tracing::info!(
-                                    target: "dock_mapper::ocr",
-                                    elapsed_ms = initialized.elapsed().as_millis(),
-                                    success = engine.as_ref().is_some_and(Result::is_ok),
-                                    "OCR engine idle prewarm finished"
-                                );
+                            if engine.is_some() && last_used.elapsed() >= Duration::from_secs(600) {
+                                engine = None;
+                                tracing::info!(target: "dock_mapper::ocr", "OCR engine released after inactivity");
                             }
                             continue;
                         }
                         Err(RecvTimeoutError::Disconnected) => break,
                     };
-                    worker_queued.fetch_sub(1, Ordering::AcqRel);
+                    if matches!(&job, OcrJob::Recognize { .. }) {
+                        worker_queued.fetch_sub(1, Ordering::AcqRel);
+                    }
+                    if matches!(&job, OcrJob::Prepare) {
+                        if engine.is_none() {
+                            let initialized = Instant::now();
+                            engine = Some(load_engine(&root));
+                            tracing::info!(target: "dock_mapper::ocr", elapsed_ms = initialized.elapsed().as_millis(), success = engine.as_ref().is_some_and(Result::is_ok), "OCR engine prepared for quick OCR");
+                        }
+                        last_used = Instant::now();
+                        continue;
+                    }
+                    let OcrJob::Recognize { generation, png, reply } = job else { unreachable!() };
                     let span = tracing::info_span!(
                         target: "dock_mapper::ocr",
                         "ocr_job",
-                        generation = job.generation
+                        generation
                     );
                     let _entered = span.enter();
-                    if worker_generation.load(Ordering::Acquire) != job.generation {
-                        let _ = job.reply.send(Err("OCR 请求已取消".into()));
+                    if worker_generation.load(Ordering::Acquire) != generation {
+                        let _ = reply.send(Err("OCR 请求已取消".into()));
                         continue;
                     }
                     if engine.is_none() {
@@ -334,14 +344,15 @@ impl OcrService {
                         );
                     }
                     let result = match engine.as_mut() {
-                        Some(Ok(engine)) => recognize_with_engine(engine, job.png),
+                        Some(Ok(engine)) => recognize_with_engine(engine, png),
                         Some(Err(error)) => Err(error.clone()),
                         None => Err("OCR 引擎状态异常".into()),
                     };
-                    if worker_generation.load(Ordering::Acquire) == job.generation {
-                        let _ = job.reply.send(result);
+                    last_used = Instant::now();
+                    if worker_generation.load(Ordering::Acquire) == generation {
+                        let _ = reply.send(result);
                     } else {
-                        let _ = job.reply.send(Err("OCR 请求已取消".into()));
+                        let _ = reply.send(Err("OCR 请求已取消".into()));
                     }
                 }
             })
@@ -357,7 +368,7 @@ impl OcrService {
         let generation = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
         let (reply, response) = oneshot::channel();
         self.queued.fetch_add(1, Ordering::AcqRel);
-        if let Err(error) = self.sender.try_send(OcrJob {
+        if let Err(error) = self.sender.try_send(OcrJob::Recognize {
             generation,
             png,
             reply,
@@ -379,6 +390,12 @@ impl OcrService {
             .map_err(|_| "OCR 工作线程已停止".to_string())?
     }
 
+    pub fn prepare(&self) {
+        // Best effort: an active recognition has priority and a full queue
+        // must never make the shortcut fail before the user chooses a region.
+        let _ = self.sender.try_send(OcrJob::Prepare);
+    }
+
     pub fn cancel(&self) {
         self.generation.fetch_add(1, Ordering::AcqRel);
     }
@@ -386,7 +403,7 @@ impl OcrService {
 
 pub fn decode_qr(png: Vec<u8>) -> Result<QrDecodeResult, String> {
     let png = validate_png(png)?;
-    let image = ocr_image::load_from_memory(&png)
+    let image = image::load_from_memory(&png)
         .map_err(|error| format!("读取二维码图片失败：{error}"))?
         .to_luma8();
     let mut decoder = quircs::Quirc::default();
@@ -450,10 +467,10 @@ mod tests {
     fn model_benchmark_reports_warm_inference_time() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/ocr");
         let mut engine = load_engine(&root).expect("bundled ONNX model");
-        let image = ocr_image::DynamicImage::new_rgb8(640, 240);
+        let image = image::DynamicImage::new_rgb8(640, 240);
         let mut png = std::io::Cursor::new(Vec::new());
         image
-            .write_to(&mut png, ocr_image::ImageFormat::Png)
+            .write_to(&mut png, image::ImageFormat::Png)
             .expect("encode fixture");
         let started = Instant::now();
         let _ = recognize_with_engine(&mut engine, png.into_inner()).expect("benchmark OCR");
@@ -490,7 +507,7 @@ mod tests {
 
     #[test]
     fn keeps_thin_high_dpi_selections_at_their_original_scale() {
-        let image = ocr_image::DynamicImage::new_rgb8(4_096, 120);
+        let image = image::DynamicImage::new_rgb8(4_096, 120);
         let resized = resize_for_onnx(image);
         assert_eq!((resized.width(), resized.height()), (4_096, 120));
     }

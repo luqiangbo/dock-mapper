@@ -11,9 +11,18 @@ use windows::Win32::UI::WindowsAndMessaging::{
 // ─── Constants (logical pixels) ─────────────────────────────────────────
 const WIDGET_HEIGHT_LOGICAL: f64 = 40.0;
 const PADDING_LOGICAL: f64 = 10.0;
+const MIN_WIDTH_LOGICAL: f64 = 48.0;
 
 /// Initial default width used before the frontend reports its real size.
 const DEFAULT_WIDTH_LOGICAL: f64 = 180.0;
+
+fn normalize_widget_width(width: f64) -> f64 {
+    if width.is_finite() {
+        width.clamp(MIN_WIDTH_LOGICAL, 600.0)
+    } else {
+        DEFAULT_WIDTH_LOGICAL
+    }
+}
 
 /// Embeds the widget webview window into the Windows taskbar.
 pub fn embed_widget_to_taskbar(window: &WebviewWindow) {
@@ -159,11 +168,7 @@ unsafe fn position_widget_dpi_aware(
 /// Resizes the window to exactly match the content width and
 /// re-anchors the X position.
 pub fn sync_dynamic_width(app: &tauri::AppHandle, width: f64) -> f64 {
-    let clamped = if width.is_finite() {
-        width.clamp(80.0, 600.0)
-    } else {
-        DEFAULT_WIDTH_LOGICAL
-    };
+    let clamped = normalize_widget_width(width);
 
     if let Some(widget) = app.get_webview_window("taskbar_widget") {
         // 1. Resize to exact content width
@@ -242,5 +247,12 @@ mod tests {
         assert!(!needs_reembed(Some(taskbar), taskbar));
         assert!(needs_reembed(Some(previous_taskbar), taskbar));
         assert!(needs_reembed(None, taskbar));
+    }
+
+    #[test]
+    fn dynamic_width_keeps_compact_metrics_visible_without_reserving_the_old_empty_gap() {
+        assert_eq!(normalize_widget_width(26.0), MIN_WIDTH_LOGICAL);
+        assert_eq!(normalize_widget_width(132.0), 132.0);
+        assert_eq!(normalize_widget_width(f64::NAN), DEFAULT_WIDTH_LOGICAL);
     }
 }

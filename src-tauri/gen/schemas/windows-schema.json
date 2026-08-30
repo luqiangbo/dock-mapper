@@ -363,6 +363,12 @@
           "markdownDescription": "Enables the choose_screenshot_save_directory command without any pre-configured scope."
         },
         {
+          "description": "Enables the clear_recent_palette command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-recent-palette",
+          "markdownDescription": "Enables the clear_recent_palette command without any pre-configured scope."
+        },
+        {
           "description": "Enables the close_overlay command without any pre-configured scope.",
           "type": "string",
           "const": "allow-close-overlay",
@@ -421,6 +427,12 @@
           "type": "string",
           "const": "allow-export-diagnostics",
           "markdownDescription": "Enables the export_diagnostics command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_color_palette command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-color-palette",
+          "markdownDescription": "Enables the get_color_palette command without any pre-configured scope."
         },
         {
           "description": "Enables the get_full_screenshot command without any pre-configured scope.",
@@ -549,6 +561,12 @@
           "markdownDescription": "Enables the recognize_selection command without any pre-configured scope."
         },
         {
+          "description": "Enables the record_palette_color command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-record-palette-color",
+          "markdownDescription": "Enables the record_palette_color command without any pre-configured scope."
+        },
+        {
           "description": "Enables the refresh_widget_position command without any pre-configured scope.",
           "type": "string",
           "const": "allow-refresh-widget-position",
@@ -601,6 +619,12 @@
           "type": "string",
           "const": "allow-set-minimize-to-tray",
           "markdownDescription": "Enables the set_minimize_to_tray command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_palette_favorite command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-palette-favorite",
+          "markdownDescription": "Enables the set_palette_favorite command without any pre-configured scope."
         },
         {
           "description": "Enables the set_screenshot_history_favorite command without any pre-configured scope.",
@@ -675,6 +699,12 @@
           "markdownDescription": "Denies the choose_screenshot_save_directory command without any pre-configured scope."
         },
         {
+          "description": "Denies the clear_recent_palette command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-recent-palette",
+          "markdownDescription": "Denies the clear_recent_palette command without any pre-configured scope."
+        },
+        {
           "description": "Denies the close_overlay command without any pre-configured scope.",
           "type": "string",
           "const": "deny-close-overlay",
@@ -733,6 +763,12 @@
           "type": "string",
           "const": "deny-export-diagnostics",
           "markdownDescription": "Denies the export_diagnostics command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_color_palette command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-color-palette",
+          "markdownDescription": "Denies the get_color_palette command without any pre-configured scope."
         },
         {
           "description": "Denies the get_full_screenshot command without any pre-configured scope.",
@@ -861,6 +897,12 @@
           "markdownDescription": "Denies the recognize_selection command without any pre-configured scope."
         },
         {
+          "description": "Denies the record_palette_color command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-record-palette-color",
+          "markdownDescription": "Denies the record_palette_color command without any pre-configured scope."
+        },
+        {
           "description": "Denies the refresh_widget_position command without any pre-configured scope.",
           "type": "string",
           "const": "deny-refresh-widget-position",
@@ -913,6 +955,12 @@
           "type": "string",
           "const": "deny-set-minimize-to-tray",
           "markdownDescription": "Denies the set_minimize_to_tray command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_palette_favorite command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-palette-favorite",
+          "markdownDescription": "Denies the set_palette_favorite command without any pre-configured scope."
         },
         {
           "description": "Denies the set_screenshot_history_favorite command without any pre-configured scope.",

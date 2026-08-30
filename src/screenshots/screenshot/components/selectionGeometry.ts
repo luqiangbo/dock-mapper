@@ -1,6 +1,6 @@
 import type { Selection } from "../hooks/useCaptureLifecycle";
 
-const MIN_SIZE = 8;
+export const MIN_SELECTION_SIZE = 8;
 
 export const RESIZE_HANDLES = ["nw", "n", "ne", "w", "e", "sw", "s", "se"] as const;
 export type ResizeHandle = (typeof RESIZE_HANDLES)[number];
@@ -81,15 +81,19 @@ export function resizeRect(
   const bottom = origin.y + origin.height;
   let { x, y, width, height } = origin;
   if (handle.includes("w")) {
-    x = Math.max(0, Math.min(origin.x + dx, right - MIN_SIZE));
+    x = Math.max(0, Math.min(origin.x + dx, right - MIN_SELECTION_SIZE));
     width = right - x;
   }
-  if (handle.includes("e")) width = Math.max(MIN_SIZE, Math.min(right + dx, viewportWidth) - x);
+  if (handle.includes("e")) {
+    width = Math.max(MIN_SELECTION_SIZE, Math.min(right + dx, viewportWidth) - x);
+  }
   if (handle.includes("n")) {
-    y = Math.max(0, Math.min(origin.y + dy, bottom - MIN_SIZE));
+    y = Math.max(0, Math.min(origin.y + dy, bottom - MIN_SELECTION_SIZE));
     height = bottom - y;
   }
-  if (handle.includes("s")) height = Math.max(MIN_SIZE, Math.min(bottom + dy, viewportHeight) - y);
+  if (handle.includes("s")) {
+    height = Math.max(MIN_SELECTION_SIZE, Math.min(bottom + dy, viewportHeight) - y);
+  }
   return { x, y, width, height };
 }
 

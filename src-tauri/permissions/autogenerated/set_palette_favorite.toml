@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-palette-favorite"
+description = "Enables the set_palette_favorite command without any pre-configured scope."
+commands.allow = ["set_palette_favorite"]
+
+[[permission]]
+identifier = "deny-set-palette-favorite"
+description = "Denies the set_palette_favorite command without any pre-configured scope."
+commands.deny = ["set_palette_favorite"]

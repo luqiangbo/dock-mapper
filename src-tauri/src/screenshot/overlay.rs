@@ -115,20 +115,26 @@ pub(super) fn record_capture_timing(
 }
 
 pub(super) fn prewarm_overlay(app: &AppHandle) {
-    if let Ok(screens) = Screen::all() {
-        for screen in screens {
-            let info = screen.display_info;
-            let label = format!("overlay-{}", info.id);
+    if let Ok(monitors) = app.available_monitors() {
+        for monitor in monitors {
+            let position = monitor.position();
+            let size = monitor.size();
+            let scale = monitor.scale_factor().max(1.0);
+            let id = (position.x as u32).wrapping_mul(31)
+                ^ (position.y as u32).wrapping_mul(131)
+                ^ size.width.wrapping_mul(17)
+                ^ size.height;
+            let label = format!("overlay-{id}");
             if app.get_webview_window(&label).is_some() {
                 continue;
             }
             let result = build_overlay_window(
                 app,
                 &label,
-                info.x as f64,
-                info.y as f64,
-                info.width as f64,
-                info.height as f64,
+                position.x as f64 / scale,
+                position.y as f64 / scale,
+                size.width as f64 / scale,
+                size.height as f64 / scale,
             );
             if let Err(error) = result {
                 tracing::warn!(target: "dock_mapper::capture", %label, %error, "Unable to prewarm capture overlay");
@@ -136,21 +142,8 @@ pub(super) fn prewarm_overlay(app: &AppHandle) {
             }
             #[cfg(target_os = "windows")]
             if let Some(window) = app.get_webview_window(&label) {
-                if let Ok(monitors) = app.available_monitors() {
-                    if let Some(monitor) = monitors.into_iter().min_by(|left, right| {
-                        monitor_screen_score(&screen, left)
-                            .total_cmp(&monitor_screen_score(&screen, right))
-                    }) {
-                        let _ = window.set_position(tauri::PhysicalPosition::new(
-                            monitor.position().x,
-                            monitor.position().y,
-                        ));
-                        let _ = window.set_size(tauri::PhysicalSize::new(
-                            monitor.size().width,
-                            monitor.size().height,
-                        ));
-                    }
-                }
+                let _ = window.set_position(tauri::PhysicalPosition::new(position.x, position.y));
+                let _ = window.set_size(tauri::PhysicalSize::new(size.width, size.height));
             }
         }
     }
@@ -169,6 +162,14 @@ pub(super) fn show_capture_error(app: &AppHandle, detail: &str) {
 }
 
 pub(super) fn handle_start_capture(app: &AppHandle) {
+    handle_start_capture_with_mode(app, CaptureMode::Screenshot);
+}
+
+pub(super) fn handle_start_quick_ocr(app: &AppHandle) {
+    handle_start_capture_with_mode(app, CaptureMode::QuickOcr);
+}
+
+fn handle_start_capture_with_mode(app: &AppHandle, mode: CaptureMode) {
     let state = app.state::<AppState>();
     if state.capture_in_progress.swap(true, Ordering::SeqCst) {
         return;
@@ -190,7 +191,10 @@ pub(super) fn handle_start_capture(app: &AppHandle) {
         unsafe {
             let _ = windows::Win32::Graphics::Dwm::DwmFlush();
         }
-        let result = capture_active_screen(&worker_app);
+        let result = capture_active_screen(&worker_app).map(|mut capture| {
+            capture.mode = mode;
+            capture
+        });
         let native_ready_ms = started.elapsed().as_millis();
         let ui_app = worker_app.clone();
         if let Err(error) = worker_app.run_on_main_thread(move || {

@@ -24,7 +24,7 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
-pub use widget::{MemoryScheme, WidgetConfig};
+pub use widget::{MemoryScheme, UsageScheme, WidgetConfig, WidgetMetricConfig, WidgetMetricKind};
 pub use key_mapping::{ScancodeMapState, ScancodeMapStatus};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -716,6 +716,7 @@ fn reset_screenshot_shortcuts(
     next.pin_shortcut = defaults.pin_shortcut;
     next.history_shortcut = defaults.history_shortcut;
     next.toggle_pin_shortcut = defaults.toggle_pin_shortcut;
+    next.quick_ocr_shortcut = defaults.quick_ocr_shortcut;
     let mut next_config = previous_config.clone();
     next_config.screenshot_config = next.clone();
     let result = screenshot::replace_all_shortcuts(&app, &next).and_then(|()| {
@@ -743,6 +744,53 @@ async fn recognize_selection(
 ) -> Result<ocr::OcrTextResult, String> {
     let png = state.images.take(&image_id)?;
     service.recognize(png.as_ref().to_vec()).await
+}
+
+#[tauri::command]
+fn get_color_palette(state: State<'_, AppState>) -> Result<config::ColorPaletteConfig, String> {
+    state.config.lock().map(|config| config.color_palette.clone()).map_err(|_| "配置状态已损坏".to_string())
+}
+
+fn mutate_palette(
+    state: &AppState,
+    change: impl FnOnce(&mut config::ColorPaletteConfig) -> Result<(), String>,
+) -> Result<config::ColorPaletteConfig, String> {
+    let _mutation = state.mutation_lock.lock().map_err(|_| "配置写入锁已损坏".to_string())?;
+    let previous = state.config.lock().map_err(|_| "配置状态已损坏".to_string())?.clone();
+    let mut next = previous.clone();
+    change(&mut next.color_palette)?;
+    config::normalize_palette(&mut next.color_palette);
+    config::save(&state.config_path, &next)?;
+    *state.config.lock().map_err(|_| "配置状态已损坏".to_string())? = next.clone();
+    Ok(next.color_palette)
+}
+
+#[tauri::command]
+fn record_palette_color(app: AppHandle, state: State<'_, AppState>, color: String) -> Result<config::ColorPaletteConfig, String> {
+    let palette = mutate_palette(&state, |palette| {
+        config::record_palette_color(palette, &color)
+    })?;
+    let _ = app.emit("color-palette-changed", &palette);
+    Ok(palette)
+}
+
+#[tauri::command]
+fn set_palette_favorite(app: AppHandle, state: State<'_, AppState>, color: String, favorite: bool) -> Result<config::ColorPaletteConfig, String> {
+    let palette = mutate_palette(&state, |palette| {
+        config::set_palette_favorite(palette, &color, favorite)
+    })?;
+    let _ = app.emit("color-palette-changed", &palette);
+    Ok(palette)
+}
+
+#[tauri::command]
+fn clear_recent_palette(app: AppHandle, state: State<'_, AppState>) -> Result<config::ColorPaletteConfig, String> {
+    let palette = mutate_palette(&state, |palette| {
+        config::clear_recent_palette(palette);
+        Ok(())
+    })?;
+    let _ = app.emit("color-palette-changed", &palette);
+    Ok(palette)
 }
 
 #[tauri::command]
@@ -910,6 +958,7 @@ pub fn run() {
             pin_screenshot_history,
             runtime_health::get_runtime_health,
             screenshot::start_screenshot,
+            screenshot::start_quick_ocr,
             screenshot::close_overlay,
             screenshot::show_capture_overlay,
             screenshot::overlay_ready,
@@ -936,6 +985,10 @@ pub fn run() {
             choose_screenshot_save_directory,
             export_diagnostics,
             recognize_selection,
+            get_color_palette,
+            record_palette_color,
+            set_palette_favorite,
+            clear_recent_palette,
             decode_qr_selection,
             widget::refresh_widget_position,
             widget::get_widget_config,

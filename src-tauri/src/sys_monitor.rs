@@ -9,6 +9,14 @@ pub struct SysStatusPayload {
     download_speed: f64,
     memory_usage: f32,
     network_available: bool,
+    cpu_usage: Option<f32>,
+    battery: Option<BatteryStatus>,
+}
+
+#[derive(Clone, serde::Serialize)]
+pub struct BatteryStatus {
+    percentage: f32,
+    charging: bool,
 }
 
 #[derive(Clone)]
@@ -70,6 +78,7 @@ pub fn start_sys_monitor(app: AppHandle) {
             }
             networks.refresh();
             sys.refresh_memory();
+            sys.refresh_cpu_usage();
             let selected = current.network_interface.as_deref();
             let network_available = selected.map_or_else(
                 || networks.iter().any(|(name, _)| !is_virtual_adapter(name)),
@@ -105,6 +114,8 @@ pub fn start_sys_monitor(app: AppHandle) {
                     0.0
                 },
                 network_available,
+                cpu_usage: Some(sys.global_cpu_info().cpu_usage()),
+                battery: battery_status(),
             };
 
             let widget_visible = emit_if_visible(&app, "taskbar_widget", payload.clone());
@@ -124,6 +135,20 @@ pub fn start_sys_monitor(app: AppHandle) {
         tracing::info!(target: "dock_mapper::monitor", "system monitor stopped");
     });
 }
+
+#[cfg(target_os = "windows")]
+fn battery_status() -> Option<BatteryStatus> {
+    use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+    let mut raw = SYSTEM_POWER_STATUS::default();
+    if unsafe { GetSystemPowerStatus(&mut raw) }.is_ok() && raw.BatteryLifePercent != u8::MAX {
+        Some(BatteryStatus { percentage: raw.BatteryLifePercent as f32, charging: raw.ACLineStatus == 1 })
+    } else {
+        None
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn battery_status() -> Option<BatteryStatus> { None }
 
 #[derive(Default)]
 struct NetworkBaseline {

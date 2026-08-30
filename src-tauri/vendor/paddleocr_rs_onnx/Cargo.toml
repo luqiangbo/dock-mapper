@@ -60,6 +60,8 @@ version = "0.33"
 
 [dependencies.image]
 version = "0.25"
+default-features = false
+features = ["png"]
 
 [dependencies.imageproc]
 version = "0.27"

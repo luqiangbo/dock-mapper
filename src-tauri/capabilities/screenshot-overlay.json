@@ -24,6 +24,10 @@
     "allow-decode-qr-selection",
     "allow-open-url",
     "allow-get-screenshot-config",
-    "allow-update-screenshot-config"
+    "allow-update-screenshot-config",
+    "allow-get-color-palette",
+    "allow-record-palette-color",
+    "allow-set-palette-favorite",
+    "allow-clear-recent-palette"
   ]
 }

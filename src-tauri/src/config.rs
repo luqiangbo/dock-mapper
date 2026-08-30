@@ -21,6 +21,16 @@ pub enum ColorCopyFormat {
     Css,
 }
 
+/// Persisted colour swatches are deliberately small and canonical.  Keeping
+/// them in the existing JSON transaction means they remain available offline
+/// without introducing a second storage backend.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ColorPaletteConfig {
+    pub recent: Vec<String>,
+    pub favorites: Vec<String>,
+}
+
 impl Default for ColorCopyFormat {
     fn default() -> Self {
         Self::Hex
@@ -34,6 +44,7 @@ pub struct AppConfig {
     pub widget_config: WidgetConfig,
     pub minimize_to_tray: bool,
     pub screenshot_config: ScreenshotConfig,
+    pub color_palette: ColorPaletteConfig,
     /// 接管前 Scancode Map 的 Base64 备份；外部修改后再次接管时会更新。
     pub scancode_map_backup: Option<String>,
     /// DockMapper 最后一次成功写入的 Scancode Map，用于区分草稿与外部修改。
@@ -47,6 +58,7 @@ pub struct ScreenshotConfig {
     pub pin_shortcut: String,
     pub history_shortcut: String,
     pub toggle_pin_shortcut: String,
+    pub quick_ocr_shortcut: String,
     pub save_directory: Option<String>,
     pub filename_prefix: String,
     pub color_copy_format: ColorCopyFormat,
@@ -59,6 +71,7 @@ impl Default for ScreenshotConfig {
             pin_shortcut: "Control+2".into(),
             history_shortcut: "Control+3".into(),
             toggle_pin_shortcut: "Control+Alt+P".into(),
+            quick_ocr_shortcut: "Control+Shift+1".into(),
             save_directory: None,
             filename_prefix: "DockMapper".into(),
             color_copy_format: ColorCopyFormat::Hex,
@@ -73,6 +86,7 @@ impl Default for AppConfig {
             widget_config: WidgetConfig::default(),
             minimize_to_tray: true,
             screenshot_config: ScreenshotConfig::default(),
+            color_palette: ColorPaletteConfig::default(),
             scancode_map_backup: None,
             applied_scancode_map: None,
         }
@@ -214,6 +228,65 @@ fn normalize_loaded_config(config: &mut AppConfig) {
     config.widget_config.refresh_interval_secs =
         config.widget_config.refresh_interval_secs.clamp(1, 5);
     normalize_screenshot_config(&mut config.screenshot_config);
+    normalize_palette(&mut config.color_palette);
+    config.widget_config.normalize();
+}
+
+pub fn normalize_color(value: &str) -> Option<String> {
+    let value = value.trim();
+    let hex = value.strip_prefix('#').unwrap_or(value);
+    if hex.len() != 6 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(format!("#{}", hex.to_ascii_uppercase()))
+}
+
+pub fn normalize_palette(palette: &mut ColorPaletteConfig) {
+    let normalize = |values: &mut Vec<String>, limit: usize| {
+        let mut unique = Vec::with_capacity(values.len());
+        for value in std::mem::take(values) {
+            if let Some(value) = normalize_color(&value) {
+                if !unique.contains(&value) {
+                    unique.push(value);
+                }
+            }
+            if unique.len() == limit {
+                break;
+            }
+        }
+        *values = unique;
+    };
+    normalize(&mut palette.recent, 5);
+    normalize(&mut palette.favorites, 5);
+}
+
+pub fn record_palette_color(
+    palette: &mut ColorPaletteConfig,
+    value: &str,
+) -> Result<(), String> {
+    let color = normalize_color(value).ok_or_else(|| "颜色必须为 #RRGGBB".to_string())?;
+    palette.recent.retain(|item| item != &color);
+    palette.recent.insert(0, color);
+    normalize_palette(palette);
+    Ok(())
+}
+
+pub fn set_palette_favorite(
+    palette: &mut ColorPaletteConfig,
+    value: &str,
+    favorite: bool,
+) -> Result<(), String> {
+    let color = normalize_color(value).ok_or_else(|| "颜色必须为 #RRGGBB".to_string())?;
+    palette.favorites.retain(|item| item != &color);
+    if favorite {
+        palette.favorites.insert(0, color);
+    }
+    normalize_palette(palette);
+    Ok(())
+}
+
+pub fn clear_recent_palette(palette: &mut ColorPaletteConfig) {
+    palette.recent.clear();
 }
 
 fn backup_path(path: &Path) -> PathBuf {
@@ -347,5 +420,45 @@ mod tests {
         fs::write(&path, "{corrupt").expect("write corrupt config");
         assert!(load_for_mutation(&path).is_err());
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn palette_normalization_uppercases_deduplicates_and_limits() {
+        let mut palette = ColorPaletteConfig {
+            recent: vec!["#aabbcc".into(), "AABBCC".into(), "invalid".into()],
+            favorites: (0..20).map(|index| format!("#{index:06x}")).collect(),
+        };
+        normalize_palette(&mut palette);
+        assert_eq!(palette.recent, vec!["#AABBCC"]);
+        assert_eq!(palette.favorites.len(), 5);
+    }
+
+    #[test]
+    fn recording_palette_colors_moves_duplicates_to_the_front_and_caps_recent() {
+        let mut palette = ColorPaletteConfig::default();
+        for index in 0..22 {
+            record_palette_color(&mut palette, &format!("#{index:06x}"))
+                .expect("record valid color");
+        }
+        record_palette_color(&mut palette, "#000005").expect("record duplicate");
+
+        assert_eq!(palette.recent.len(), 5);
+        assert_eq!(palette.recent[0], "#000005");
+        assert_eq!(palette.recent.iter().filter(|color| *color == "#000005").count(), 1);
+        assert!(!palette.recent.contains(&"#000000".to_string()));
+    }
+
+    #[test]
+    fn favorites_survive_recent_history_clear_and_can_be_removed() {
+        let mut palette = ColorPaletteConfig::default();
+        record_palette_color(&mut palette, "#aabbcc").expect("record color");
+        set_palette_favorite(&mut palette, "#aabbcc", true).expect("favorite color");
+        clear_recent_palette(&mut palette);
+
+        assert!(palette.recent.is_empty());
+        assert_eq!(palette.favorites, vec!["#AABBCC"]);
+
+        set_palette_favorite(&mut palette, "#AABBCC", false).expect("remove favorite");
+        assert!(palette.favorites.is_empty());
     }
 }

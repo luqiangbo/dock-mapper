@@ -12,11 +12,8 @@ use std::{
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
-use image::RgbaImage;
-use screenshots::Screen;
 use serde::{Deserialize, Serialize};
 use tauri::http::{Request, Response, StatusCode};
-use tauri::Monitor;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 mod capture;
@@ -59,6 +56,14 @@ pub struct Rect {
     height: f64,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CaptureMode {
+    #[default]
+    Screenshot,
+    QuickOcr,
+}
+
 #[derive(Clone)]
 struct CaptureData {
     bmp: Arc<[u8]>,
@@ -74,6 +79,7 @@ struct CaptureData {
     physical_height: u32,
     window_candidates: Vec<window_candidates::WindowCandidate>,
     backend: &'static str,
+    mode: CaptureMode,
 }
 
 #[derive(Clone, Debug)]
@@ -150,6 +156,10 @@ pub fn start_capture(app: &AppHandle) {
     handle_start_capture(app);
 }
 
+pub fn start_quick_ocr_capture(app: &AppHandle) {
+    handle_start_quick_ocr(app);
+}
+
 pub(crate) fn show_main_window(app: &AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         tracing::warn!(target: "dock_mapper::window", "主窗口不存在，无法显示");
@@ -190,6 +200,13 @@ pub fn start_screenshot(app: AppHandle) {
     handle_start_capture(&app);
 }
 
+#[tauri::command]
+pub fn start_quick_ocr(app: AppHandle, service: State<'_, crate::ocr::OcrService>) {
+    // Engine preparation is asynchronous and does not delay the capture UI.
+    service.prepare();
+    handle_start_quick_ocr(&app);
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FullScreenshot {
@@ -201,6 +218,7 @@ pub struct FullScreenshot {
     image_height: u32,
     overlay_label: String,
     window_candidates: Vec<window_candidates::WindowCandidate>,
+    mode: CaptureMode,
 }
 
 
@@ -434,6 +452,7 @@ pub fn get_full_screenshot(
         image_height: capture.image_height,
         overlay_label: label,
         window_candidates: capture.window_candidates,
+        mode: capture.mode,
     })
 }
 
@@ -503,7 +522,7 @@ fn pin_image_impl(
     // decoding a large/long screenshot on Tauri's IPC thread can starve the
     // Windows event loop, which also prevents Cancel and the global shortcut
     // from being processed.
-    let (pixel_width, pixel_height) = image::io::Reader::new(Cursor::new(data.as_ref()))
+    let (pixel_width, pixel_height) = image::ImageReader::new(Cursor::new(data.as_ref()))
         .with_guessed_format()
         .map_err(|error| error.to_string())?
         .into_dimensions()
@@ -519,14 +538,14 @@ fn pin_image_impl(
     let (screen_id, screen_bounds) = if let Some(capture) = capture.as_ref() {
         (capture.screen_id, capture.bounds)
     } else {
-        let info = active_screen(&app)?.display_info;
+        let info = active_screen(&app)?;
         (
             info.id,
             Rect {
-                x: info.x as f64,
-                y: info.y as f64,
-                width: info.width as f64,
-                height: info.height as f64,
+                x: info.bounds.x,
+                y: info.bounds.y,
+                width: info.bounds.width,
+                height: info.bounds.height,
             },
         )
     };

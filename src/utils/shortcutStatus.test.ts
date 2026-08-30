@@ -7,6 +7,7 @@ const config: ScreenshotConfig = {
   pin_shortcut: "Control+2",
   history_shortcut: "Control+3",
   toggle_pin_shortcut: "Control+Alt+P",
+  quick_ocr_shortcut: "Control+Shift+1",
   save_directory: null,
   filename_prefix: "DockMapper",
   color_copy_format: "hex",

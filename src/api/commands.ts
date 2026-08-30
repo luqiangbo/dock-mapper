@@ -3,6 +3,7 @@ import type { ScreenshotHistorySummary } from "../screenshots/screenshot/api";
 import { copyBinaryPayload } from "../screenshots/screenshot/utils/binaryPayload";
 import type {
   ApplyScancodeMapResult,
+  ColorPaletteConfig,
   KeyMapping,
   RuntimeHealth,
   ScancodeMapStatus,
@@ -59,6 +60,15 @@ export const screenshotSettingsApi = {
   resetShortcuts: () => invoke<ScreenshotConfig>("reset_screenshot_shortcuts"),
   chooseSaveDirectory: () => invoke<string | null>("choose_screenshot_save_directory"),
   start: () => invoke<void>("start_screenshot"),
+  startQuickOcr: () => invoke<void>("start_quick_ocr"),
+};
+
+export const paletteApi = {
+  get: () => invoke<ColorPaletteConfig>("get_color_palette"),
+  record: (color: string) => invoke<ColorPaletteConfig>("record_palette_color", { color }),
+  favorite: (color: string, favorite: boolean) =>
+    invoke<ColorPaletteConfig>("set_palette_favorite", { color, favorite }),
+  clearRecent: () => invoke<ColorPaletteConfig>("clear_recent_palette"),
 };
 
 export const generalSettingsApi = {

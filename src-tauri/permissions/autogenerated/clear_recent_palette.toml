@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-clear-recent-palette"
+description = "Enables the clear_recent_palette command without any pre-configured scope."
+commands.allow = ["clear_recent_palette"]
+
+[[permission]]
+identifier = "deny-clear-recent-palette"
+description = "Denies the clear_recent_palette command without any pre-configured scope."
+commands.deny = ["clear_recent_palette"]

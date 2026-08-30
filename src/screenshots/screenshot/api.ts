@@ -11,6 +11,7 @@ export interface FullScreenshot {
   imageHeight: number;
   overlayLabel: string;
   windowCandidates: WindowCandidate[];
+  mode: "screenshot" | "quick_ocr";
 }
 
 export interface WindowCandidate {

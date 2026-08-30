@@ -19,3 +19,4 @@ minimumReleaseAgeExclude:
   - '@rspack/binding-win32-x64-msvc@2.1.9'
   - '@rspack/binding@2.1.9'
   - '@rspack/core@2.1.9'
+  - lucide-react@1.37.0

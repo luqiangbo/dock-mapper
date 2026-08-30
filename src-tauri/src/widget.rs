@@ -13,10 +13,43 @@ pub enum MemoryScheme {
     Gauge,
 }
 
+pub type UsageScheme = MemoryScheme;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WidgetMetricKind {
+    #[default]
+    Network,
+    Cpu,
+    Memory,
+    Battery,
+    /// Kept only so configurations written by 1.1.0 preview builds can be
+    /// loaded and normalized without making the complete config unreadable.
+    #[doc(hidden)]
+    #[serde(rename = "disk_io")]
+    DiskIoLegacy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WidgetMetricConfig {
+    pub kind: WidgetMetricKind,
+    pub enabled: bool,
+    pub usage_scheme: UsageScheme,
+}
+
+impl Default for WidgetMetricConfig {
+    fn default() -> Self {
+        Self { kind: WidgetMetricKind::Network, enabled: true, usage_scheme: UsageScheme::Capsule }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WidgetConfig {
+    /// Kept for lossless reads of 1.0.5 configuration and API clients.
     pub memory_scheme: MemoryScheme,
+    pub metrics: Vec<WidgetMetricConfig>,
     pub refresh_interval_secs: u8,
     pub network_interface: Option<String>,
 }
@@ -25,9 +58,68 @@ impl Default for WidgetConfig {
     fn default() -> Self {
         Self {
             memory_scheme: MemoryScheme::Capsule,
+            metrics: vec![
+                WidgetMetricConfig::default(),
+                WidgetMetricConfig { kind: WidgetMetricKind::Memory, enabled: true, usage_scheme: MemoryScheme::Capsule },
+            ],
             refresh_interval_secs: 1,
             network_interface: None,
         }
+    }
+}
+
+impl WidgetConfig {
+    pub fn normalize(&mut self) {
+        let mut normalized = Vec::new();
+        for metric in std::mem::take(&mut self.metrics) {
+            if metric.kind == WidgetMetricKind::DiskIoLegacy {
+                continue;
+            }
+            if !normalized.iter().any(|item: &WidgetMetricConfig| item.kind == metric.kind) {
+                normalized.push(metric);
+            }
+        }
+        let had_metric_config = !normalized.is_empty();
+        if normalized.is_empty() {
+            normalized = Self::default().metrics;
+        }
+        for kind in [
+            WidgetMetricKind::Network,
+            WidgetMetricKind::Cpu,
+            WidgetMetricKind::Memory,
+            WidgetMetricKind::Battery,
+        ] {
+            if !normalized.iter().any(|item| item.kind == kind) {
+                normalized.push(WidgetMetricConfig {
+                    kind,
+                    enabled: false,
+                    usage_scheme: self.memory_scheme,
+                });
+            }
+        }
+        // A taskbar widget with every switch disabled still owns taskbar
+        // space but cannot communicate anything useful. Keep the network
+        // metric as a deterministic recovery default.
+        if !normalized.iter().any(|item| item.enabled) {
+            if let Some(network) = normalized
+                .iter_mut()
+                .find(|item| item.kind == WidgetMetricKind::Network)
+            {
+                network.enabled = true;
+            }
+        }
+        if let Some(memory) = normalized.iter_mut().find(|item| item.kind == WidgetMetricKind::Memory) {
+            if had_metric_config {
+                // Per-metric styles are authoritative for current configs;
+                // retain the old field as a compatibility mirror.
+                self.memory_scheme = memory.usage_scheme;
+            } else {
+                // A 1.0.5 config has no metric list, so migrate its legacy
+                // memory presentation into the new per-metric setting.
+                memory.usage_scheme = self.memory_scheme;
+            }
+        }
+        self.metrics = normalized;
     }
 }
 
@@ -73,6 +165,7 @@ pub fn update_widget_config(
         .lock()
         .map_err(|_| "配置写入锁已损坏".to_string())?;
     config.refresh_interval_secs = config.refresh_interval_secs.clamp(1, 5);
+    config.normalize();
     let previous_config = {
         let mut current = state
             .config
@@ -153,5 +246,77 @@ mod tests {
             MemoryScheme::Capsule
         );
         assert!(serde_json::from_str::<MemoryScheme>("1").is_err());
+    }
+
+    #[test]
+    fn normalize_migrates_missing_metrics_to_network_and_memory() {
+        let mut config = WidgetConfig { metrics: Vec::new(), memory_scheme: MemoryScheme::Ring, ..WidgetConfig::default() };
+        config.normalize();
+        assert_eq!(config.metrics.len(), 4);
+        assert_eq!(config.metrics[1].kind, WidgetMetricKind::Memory);
+        assert_eq!(config.metrics[1].usage_scheme, MemoryScheme::Ring);
+    }
+
+    #[test]
+    fn normalize_keeps_at_least_one_metric_enabled() {
+        let mut config = WidgetConfig {
+            metrics: vec![
+                WidgetMetricConfig { kind: WidgetMetricKind::Network, enabled: false, usage_scheme: MemoryScheme::Capsule },
+                WidgetMetricConfig { kind: WidgetMetricKind::Memory, enabled: false, usage_scheme: MemoryScheme::Ring },
+            ],
+            ..WidgetConfig::default()
+        };
+        config.normalize();
+        assert!(config
+            .metrics
+            .iter()
+            .any(|metric| metric.kind == WidgetMetricKind::Network && metric.enabled));
+    }
+
+    #[test]
+    fn normalize_preserves_a_current_memory_metric_style() {
+        let mut config = WidgetConfig {
+            memory_scheme: MemoryScheme::Capsule,
+            metrics: vec![WidgetMetricConfig {
+                kind: WidgetMetricKind::Memory,
+                enabled: true,
+                usage_scheme: MemoryScheme::Gauge,
+            }],
+            ..WidgetConfig::default()
+        };
+        config.normalize();
+        assert_eq!(config.memory_scheme, MemoryScheme::Gauge);
+        assert_eq!(
+            config
+                .metrics
+                .iter()
+                .find(|metric| metric.kind == WidgetMetricKind::Memory)
+                .unwrap()
+                .usage_scheme,
+            MemoryScheme::Gauge
+        );
+    }
+
+    #[test]
+    fn normalize_discards_legacy_disk_io_metric_without_losing_the_config() {
+        let mut config: WidgetConfig = serde_json::from_str(
+            r#"{
+                "metrics": [
+                    { "kind": "disk_io", "enabled": true, "usage_scheme": "capsule" },
+                    { "kind": "cpu", "enabled": true, "usage_scheme": "ring" }
+                ]
+            }"#,
+        )
+        .unwrap();
+        config.normalize();
+        assert_eq!(config.metrics.len(), 4);
+        assert!(config
+            .metrics
+            .iter()
+            .all(|metric| metric.kind != WidgetMetricKind::DiskIoLegacy));
+        assert!(config
+            .metrics
+            .iter()
+            .any(|metric| metric.kind == WidgetMetricKind::Cpu && metric.enabled));
     }
 }

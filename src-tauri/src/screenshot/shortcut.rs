@@ -1,5 +1,5 @@
 use super::{
-    handle_start_capture, open_screenshot_history, pin_recent_screenshot, toggle_latest_pin,
+    handle_start_capture, start_quick_ocr_capture, open_screenshot_history, pin_recent_screenshot, toggle_latest_pin,
     AppState,
 };
 use crate::config::ScreenshotConfig;
@@ -13,14 +13,16 @@ pub(super) enum ShortcutAction {
     PinRecent,
     OpenHistory,
     ToggleLatestPin,
+    QuickOcr,
 }
 
 impl ShortcutAction {
-    const ALL: [Self; 4] = [
+    const ALL: [Self; 5] = [
         Self::Capture,
         Self::PinRecent,
         Self::OpenHistory,
         Self::ToggleLatestPin,
+        Self::QuickOcr,
     ];
 
     pub(super) fn label(self) -> &'static str {
@@ -29,6 +31,7 @@ impl ShortcutAction {
             Self::PinRecent => "最近截图贴图",
             Self::OpenHistory => "打开截图历史",
             Self::ToggleLatestPin => "显隐最近贴图",
+            Self::QuickOcr => "快速 OCR",
         }
     }
 
@@ -38,6 +41,7 @@ impl ShortcutAction {
             Self::PinRecent => "pin_recent",
             Self::OpenHistory => "open_history",
             Self::ToggleLatestPin => "toggle_latest_pin",
+            Self::QuickOcr => "quick_ocr",
         }
     }
 }
@@ -86,6 +90,7 @@ pub(super) fn bindings(config: &ScreenshotConfig) -> Vec<(ShortcutAction, String
             ShortcutAction::ToggleLatestPin,
             config.toggle_pin_shortcut.clone(),
         ),
+        (ShortcutAction::QuickOcr, config.quick_ocr_shortcut.clone()),
     ]
 }
 
@@ -105,6 +110,7 @@ fn dispatch(app: &AppHandle, action: ShortcutAction) {
         ShortcutAction::PinRecent => pin_recent_screenshot(app),
         ShortcutAction::OpenHistory => open_screenshot_history(app),
         ShortcutAction::ToggleLatestPin => toggle_latest_pin(app),
+        ShortcutAction::QuickOcr => start_quick_ocr_capture(app),
     }
 }
 
@@ -341,10 +347,10 @@ mod tests {
     }
 
     #[test]
-    fn defaults_cover_four_distinct_actions() {
+    fn defaults_cover_five_distinct_actions() {
         let config = ScreenshotConfig::default();
         validate_bindings(&config).unwrap();
-        assert_eq!(bindings(&config).len(), 4);
+        assert_eq!(bindings(&config).len(), 5);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use image::{ImageFormat, ImageOutputFormat};
+use image::ImageFormat;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, OpenOptions},
@@ -300,7 +300,7 @@ impl HistoryStore {
 }
 
 fn png_dimensions(bytes: &[u8]) -> Result<(u32, u32), String> {
-    let reader = image::io::Reader::new(std::io::Cursor::new(bytes))
+    let reader = image::ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
         .map_err(|error| format!("读取截图历史图片失败：{error}"))?;
     if reader.format() != Some(ImageFormat::Png) {
@@ -323,7 +323,7 @@ fn create_thumbnail(bytes: &[u8]) -> Result<Vec<u8>, String> {
     };
     let mut output = Cursor::new(Vec::new());
     thumbnail
-        .write_to(&mut output, ImageOutputFormat::Png)
+        .write_to(&mut output, ImageFormat::Png)
         .map_err(|error| format!("编码截图历史缩略图失败：{error}"))?;
     Ok(output.into_inner())
 }
