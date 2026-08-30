@@ -31,29 +31,31 @@ $publicKey = (Get-Content -Raw "$env:USERPROFILE\.tauri\dockmapper.key.pub").Tri
 # 将 $publicKey 原样写入 src-tauri/tauri.conf.json 的 plugins.updater.pubkey
 ```
 
-发布任务会在编译前执行一次临时文件签名，提前检查私钥内容和密码。私钥与公钥
-必须来自同一次 `tauri signer generate`，否则客户端无法验证后续更新。
+发布任务将这两个 Secrets 直接传给 Tauri Action。私钥内容或密码错误时，Tauri
+会在构建更新器签名时直接报告失败。私钥与公钥必须来自同一次
+`tauri signer generate`，否则客户端无法验证后续更新。
 
 在仓库 `Settings → General → Releases` 启用 immutable releases。该设置会在 Draft
 正式发布后锁定 tag 与 Release assets。
 
 ## 发布新版本
 
-先同步三处版本号并提交：
+`src-tauri/Cargo.toml` 是唯一版本来源。输入一次新版本，脚本会同步 Cargo 主包并
+刷新 `Cargo.lock`：
 
 ```powershell
-pnpm version:sync 1.1.2
-git add package.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json `
-  .github/workflows/release.yml docs/winget-publish-guide.md
-git commit -m "chore: bump version to 1.1.2"
-git tag v1.1.2
+$version = Read-Host "Version (x.y.z)"
+pnpm version:sync $version
+git add src-tauri/Cargo.toml src-tauri/Cargo.lock
+git commit -m "chore: bump version to $version"
+git tag "v$version"
 git push origin main
-git push origin v1.1.2
+git push origin "v$version"
 ```
 
 CI 按顺序执行：
 
-1. `validate`：校验 tag 与三处版本一致，执行前端和 Rust 质量检查。
+1. `validate`：校验 tag、Cargo 主包与锁文件版本一致，执行前端和 Rust 质量检查。
 2. `publish-release`：创建 Draft、构建 NSIS、校验 Updater 签名与可选
    Authenticode 签名，然后正式发布。
 3. `submit-winget`：使用已冻结安装器的 URL 更新 Winget；该 job 可单独重跑，

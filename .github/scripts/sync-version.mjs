@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 
 const args = process.argv.slice(2);
@@ -9,29 +10,30 @@ if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
   process.exit(1);
 }
 
-const packagePath = "package.json";
 const cargoPath = "src-tauri/Cargo.toml";
-const tauriPath = "src-tauri/tauri.conf.json";
+const lockPath = "src-tauri/Cargo.lock";
+const cargoVersionPattern = /(\[package\][\s\S]*?\r?\nversion\s*=\s*")([^"]+)(")/;
+const lockVersionPattern = /(\[\[package\]\]\r?\nname = "dock-mapper"\r?\nversion = ")([^"]+)(")/;
 
-const [packageText, cargoText, tauriText] = await Promise.all([
-  readFile(packagePath, "utf8"),
+const [cargoText, lockText] = await Promise.all([
   readFile(cargoPath, "utf8"),
-  readFile(tauriPath, "utf8"),
+  readFile(lockPath, "utf8"),
 ]);
 
-const packageJson = JSON.parse(packageText);
-const tauriJson = JSON.parse(tauriText);
-const cargoMatch = cargoText.match(/(\[package\][\s\S]*?\nversion\s*=\s*")([^"]+)(")/);
+const cargoMatch = cargoText.match(cargoVersionPattern);
+const lockMatch = lockText.match(lockVersionPattern);
 
 if (!cargoMatch) {
   throw new Error("未找到 Cargo [package] version");
 }
+if (!lockMatch) {
+  throw new Error("未找到 Cargo.lock 中的 dock-mapper version");
+}
 
 if (checkOnly) {
   const actual = {
-    "package.json": packageJson.version,
     "src-tauri/Cargo.toml": cargoMatch[2],
-    "src-tauri/tauri.conf.json": tauriJson.version,
+    "src-tauri/Cargo.lock": lockMatch[2],
   };
   const mismatches = Object.entries(actual).filter(([, value]) => value !== version);
   if (mismatches.length) {
@@ -44,17 +46,47 @@ if (checkOnly) {
   process.exit(0);
 }
 
-packageJson.version = version;
-tauriJson.version = version;
-const nextCargo = cargoText.replace(
-  /(\[package\][\s\S]*?\nversion\s*=\s*")([^"]+)(")/,
-  `$1${version}$3`,
+if (cargoMatch[2] === version && lockMatch[2] === version) {
+  console.log(`版本已经是 ${version}`);
+  process.exit(0);
+}
+
+const nextCargo = cargoText.replace(cargoVersionPattern, (_match, prefix, _current, suffix) =>
+  `${prefix}${version}${suffix}`,
 );
 
-await Promise.all([
-  writeFile(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`),
-  writeFile(cargoPath, nextCargo),
-  writeFile(tauriPath, `${JSON.stringify(tauriJson, null, 2)}\n`),
-]);
+function refreshCargoLock() {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "cargo",
+      ["metadata", "--manifest-path", cargoPath, "--format-version", "1", "--no-deps"],
+      {
+        cwd: process.cwd(),
+        stdio: ["ignore", "ignore", "inherit"],
+        windowsHide: true,
+      },
+    );
+
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`cargo metadata 失败，退出码：${code}`));
+    });
+  });
+}
+
+try {
+  await writeFile(cargoPath, nextCargo);
+  await refreshCargoLock();
+
+  const refreshedLock = await readFile(lockPath, "utf8");
+  const refreshedLockMatch = refreshedLock.match(lockVersionPattern);
+  if (refreshedLockMatch?.[2] !== version) {
+    throw new Error(`Cargo.lock 版本未更新为 ${version}`);
+  }
+} catch (error) {
+  await Promise.all([writeFile(cargoPath, cargoText), writeFile(lockPath, lockText)]);
+  throw error;
+}
 
 console.log(`版本已同步为 ${version}`);
