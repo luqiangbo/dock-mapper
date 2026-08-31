@@ -59,7 +59,7 @@ function refreshCargoLock() {
   return new Promise((resolve, reject) => {
     const child = spawn(
       "cargo",
-      ["metadata", "--manifest-path", cargoPath, "--format-version", "1", "--no-deps"],
+      ["update", "--manifest-path", cargoPath, "--package", "dock-mapper"],
       {
         cwd: process.cwd(),
         stdio: ["ignore", "ignore", "inherit"],
@@ -70,7 +70,7 @@ function refreshCargoLock() {
     child.on("error", reject);
     child.on("exit", (code) => {
       if (code === 0) resolve();
-      else reject(new Error(`cargo metadata 失败，退出码：${code}`));
+      else reject(new Error(`cargo update 失败，退出码：${code}`));
     });
   });
 }

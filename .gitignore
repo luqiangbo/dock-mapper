@@ -5,3 +5,4 @@ target/
 .DS_Store
 .codegraph/
 graphify-out/
+/src-tauri/resources/runtime/vc_redist.x64.exe

@@ -202,7 +202,40 @@ jobs:
             -Uri "https://github.com/microsoft/winget-create/releases/download/v1.12.13.0/wingetcreate.exe" `
             -OutFile $wingetCreate
 
+          $manifestRoot = Join-Path $PWD "manifests"
           & $wingetCreate update luqiangbo.DockMapper `
-            --submit `
+            --out $manifestRoot `
             --urls $installerUrl `
             --version $env:VERSION
+          if ($LASTEXITCODE -ne 0) { throw "Winget manifest generation failed: $LASTEXITCODE" }
+
+          $installerManifests = @(Get-ChildItem $manifestRoot -Recurse -Filter "*.installer.yaml")
+          if ($installerManifests.Count -ne 1) {
+            throw "Expected one installer manifest, found $($installerManifests.Count)"
+          }
+
+          $installerManifest = $installerManifests[0]
+          $manifest = Get-Content $installerManifest.FullName -Raw
+          $vcredistPackage = "Microsoft.VCRedist.2015+.x64"
+          if ($manifest -notmatch [regex]::Escape("PackageIdentifier: $vcredistPackage")) {
+            if ($manifest -match '(?m)^Dependencies:\s*$') {
+              $packageDependency = "  PackageDependencies:`n  - PackageIdentifier: $vcredistPackage`n"
+              $manifest = $manifest -replace '(?m)^Dependencies:\s*$', "Dependencies:`n$packageDependency"
+            } else {
+              $dependency = "Dependencies:`n  PackageDependencies:`n  - PackageIdentifier: $vcredistPackage`n"
+              $manifest = $manifest -replace '(?m)^Installers:', "${dependency}Installers:"
+            }
+            Set-Content $installerManifest.FullName -Value $manifest -NoNewline -Encoding utf8
+          }
+
+          $manifest = Get-Content $installerManifest.FullName -Raw
+          if ($manifest -notmatch [regex]::Escape("PackageIdentifier: $vcredistPackage")) {
+            throw "VC++ runtime dependency was not added to the Winget manifest"
+          }
+
+          $manifestDirectory = $installerManifest.Directory.FullName
+          & $wingetCreate submit `
+            --no-open `
+            --prtitle "New version: luqiangbo.DockMapper version $env:VERSION" `
+            $manifestDirectory
+          if ($LASTEXITCODE -ne 0) { throw "Winget manifest submission failed: $LASTEXITCODE" }

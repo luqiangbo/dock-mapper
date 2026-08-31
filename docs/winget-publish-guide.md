@@ -6,7 +6,8 @@
 - 不删除、不移动、不复用已经公开的 tag。
 - `microsoft/winget-pkgs` 是 Winget 清单唯一来源，本仓库不保存副本。
 - 自动更新只使用 Release 资产中的签名 `latest.json`。
-- Winget v1.0.5 PR 合并前不再推送改动；审核要求不是代码错误。
+- NSIS 直装包会在缺少 Microsoft Visual C++ x64 运行库时静默安装它；Winget
+  清单同时声明 `Microsoft.VCRedist.2015+.x64` 依赖。
 
 ## 首次配置
 
@@ -56,10 +57,12 @@ git push origin "v$version"
 CI 按顺序执行：
 
 1. `validate`：校验 tag、Cargo 主包与锁文件版本一致，执行前端和 Rust 质量检查。
-2. `publish-release`：创建 Draft、构建 NSIS、校验 Updater 签名与可选
-   Authenticode 签名，然后正式发布。
-3. `submit-winget`：使用已冻结安装器的 URL 更新 Winget；该 job 可单独重跑，
-   不会重新构建或覆盖安装器。
+2. `publish-release`：下载并校验固定 SHA-256 的微软 VC++ x64 运行库，将其打包进
+   NSIS；安装时仅在系统运行库低于 `14.51.36247` 时升级；创建 Draft、构建
+   安装器、校验 Updater 签名与可选 Authenticode 签名，然后正式发布。
+3. `submit-winget`：使用已冻结安装器的 URL 生成清单，注入
+   `Microsoft.VCRedist.2015+.x64` 依赖后提交；该 job 可单独重跑，不会重新构建或
+   覆盖安装器。
 
 失败时修复问题并发布一个新的补丁版本，例如 `v1.0.7`。不要删除或复用
 `v1.0.6`。
@@ -71,19 +74,21 @@ CI 按顺序执行：
   不能批准自己的改动，作者无需为此修改清单。
 - 只有出现验证失败、维护者明确请求修改或 `Needs-Author-Feedback` 时才继续推送。
 
-合并 v1.0.5 后，可另开一次元数据增强 PR。必须从实际安装后的 Windows
-“应用和功能”/卸载注册项核对 `Publisher`、`DisplayName` 与 `DisplayVersion`，
-不要根据项目名猜测。随后再补充项目、支持、许可证、发行说明 URL、中文描述、
-Tags、Scope 和 UpgradeBehavior。
-
 ## 本地验收
 
-在 Windows Sandbox 中使用正式 Release URL 验证：
+必须在未预装 Microsoft Visual C++ 运行库的干净 Windows Sandbox 中使用正式
+Release URL 验证。先直装 NSIS 并启动应用，再验证 Winget 安装、升级和卸载：
 
 ```powershell
+$installer = "DockMapper_<version>_x64-setup.exe"
+Start-Process -FilePath ".\$installer" -ArgumentList "/S" -Wait
+Start-Process "$env:LOCALAPPDATA\DockMapper\dock-mapper.exe"
+
 winget install --id luqiangbo.DockMapper --exact --silent
 winget upgrade --id luqiangbo.DockMapper --exact --silent
 winget uninstall --id luqiangbo.DockMapper --exact --silent
 ```
 
-同时检查“应用和功能”元数据、静默参数以及安装器 SHA-256 与 Winget PR 完全一致。
+确认 `dock-mapper.exe` 能持续运行，而不是以 `0xC0000135` 退出；同时检查“应用和
+功能”元数据、静默参数、Winget PR 中的 VC++ 依赖，以及安装器 SHA-256 与 PR
+完全一致。

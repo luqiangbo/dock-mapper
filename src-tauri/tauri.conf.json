@@ -5,7 +5,8 @@
     "frontendDist": "../dist",
     "devUrl": "http://127.0.0.1:13301",
     "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build"
+    "beforeBuildCommand": "pnpm build",
+    "beforeBundleCommand": "pnpm runtime:prepare"
   },
   "bundle": {
     "active": true,
@@ -14,7 +15,8 @@
       "nsis"
     ],
     "resources": [
-      "resources/ocr/*"
+      "resources/ocr/*",
+      "resources/runtime/vc_redist.x64.exe"
     ],
     "icon": [
       "icons/icon.ico"
@@ -22,6 +24,7 @@
     "windows": {
       "nsis": {
         "installMode": "currentUser",
+        "installerHooks": "./windows/installer-hooks.nsh",
         "languages": [
           "SimpChinese"
         ]

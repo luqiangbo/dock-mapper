@@ -12,7 +12,8 @@
     "format": "oxfmt src index.html screenshot.html widget.html rsbuild.config.ts tsconfig.json package.json .oxfmtrc.json .oxlintrc.json",
     "format:check": "oxfmt --check src index.html screenshot.html widget.html rsbuild.config.ts tsconfig.json package.json .oxfmtrc.json .oxlintrc.json",
     "test": "vitest run --passWithNoTests",
-    "version:sync": "node .github/scripts/sync-version.mjs"
+    "version:sync": "node .github/scripts/sync-version.mjs",
+    "runtime:prepare": "node .github/scripts/prepare-vcredist.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "6.3.2",
