@@ -45,5 +45,6 @@ dockmapper_vcredist_ready:
   DetailPrint "Microsoft Visual C++ x64 runtime 14.51.36247 or newer is already installed"
 dockmapper_vcredist_cleanup:
   Delete "$INSTDIR\resources\runtime\vc_redist.x64.exe"
+  Delete "$INSTDIR\resources\runtime\README.txt"
   RMDir "$INSTDIR\resources\runtime"
 !macroend

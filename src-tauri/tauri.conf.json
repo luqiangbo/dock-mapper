@@ -16,7 +16,7 @@
     ],
     "resources": [
       "resources/ocr/*",
-      "resources/runtime/vc_redist.x64.exe"
+      "resources/runtime/*"
     ],
     "icon": [
       "icons/icon.ico"
