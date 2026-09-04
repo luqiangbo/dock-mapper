@@ -447,16 +447,22 @@
           "markdownDescription": "Enables the get_key_mappings command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_key_visualizer_config command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-key-visualizer-config",
+          "markdownDescription": "Enables the get_key_visualizer_config command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_key_visualizer_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-key-visualizer-status",
+          "markdownDescription": "Enables the get_key_visualizer_status command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_minimize_to_tray command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-minimize-to-tray",
           "markdownDescription": "Enables the get_minimize_to_tray command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the get_network_interfaces command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-get-network-interfaces",
-          "markdownDescription": "Enables the get_network_interfaces command without any pre-configured scope."
         },
         {
           "description": "Enables the get_pin_image command without any pre-configured scope.",
@@ -597,6 +603,12 @@
           "markdownDescription": "Enables the restore_scancode_map command without any pre-configured scope."
         },
         {
+          "description": "Enables the retry_key_visualizer command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-retry-key-visualizer",
+          "markdownDescription": "Enables the retry_key_visualizer command without any pre-configured scope."
+        },
+        {
           "description": "Enables the save_image command without any pre-configured scope.",
           "type": "string",
           "const": "allow-save-image",
@@ -655,6 +667,12 @@
           "type": "string",
           "const": "allow-sync-widget-dynamic-width",
           "markdownDescription": "Enables the sync_widget_dynamic_width command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_key_visualizer_config command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-update-key-visualizer-config",
+          "markdownDescription": "Enables the update_key_visualizer_config command without any pre-configured scope."
         },
         {
           "description": "Enables the update_pin_options command without any pre-configured scope.",
@@ -783,16 +801,22 @@
           "markdownDescription": "Denies the get_key_mappings command without any pre-configured scope."
         },
         {
+          "description": "Denies the get_key_visualizer_config command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-key-visualizer-config",
+          "markdownDescription": "Denies the get_key_visualizer_config command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_key_visualizer_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-key-visualizer-status",
+          "markdownDescription": "Denies the get_key_visualizer_status command without any pre-configured scope."
+        },
+        {
           "description": "Denies the get_minimize_to_tray command without any pre-configured scope.",
           "type": "string",
           "const": "deny-get-minimize-to-tray",
           "markdownDescription": "Denies the get_minimize_to_tray command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the get_network_interfaces command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-get-network-interfaces",
-          "markdownDescription": "Denies the get_network_interfaces command without any pre-configured scope."
         },
         {
           "description": "Denies the get_pin_image command without any pre-configured scope.",
@@ -933,6 +957,12 @@
           "markdownDescription": "Denies the restore_scancode_map command without any pre-configured scope."
         },
         {
+          "description": "Denies the retry_key_visualizer command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-retry-key-visualizer",
+          "markdownDescription": "Denies the retry_key_visualizer command without any pre-configured scope."
+        },
+        {
           "description": "Denies the save_image command without any pre-configured scope.",
           "type": "string",
           "const": "deny-save-image",
@@ -991,6 +1021,12 @@
           "type": "string",
           "const": "deny-sync-widget-dynamic-width",
           "markdownDescription": "Denies the sync_widget_dynamic_width command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_key_visualizer_config command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-update-key-visualizer-config",
+          "markdownDescription": "Denies the update_key_visualizer_config command without any pre-configured scope."
         },
         {
           "description": "Denies the update_pin_options command without any pre-configured scope.",

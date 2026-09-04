@@ -1,8 +1,10 @@
 export type KeyCode = string & { readonly __keyCode: unique symbol };
 export type MemoryScheme = "capsule" | "ring" | "gauge";
 export type UsageScheme = MemoryScheme;
+export type SpeedUnit = "auto" | "kb" | "mb";
 export type WidgetMetricKind = "network" | "cpu" | "memory" | "battery";
 export type ThemeMode = "light" | "dark" | "system";
+export type KeyVisualizerCategory = "modifier" | "combination" | "character" | "other";
 
 export interface KeyMapping {
   id: string;
@@ -44,6 +46,7 @@ export interface WidgetConfig {
   metrics: WidgetMetricConfig[];
   refresh_interval_secs: number;
   network_interface: string | null;
+  speed_unit: SpeedUnit;
 }
 
 export interface WidgetMetricConfig {
@@ -55,6 +58,29 @@ export interface WidgetMetricConfig {
 export interface ColorPaletteConfig {
   recent: string[];
   favorites: string[];
+}
+
+export interface KeyVisualizerConfig {
+  enabled: boolean;
+  show_modifiers: boolean;
+  show_combinations: boolean;
+  show_characters: boolean;
+  show_other: boolean;
+  font_size: number;
+  scale_percent: number;
+  text_opacity: number;
+}
+
+export interface KeyVisualizerStatus {
+  listening: boolean;
+  error: string | null;
+}
+
+export interface KeyVisualizerInput {
+  label: string;
+  category: KeyVisualizerCategory;
+  repeat: number;
+  timestamp_ms: number;
 }
 
 export interface SysStatus {

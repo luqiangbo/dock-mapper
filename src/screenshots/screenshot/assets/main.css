@@ -838,6 +838,21 @@ body,
   line-height: 1.25;
 }
 
+.inline-arrow-label-editor {
+  position: absolute;
+  z-index: 25;
+  width: 180px;
+  min-width: 100px;
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 6px;
+  outline: none;
+  background: rgba(17, 24, 39, 0.88);
+  text-align: center;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+
 .text-editor.is-dragging {
   cursor: grabbing;
   box-shadow: 0 16px 44px rgba(10, 12, 24, 0.4);

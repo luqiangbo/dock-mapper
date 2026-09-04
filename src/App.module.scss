@@ -3,7 +3,7 @@
 $compact-radius: 10px;
 
 .shell {
-  min-width: 640px;
+  min-width: 840px;
   height: 100vh;
   padding: 10px;
   overflow: visible !important;
@@ -48,15 +48,13 @@ $compact-radius: 10px;
   height: 34px;
   flex: 0 0 34px;
   place-items: center;
-  border: 1px solid rgb(255 255 255 / 42%);
-  border-radius: $compact-radius;
-  color: white;
-  background: linear-gradient(145deg, #6f91ff, #4d5cf2);
-  box-shadow:
-    0 5px 14px rgb(70 89 210 / 30%),
-    inset 0 1px rgb(255 255 255 / 42%);
-  font-size: 17px;
-  font-weight: 750;
+
+  img {
+    display: block;
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+  }
 }
 
 .nav {
@@ -229,7 +227,11 @@ $compact-radius: 10px;
     width: 32px;
     height: 32px;
     flex-basis: 32px;
-    font-size: 16px;
+
+    img {
+      width: 30px;
+      height: 30px;
+    }
   }
 
   .nav {

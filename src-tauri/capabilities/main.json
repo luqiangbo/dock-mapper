@@ -41,10 +41,13 @@
     "allow-choose-screenshot-save-directory",
     "allow-export-diagnostics",
     "allow-get-widget-config",
-    "allow-get-network-interfaces",
     "allow-update-widget-config",
     "allow-get-minimize-to-tray",
     "allow-set-minimize-to-tray",
+    "allow-get-key-visualizer-config",
+    "allow-update-key-visualizer-config",
+    "allow-get-key-visualizer-status",
+    "allow-retry-key-visualizer",
     {
       "identifier": "opener:allow-open-url",
       "allow": [

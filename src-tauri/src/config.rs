@@ -58,10 +58,39 @@ pub struct AppConfig {
     pub minimize_to_tray: bool,
     pub screenshot_config: ScreenshotConfig,
     pub color_palette: ColorPaletteConfig,
+    pub key_visualizer_config: KeyVisualizerConfig,
     /// 接管前 Scancode Map 的 Base64 备份；外部修改后再次接管时会更新。
     pub scancode_map_backup: Option<String>,
     /// DockMapper 最后一次成功写入的 Scancode Map，用于区分草稿与外部修改。
     pub applied_scancode_map: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct KeyVisualizerConfig {
+    pub enabled: bool,
+    pub show_modifiers: bool,
+    pub show_combinations: bool,
+    pub show_characters: bool,
+    pub show_other: bool,
+    pub font_size: u16,
+    pub scale_percent: u16,
+    pub text_opacity: u8,
+}
+
+impl Default for KeyVisualizerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            show_modifiers: true,
+            show_combinations: true,
+            show_characters: true,
+            show_other: true,
+            font_size: 28,
+            scale_percent: 100,
+            text_opacity: 100,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,6 +133,7 @@ impl Default for AppConfig {
             minimize_to_tray: true,
             screenshot_config: ScreenshotConfig::default(),
             color_palette: ColorPaletteConfig::default(),
+            key_visualizer_config: KeyVisualizerConfig::default(),
             scancode_map_backup: None,
             applied_scancode_map: None,
         }
@@ -247,6 +277,13 @@ fn normalize_loaded_config(config: &mut AppConfig) {
     normalize_screenshot_config(&mut config.screenshot_config);
     normalize_palette(&mut config.color_palette);
     config.widget_config.normalize();
+    normalize_key_visualizer_config(&mut config.key_visualizer_config);
+}
+
+pub fn normalize_key_visualizer_config(config: &mut KeyVisualizerConfig) {
+    config.font_size = config.font_size.clamp(16, 48);
+    config.scale_percent = config.scale_percent.clamp(75, 200);
+    config.text_opacity = config.text_opacity.clamp(20, 100);
 }
 
 pub fn normalize_color(value: &str) -> Option<String> {
@@ -343,7 +380,7 @@ mod tests {
         let loaded = load(&path);
         assert_eq!(loaded.key_mappings[0].id, "stable-id");
         assert!(!loaded.key_mappings[0].enabled);
-        assert_eq!(loaded.widget_config.refresh_interval_secs, 4);
+        assert_eq!(loaded.widget_config.refresh_interval_secs, 3);
         assert_eq!(loaded.applied_scancode_map.as_deref(), Some("AQIDBA=="));
         let _ = fs::remove_file(backup_path(&path));
         let _ = fs::remove_file(path);
@@ -443,6 +480,28 @@ mod tests {
         )
         .expect("deserialize screenshot config");
         assert_eq!(restored.capture_size_unit, CaptureSizeUnit::Dip);
+    }
+
+    #[test]
+    fn key_visualizer_defaults_opacity_and_drops_legacy_window_controls() {
+        let config: KeyVisualizerConfig = serde_json::from_str(
+            r#"{"enabled":true,"mouse_passthrough":false,"position":{"x":120,"y":240}}"#,
+        )
+        .expect("legacy key visualizer config remains readable");
+        assert_eq!(config.text_opacity, 100);
+        let serialized = serde_json::to_value(config).expect("serialize key visualizer config");
+        assert!(serialized.get("mouse_passthrough").is_none());
+        assert!(serialized.get("position").is_none());
+    }
+
+    #[test]
+    fn key_visualizer_opacity_is_normalized_to_supported_range() {
+        let mut low = KeyVisualizerConfig { text_opacity: 1, ..KeyVisualizerConfig::default() };
+        normalize_key_visualizer_config(&mut low);
+        assert_eq!(low.text_opacity, 20);
+        let mut high = KeyVisualizerConfig { text_opacity: 255, ..KeyVisualizerConfig::default() };
+        normalize_key_visualizer_config(&mut high);
+        assert_eq!(high.text_opacity, 100);
     }
 
     #[test]

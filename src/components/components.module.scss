@@ -17,6 +17,103 @@ $compact-radius: 10px;
   @include glass.surface(var(--glass-surface), 16px);
 }
 
+.dashboardHero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 2px;
+
+  h3 {
+    margin: 2px 0 0;
+  }
+}
+
+.liveBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--status-success);
+  font-size: 12px;
+
+  i {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 14%, transparent);
+  }
+}
+
+.dashboardMetrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 12px;
+}
+
+.dashboardCharts,
+.dashboardModules {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.trendChart {
+  width: 100%;
+  height: 230px;
+}
+
+.chartEmpty {
+  display: flex;
+  height: 230px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.dashboardStatusList,
+.dashboardActions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dashboardStatusRow {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--glass-border);
+
+  &:last-child {
+    padding-bottom: 0;
+    border-bottom: 0;
+  }
+
+  span {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-secondary);
+  }
+
+  b {
+    text-align: right;
+    font-size: 12px;
+  }
+}
+
+.dashboardActions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+
+  button {
+    height: 42px;
+  }
+}
+
 .overviewGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -114,6 +211,101 @@ $compact-radius: 10px;
   &.error::before {
     background: var(--danger);
   }
+}
+
+.widgetPreviewHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.widgetPreview {
+  display: flex;
+  width: fit-content;
+  min-height: 48px;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 4px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 10px;
+  color: #fff;
+  background: #17191f;
+  font: 12px/1.1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.previewNetwork {
+  display: grid;
+  grid-template-columns: 12px 6ch 4.5ch;
+  align-items: center;
+
+  b {
+    text-align: right;
+  }
+
+  small {
+    padding-left: 3px;
+    font-size: 10px;
+  }
+}
+
+.previewCompact,
+.previewGauge {
+  display: flex;
+  min-width: 48px;
+  align-items: center;
+  gap: 3px;
+
+  b {
+    min-width: 4ch;
+    text-align: right;
+  }
+}
+
+.previewRing {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 3px solid var(--accent);
+  border-radius: 50%;
+  font-size: 9px;
+}
+
+.previewGauge > span {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+
+  i {
+    width: 3px;
+    height: 12px;
+    border-radius: 2px;
+    background: rgb(255 255 255 / 18%);
+  }
+
+  i[data-active="true"] {
+    background: var(--accent);
+  }
+}
+
+.widgetOptionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.widgetOptionCard {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  background: var(--glass-control);
 }
 
 .adminNotice {
@@ -294,6 +486,93 @@ $compact-radius: 10px;
   font-size: 12px;
 }
 
+.settingsStack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.centerState {
+  display: grid;
+  min-height: 280px;
+  place-items: center;
+}
+
+.inlineAlert {
+  margin-top: 14px;
+}
+
+.keyVisualizerStatus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.keyVisualizerStage {
+  display: grid;
+  min-height: 150px;
+  margin-top: 16px;
+  place-items: center;
+  transform-origin: center;
+  transition: transform 160ms ease;
+}
+
+.keyVisualizerPreview {
+  display: flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 9px;
+  padding: 0;
+  color: var(--text-primary);
+
+  span {
+    padding: 0;
+    font-weight: 650;
+  }
+
+  b { color: var(--text-secondary); font-size: 0.7em; }
+  em { color: var(--accent); font-size: 0.58em; font-style: normal; font-variant-numeric: tabular-nums; }
+}
+
+.keyFilterGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.keyFilterItem {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--glass-surface) 70%, transparent);
+
+  > span:first-child {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
+  }
+}
+
+.visualizerControl {
+  display: grid;
+  grid-template-columns: 150px minmax(180px, 1fr);
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+
+  > div:first-child {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+}
+
 .modalFields,
 .field {
   display: flex;
@@ -468,6 +747,11 @@ $compact-radius: 10px;
     align-items: flex-start;
     flex-direction: column;
   }
+
+  .dashboardCharts,
+  .dashboardModules {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 680px) {
@@ -489,6 +773,10 @@ $compact-radius: 10px;
     align-items: flex-start;
   }
 
+  .widgetOptionGrid {
+    grid-template-columns: 1fr;
+  }
+
   .shortcutItem {
     align-items: stretch;
     flex-direction: column;
@@ -498,6 +786,15 @@ $compact-radius: 10px;
   .shortcutInput {
     width: 100%;
     flex-basis: auto;
+  }
+
+  .keyFilterGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .visualizerControl {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
 }
 

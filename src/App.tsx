@@ -8,6 +8,7 @@ import {
   CameraOutlined,
   GithubOutlined,
   KeyOutlined,
+  FontSizeOutlined,
   MenuOutlined,
   MoonOutlined,
   SettingOutlined,
@@ -16,11 +17,15 @@ import {
 import Dashboard from "./components/Dashboard";
 import KeyMapper from "./components/KeyMapper";
 import WidgetSettings from "./components/WidgetSettings";
+import KeyVisualizerSettings from "./components/KeyVisualizerSettings";
 import GeneralSettings from "./components/GeneralSettings";
 import ScreenshotSettings from "./components/ScreenshotSettings";
 import { useTheme } from "./ThemeContext";
+import appIcon from "./assets/app-icon.png";
 import styles from "./App.module.scss";
 import { MAIN_EVENTS } from "./api/commands";
+import type { SysStatus } from "./types";
+import { appendDashboardSample, type DashboardSample } from "./components/dashboardTelemetry";
 import {
   loadSidebarWidth,
   saveSidebarWidth,
@@ -31,7 +36,7 @@ import {
 const { Header, Content } = Layout;
 const { Text, Title } = Typography;
 const REPOSITORY_URL = "https://github.com/luqiangbo/dock-mapper";
-type PageKey = "dashboard" | "keymapper" | "screenshot" | "widget" | "settings";
+type PageKey = "dashboard" | "keymapper" | "keyvisualizer" | "screenshot" | "widget" | "settings";
 type ScreenshotTabKey = "history" | "settings";
 
 interface MainNavigation {
@@ -48,6 +53,7 @@ interface PageItem {
 const PAGES: PageItem[] = [
   { key: "dashboard", label: "仪表盘", icon: <DashboardOutlined /> },
   { key: "keymapper", label: "按键映射", icon: <KeyOutlined /> },
+  { key: "keyvisualizer", label: "按键文本", icon: <FontSizeOutlined /> },
   { key: "screenshot", label: "截图", icon: <CameraOutlined /> },
   { key: "widget", label: "挂件设置", icon: <MenuOutlined /> },
   { key: "settings", label: "全局设置", icon: <SettingOutlined /> },
@@ -57,6 +63,8 @@ export default function App() {
   const [activePage, setActivePage] = useState<PageKey>("dashboard");
   const [screenshotTab, setScreenshotTab] = useState<ScreenshotTabKey>("history");
   const [siderWidth, setSiderWidth] = useState(loadSidebarWidth);
+  const [sysStatus, setSysStatus] = useState<SysStatus | null>(null);
+  const [dashboardSamples, setDashboardSamples] = useState<DashboardSample[]>([]);
   const { resolved, setMode } = useTheme();
 
   useEffect(() => {
@@ -67,6 +75,22 @@ export default function App() {
         setScreenshotTab(payload.tab ?? "history");
       }
       setActivePage(payload.page);
+    }).then((off) => {
+      if (disposed) off();
+      else unlisten = off;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen<SysStatus>(MAIN_EVENTS.systemStatus, ({ payload }) => {
+      setSysStatus(payload);
+      setDashboardSamples((samples) => appendDashboardSample(samples, payload));
     }).then((off) => {
       if (disposed) off();
       else unlisten = off;
@@ -93,12 +117,17 @@ export default function App() {
         );
       case "widget":
         return <WidgetSettings />;
+      case "keyvisualizer":
+        return <KeyVisualizerSettings />;
       case "settings":
         return <GeneralSettings />;
       default:
-        return <Dashboard />;
+        return <Dashboard status={sysStatus} samples={dashboardSamples} onNavigate={(target, tab) => {
+          if (target === "screenshot" && tab) setScreenshotTab(tab);
+          setActivePage(target);
+        }} />;
     }
-  }, [activePage, screenshotTab]);
+  }, [activePage, dashboardSamples, screenshotTab, sysStatus]);
 
   return (
     <Splitter
@@ -117,7 +146,7 @@ export default function App() {
         <aside className={styles.sider}>
           <div className={styles.brand}>
             <span className={styles.brandMark} aria-hidden="true">
-              D
+              <img src={appIcon} alt="" />
             </span>
             <Text strong>DockMapper</Text>
           </div>

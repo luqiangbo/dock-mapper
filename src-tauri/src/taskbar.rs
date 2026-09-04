@@ -115,6 +115,13 @@ fn needs_reembed(current_parent: Option<HWND>, taskbar_hwnd: HWND) -> bool {
     current_parent != Some(taskbar_hwnd)
 }
 
+fn rect_matches_target(rect: RECT, left: i32, top: i32, width: i32, height: i32) -> bool {
+    (rect.left - left).abs() <= 1
+        && (rect.top - top).abs() <= 1
+        && ((rect.right - rect.left) - width).abs() <= 1
+        && ((rect.bottom - rect.top) - height).abs() <= 1
+}
+
 // ─── DPI-aware position (uses dynamic width from global store) ──────────
 unsafe fn position_widget_dpi_aware(
     window: &WebviewWindow,
@@ -148,6 +155,18 @@ unsafe fn position_widget_dpi_aware(
         }
     };
 
+    if let Ok(widget_hwnd) = window.hwnd() {
+        if let Some(current) = get_window_rect(widget_hwnd) {
+            let target_left = taskbar_rect.left + (x_logical * scale_factor).round() as i32;
+            let target_top = taskbar_rect.top + (y_logical * scale_factor).round() as i32;
+            let target_width = (width_logical * scale_factor).round() as i32;
+            let target_height = (WIDGET_HEIGHT_LOGICAL * scale_factor).round() as i32;
+            if rect_matches_target(current, target_left, target_top, target_width, target_height) {
+                return;
+            }
+        }
+    }
+
     let _ = window.set_position(Position::Logical(LogicalPosition::new(
         x_logical, y_logical,
     )));
@@ -171,11 +190,14 @@ pub fn sync_dynamic_width(app: &tauri::AppHandle, width: f64) -> f64 {
     let clamped = normalize_widget_width(width);
 
     if let Some(widget) = app.get_webview_window("taskbar_widget") {
-        // 1. Resize to exact content width
-        let _ = widget.set_size(Size::Logical(LogicalSize::new(
-            clamped,
-            WIDGET_HEIGHT_LOGICAL,
-        )));
+        let scale = widget.scale_factor().unwrap_or(1.0);
+        let current_width = widget.inner_size().map(|size| size.width as f64 / scale).ok();
+        if current_width.is_none_or(|width| (width - clamped).abs() > 0.5) {
+            let _ = widget.set_size(Size::Logical(LogicalSize::new(
+                clamped,
+                WIDGET_HEIGHT_LOGICAL,
+            )));
+        }
 
         // 2. Re-anchor X position
         unsafe {
@@ -254,5 +276,13 @@ mod tests {
         assert_eq!(normalize_widget_width(26.0), MIN_WIDTH_LOGICAL);
         assert_eq!(normalize_widget_width(132.0), 132.0);
         assert_eq!(normalize_widget_width(f64::NAN), DEFAULT_WIDTH_LOGICAL);
+    }
+
+    #[test]
+    fn matching_widget_geometry_does_not_need_another_native_move() {
+        let rect = RECT { left: 100, top: 4, right: 280, bottom: 44 };
+        assert!(rect_matches_target(rect, 100, 4, 180, 40));
+        assert!(rect_matches_target(rect, 101, 5, 180, 40));
+        assert!(!rect_matches_target(rect, 103, 4, 180, 40));
     }
 }

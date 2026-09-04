@@ -5,6 +5,8 @@ import type {
   ApplyScancodeMapResult,
   ColorPaletteConfig,
   KeyMapping,
+  KeyVisualizerConfig,
+  KeyVisualizerStatus,
   RuntimeHealth,
   ScancodeMapStatus,
   ScreenshotConfig,
@@ -20,6 +22,8 @@ export const MAIN_EVENTS = {
   scancodeMapChanged: "scancode-map-changed",
   systemStatus: "sys-status-update",
   shortcutStatusChanged: "shortcut-status-changed",
+  keyVisualizerConfigChanged: "key-visualizer-config-changed",
+  keyVisualizerInput: "key-visualizer-input",
 } as const;
 
 export function errorMessage(error: unknown): string {
@@ -80,8 +84,15 @@ export const generalSettingsApi = {
 
 export const widgetApi = {
   config: () => invoke<WidgetConfig>("get_widget_config"),
-  networkInterfaces: () => invoke<string[]>("get_network_interfaces"),
   update: (config: WidgetConfig) => invoke<WidgetConfig>("update_widget_config", { config }),
+};
+
+export const keyVisualizerApi = {
+  config: () => invoke<KeyVisualizerConfig>("get_key_visualizer_config"),
+  update: (keyVisualizerConfig: KeyVisualizerConfig) =>
+    invoke<KeyVisualizerConfig>("update_key_visualizer_config", { keyVisualizerConfig }),
+  status: () => invoke<KeyVisualizerStatus>("get_key_visualizer_status"),
+  retry: () => invoke<KeyVisualizerStatus>("retry_key_visualizer"),
 };
 
 export const runtimeApi = {

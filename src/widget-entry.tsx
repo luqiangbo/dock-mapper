@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { CaretDownFilled, CaretUpFilled } from "@ant-design/icons";
-import type { MemoryScheme, SysStatus, WidgetConfig, WidgetMetricConfig } from "./types";
+import { Battery, Cpu, MemoryStick } from "lucide-react";
+import type { MemoryScheme, SysStatus, WidgetConfig, WidgetMetricConfig, WidgetMetricKind } from "./types";
 import { formatSpeedParts } from "./utils/format";
 import "./widget.scss";
 
@@ -11,6 +12,13 @@ const FALLBACK_METRICS: WidgetMetricConfig[] = [
   { kind: "network", enabled: true, usage_scheme: "capsule" },
   { kind: "memory", enabled: true, usage_scheme: "capsule" },
 ];
+const FALLBACK_CONFIG: WidgetConfig = {
+  memory_scheme: "capsule",
+  metrics: FALLBACK_METRICS,
+  refresh_interval_secs: 1,
+  network_interface: null,
+  speed_unit: "auto",
+};
 
 function memoryColor(usage: number): string {
   if (usage < 70) return "#35c985";
@@ -18,14 +26,18 @@ function memoryColor(usage: number): string {
   return "#ff5d67";
 }
 
-function CapsuleIndicator({ usage, label = "RAM" }: { usage: number; label?: string }) {
-  const color = memoryColor(usage);
-  const urgency = usage >= 90 ? " led-flash" : usage >= 70 ? " led-breathe" : "";
+function metricIcon(kind: Exclude<WidgetMetricKind, "network">): ReactNode {
+  if (kind === "cpu") return <Cpu />;
+  if (kind === "battery") return <Battery />;
+  return <MemoryStick />;
+}
+
+function CapsuleIndicator({ usage, kind }: { usage: number; kind: Exclude<WidgetMetricKind, "network"> }) {
   return (
     <div className="capsule-indicator">
-      <span className={`led-dot${urgency}`} style={{ "--led-color": color } as CSSProperties} />
+      <span className="metric-icon">{metricIcon(kind)}</span>
       <span className="capsule-label" aria-label={`内存占用 ${usage.toFixed(0)}%`}>
-        {label} {usage.toFixed(0)}%
+        {usage.toFixed(0)}%
       </span>
     </div>
   );
@@ -37,15 +49,15 @@ function RingIndicator({ usage }: { usage: number }) {
   const dash = (usage / 100) * circumference;
   return (
     <div className="ring-indicator" aria-label={`内存占用 ${usage.toFixed(0)}%`}>
-      <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
-        <circle className="ring-track" cx="12" cy="12" r={radius} fill="none" strokeWidth="2.5" />
+      <svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true">
+        <circle className="ring-track" cx="12" cy="12" r={radius} fill="none" strokeWidth="2.8" />
         <circle
           cx="12"
           cy="12"
           r={radius}
           fill="none"
           stroke={memoryColor(usage)}
-          strokeWidth="2.5"
+          strokeWidth="2.8"
           strokeDasharray={`${dash} ${circumference - dash}`}
           strokeLinecap="round"
           transform="rotate(-90 12 12)"
@@ -57,7 +69,8 @@ function RingIndicator({ usage }: { usage: number }) {
 }
 
 function GaugeIndicator({ usage }: { usage: number }) {
-  const filled = Math.round(usage / 20);
+  const filled = Math.ceil(usage / 20);
+  const color = memoryColor(usage);
   return (
     <div className="gauge-indicator" aria-label={`内存占用 ${usage.toFixed(0)}%`}>
       <div className="gauge-blocks" aria-hidden="true">
@@ -65,7 +78,7 @@ function GaugeIndicator({ usage }: { usage: number }) {
           <span
             key={index}
             className="gauge-block"
-            style={index < filled ? { backgroundColor: memoryColor((index + 1) * 20) } : undefined}
+            style={index < filled ? { backgroundColor: color } : undefined}
           />
         ))}
       </div>
@@ -74,10 +87,10 @@ function GaugeIndicator({ usage }: { usage: number }) {
   );
 }
 
-function MemoryIndicator({ usage, scheme, label }: { usage: number; scheme: MemoryScheme; label?: string }) {
+function MemoryIndicator({ usage, scheme, kind }: { usage: number; scheme: MemoryScheme; kind: Exclude<WidgetMetricKind, "network"> }) {
   if (scheme === "ring") return <RingIndicator usage={usage} />;
   if (scheme === "gauge") return <GaugeIndicator usage={usage} />;
-  return <CapsuleIndicator usage={usage} label={label} />;
+  return <CapsuleIndicator usage={usage} kind={kind} />;
 }
 
 function TaskbarWidget() {
@@ -87,7 +100,7 @@ function TaskbarWidget() {
     memory_usage: 0,
     network_available: true,
   });
-  const [metrics, setMetrics] = useState<WidgetMetricConfig[]>(FALLBACK_METRICS);
+  const [config, setConfig] = useState<WidgetConfig>(FALLBACK_CONFIG);
   const containerRef = useRef<HTMLDivElement>(null);
   const widthSyncFrame = useRef<number | null>(null);
   const pendingWidth = useRef<number | null>(null);
@@ -139,18 +152,16 @@ function TaskbarWidget() {
   useEffect(() => {
     widthSyncDisposed.current = false;
     void invoke<WidgetConfig>("get_widget_config")
-      .then((config) => setMetrics(config.metrics))
+      .then(setConfig)
       .catch((error) => console.error("任务栏挂件配置读取失败", error));
 
     const statusListener = listen<SysStatus>("sys-status-update", (event) => {
       setStatus(event.payload);
     });
     const configListener = listen<WidgetConfig>("widget-config-changed", (event) => {
-      setMetrics(event.payload.metrics);
+      setConfig(event.payload);
     });
 
-    const observer = new ResizeObserver(syncWidth);
-    if (containerRef.current) observer.observe(containerRef.current);
     syncWidth();
     void invoke("refresh_widget_position");
     // Native code refreshes immediately on width/config changes; this timer is
@@ -164,19 +175,31 @@ function TaskbarWidget() {
       pendingWidth.current = null;
       void statusListener.then((unlisten) => unlisten());
       void configListener.then((unlisten) => unlisten());
-      observer.disconnect();
       window.clearInterval(positionTimer);
     };
   }, [syncWidth]);
 
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const observer = new ResizeObserver(syncWidth);
+    observer.observe(container);
+    syncWidth();
+    const settleTimer = window.setTimeout(() => observer.disconnect(), 250);
+    return () => {
+      window.clearTimeout(settleTimer);
+      observer.disconnect();
+    };
+  }, [config.metrics, syncWidth]);
+
   const upload = status.network_available
-    ? formatSpeedParts(status.upload_speed)
+    ? formatSpeedParts(status.upload_speed, config.speed_unit)
     : { value: "—", unit: "" };
   const download = status.network_available
-    ? formatSpeedParts(status.download_speed)
+    ? formatSpeedParts(status.download_speed, config.speed_unit)
     : { value: "—", unit: "" };
 
-  const enabled = metrics.filter((metric) => metric.enabled).filter((metric) => {
+  const enabled = config.metrics.filter((metric) => metric.enabled).filter((metric) => {
     if (metric.kind === "battery") return status.battery != null;
     if (metric.kind === "cpu") return status.cpu_usage != null;
     return true;
@@ -191,8 +214,7 @@ function TaskbarWidget() {
           </div>;
         }
         const usage = metric.kind === "memory" ? status.memory_usage : metric.kind === "cpu" ? status.cpu_usage ?? 0 : status.battery?.percentage ?? 0;
-        const label = metric.kind === "memory" ? "RAM" : metric.kind === "cpu" ? "CPU" : "BAT";
-        return <MemoryIndicator key={metric.kind} usage={usage} scheme={metric.usage_scheme} label={label} />;
+        return <MemoryIndicator key={metric.kind} usage={usage} scheme={metric.usage_scheme} kind={metric.kind} />;
       })}
     </div>
   );

@@ -6,7 +6,7 @@ import { calculateArrowGeometry, drawArrow } from "./arrowGeometry";
 function geometry(
   start: { x: number; y: number },
   end: { x: number; y: number },
-  style: ArrowStyle = "outline",
+  style: ArrowStyle = "filled",
   lineWidth = 2,
   canvasScale = 1,
 ) {
@@ -36,6 +36,9 @@ function mockContext() {
     closePath: vi.fn(),
     stroke: vi.fn(),
     fill: vi.fn(),
+    measureText: vi.fn(() => ({ width: 24 })),
+    strokeText: vi.fn(),
+    fillText: vi.fn(),
   } as unknown as CanvasRenderingContext2D;
 }
 
@@ -63,10 +66,10 @@ describe("arrow geometry", () => {
     );
   });
 
-  it("stops an outline shaft at the center of the head base", () => {
+  it("stops the shaft at the center of the head base", () => {
     const result = geometry({ x: 0, y: 0 }, { x: 100, y: 0 });
     expect(result.shaftEnd).toEqual(result.heads[0].baseCenter);
-    expect(result.heads[0].filled).toBe(false);
+    expect(result.heads[0].filled).toBe(true);
   });
 
   it("keeps short double-headed arrows ordered and finite", () => {
@@ -85,10 +88,10 @@ describe("arrow geometry", () => {
     expect(at1x.headLength).toBeCloseTo(at2x.headLength / 2);
   });
 
-  it("closes and strokes an outline head without filling it", () => {
+  it("draws an open V head without filling it", () => {
     const context = mockContext();
-    drawArrow(context, { x: 0, y: 0 }, { x: 100, y: 0 }, "outline", 1, 1);
-    expect(context.closePath).toHaveBeenCalledTimes(1);
+    drawArrow(context, { x: 0, y: 0 }, { x: 100, y: 0 }, "chevron", 1, 1);
+    expect(context.closePath).not.toHaveBeenCalled();
     expect(context.stroke).toHaveBeenCalledTimes(2);
     expect(context.fill).not.toHaveBeenCalled();
   });
@@ -105,14 +108,16 @@ describe("arrow geometry", () => {
     expect(double.fill).toHaveBeenCalledTimes(2);
   });
 
-  it("exposes twelve selectable arrow styles while keeping the legacy three", () => {
-    expect(ARROW_STYLE_OPTIONS).toHaveLength(12);
-    expect(ARROW_STYLE_OPTIONS.slice(0, 3)).toEqual([
+  it("exposes the five focused arrow styles", () => {
+    expect(ARROW_STYLE_OPTIONS).toHaveLength(5);
+    expect(ARROW_STYLE_OPTIONS).toEqual([
       { value: "filled", label: "实心箭头" },
-      { value: "outline", label: "线框箭头" },
+      { value: "chevron", label: "V 形箭头" },
       { value: "double", label: "双向箭头" },
+      { value: "block", label: "块状箭头" },
+      { value: "label", label: "文字箭头" },
     ]);
-    expect(new Set(ARROW_STYLE_OPTIONS.map((option) => option.value)).size).toBe(12);
+    expect(new Set(ARROW_STYLE_OPTIONS.map((option) => option.value)).size).toBe(5);
   });
 
   it.each(ARROW_STYLE_OPTIONS.map((option) => option.value))(
@@ -124,11 +129,24 @@ describe("arrow geometry", () => {
     },
   );
 
-  it("draws each additional endpoint marker without losing the arrow shaft", () => {
-    for (const style of ARROW_STYLE_OPTIONS.slice(3)) {
-      const context = mockContext();
-      drawArrow(context, { x: 0, y: 0 }, { x: 100, y: 0 }, style.value, 1, 1);
-      expect(context.stroke).toHaveBeenCalled();
-    }
+  it("draws a filled polygon for a block arrow", () => {
+    const context = mockContext();
+    drawArrow(context, { x: 0, y: 0 }, { x: 100, y: 0 }, "block", 1, 1);
+    expect(context.closePath).toHaveBeenCalled();
+    expect(context.fill).toHaveBeenCalled();
+  });
+
+  it("measures and renders a horizontal label inside a split shaft", () => {
+    const context = mockContext();
+    drawArrow(context, { x: 0, y: 0 }, { x: 100, y: 0 }, "label", 1, 1, "说明", {
+      fontSize: 16,
+      color: "#fff",
+      font: "sans",
+      bold: false,
+      strokeColor: "#000",
+      strokeWidth: 1,
+    });
+    expect(context.measureText).toHaveBeenCalledWith("说明");
+    expect(context.fillText).toHaveBeenCalledWith("说明", expect.any(Number), expect.any(Number));
   });
 });

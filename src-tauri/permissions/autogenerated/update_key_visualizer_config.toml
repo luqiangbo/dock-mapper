@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-update-key-visualizer-config"
+description = "Enables the update_key_visualizer_config command without any pre-configured scope."
+commands.allow = ["update_key_visualizer_config"]
+
+[[permission]]
+identifier = "deny-update-key-visualizer-config"
+description = "Denies the update_key_visualizer_config command without any pre-configured scope."
+commands.deny = ["update_key_visualizer_config"]

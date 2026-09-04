@@ -108,6 +108,7 @@ interface RasterGestureSettings {
   highlightWidth: number;
   highlightOpacity: number;
   mosaicBlock: number;
+  textStyle: TextStyle;
 }
 
 type ActiveAnnotationGesture = AnnotationGesture<RasterAnnotation[]> & {
@@ -161,6 +162,12 @@ function rasterFromGesture(gesture: ActiveAnnotationGesture, scale: number): Ras
       arrowHeadSize: gesture.settings.arrowHeadSize,
       opacity: gesture.tool === "highlight" ? gesture.settings.highlightOpacity : 1,
       mosaicBlock: Math.max(4, Math.round(gesture.settings.mosaicBlock * scale)),
+      arrowLabel: "",
+      arrowLabelStyle: {
+        ...gesture.settings.textStyle,
+        fontSize: gesture.settings.textStyle.fontSize * scale,
+        strokeWidth: gesture.settings.textStyle.strokeWidth * scale,
+      },
     },
   };
 }
@@ -479,6 +486,12 @@ function ScreenshotOverlay(): React.JSX.Element {
   const [secondaryToolbarSize, setSecondaryToolbarSize] = useState<ToolbarSize>(EMPTY_TOOLBAR_SIZE);
   const [compactToolbar, setCompactToolbar] = useState(() => window.innerWidth < 680);
   const [toolbarPopupOpen, setToolbarPopupOpen] = useState(false);
+  const [arrowLabelEditor, setArrowLabelEditor] = useState<{
+    id: string;
+    original: string;
+    isNew: boolean;
+  } | null>(null);
+  const [arrowLabelDraft, setArrowLabelDraft] = useState("");
 
   useEffect(
     () => () => {
@@ -543,6 +556,8 @@ function ScreenshotOverlay(): React.JSX.Element {
     nativeInputGateRef.current.reset();
     setTextEditor(null);
     setTextDraft("");
+    setArrowLabelEditor(null);
+    setArrowLabelDraft("");
     setSelectedTextId(null);
     setSelectedNumberId(null);
     setSelectedRasterId(null);
@@ -555,17 +570,49 @@ function ScreenshotOverlay(): React.JSX.Element {
     nativeInputGateRef.current.reset();
     setTextEditor(null);
     setTextDraft("");
+    setArrowLabelEditor(null);
+    setArrowLabelDraft("");
     setSelectedTextId(null);
     setSelectedNumberId(null);
     setSelectedRasterId(null);
     redoHistory(captureObjectSnapshot());
   }, [cancelObjectMutation, captureObjectSnapshot, redoHistory]);
 
+  const commitArrowLabel = useCallback(() => {
+    if (!arrowLabelEditor) return;
+    const draft = arrowLabelDraft.trim();
+    if (!draft) {
+      if (arrowLabelEditor.isNew) undo();
+      setArrowLabelEditor(null);
+      setArrowLabelDraft("");
+      return;
+    }
+    if (!arrowLabelEditor.isNew && draft !== arrowLabelEditor.original) pushCurrentObjects();
+    setRasterAnnotations((items) => items.map((item) => item.id === arrowLabelEditor.id
+      ? { ...item, style: { ...item.style, arrowLabel: draft } }
+      : item));
+    setArrowLabelEditor(null);
+    setArrowLabelDraft("");
+  }, [arrowLabelDraft, arrowLabelEditor, pushCurrentObjects, undo]);
+
+  const cancelArrowLabel = useCallback(() => {
+    if (arrowLabelEditor?.isNew) undo();
+    setArrowLabelEditor(null);
+    setArrowLabelDraft("");
+  }, [arrowLabelEditor, undo]);
+
   useEffect(() => {
     qrRequest.current.cancel();
     setQrContents(null);
     setActiveOcrBlock(null);
   }, [selection?.x, selection?.y, selection?.width, selection?.height]);
+
+  useEffect(() => {
+    if (phase !== "editing") {
+      setArrowLabelEditor(null);
+      setArrowLabelDraft("");
+    }
+  }, [phase]);
 
   useEffect(() => {
     const gesture = annotationGestureRef.current;
@@ -1151,7 +1198,7 @@ function ScreenshotOverlay(): React.JSX.Element {
         strokeColor: obj.strokeColor,
         strokeWidth: obj.strokeWidth,
       });
-      lastTextFontSize.current = obj.fontSize;
+      lastTextFontSize.current = nearestTextSize(obj.fontSize);
       setStrokeColor(obj.color);
       setTextStyle({
         fontSize: nearestTextSize(obj.fontSize * obj.transformScale),
@@ -1532,7 +1579,7 @@ function ScreenshotOverlay(): React.JSX.Element {
   );
 
   useOverlayKeyboard({
-    blocked: Boolean(textEditor) || toolbarPopupOpen,
+    blocked: Boolean(textEditor) || Boolean(arrowLabelEditor) || toolbarPopupOpen,
     tool,
     phase,
     hasSelectedText: Boolean(selectedTextId),
@@ -1991,6 +2038,10 @@ function ScreenshotOverlay(): React.JSX.Element {
     ): boolean => {
       if (event.button !== 0) return false;
       if (phase !== "editing" || busy || !shotReady) return false;
+      if (arrowLabelEditor) {
+        commitArrowLabel();
+        return false;
+      }
       if (textEditor) {
         commitText(textDraft);
         return false;
@@ -2079,6 +2130,7 @@ function ScreenshotOverlay(): React.JSX.Element {
           highlightWidth,
           highlightOpacity,
           mosaicBlock,
+          textStyle,
         },
       };
       annotationGestureRef.current = gesture;
@@ -2112,6 +2164,8 @@ function ScreenshotOverlay(): React.JSX.Element {
       textDraft,
       commitText,
       selectedTextId,
+      arrowLabelEditor,
+      commitArrowLabel,
     ],
   );
 
@@ -2173,6 +2227,10 @@ function ScreenshotOverlay(): React.JSX.Element {
         pushCurrentObjects();
         setRasterAnnotations([...gesture.baseline, preview]);
         setSelectedRasterId(preview.id);
+        if (preview.kind === "arrow" && preview.style.arrowStyle === "label") {
+          setArrowLabelDraft("");
+          setArrowLabelEditor({ id: preview.id, original: "", isNew: true });
+        }
       }
     },
     [cancelAnnotationPreview, flushAnnotationPreview, pushCurrentObjects, selection?.width],
@@ -2356,6 +2414,17 @@ function ScreenshotOverlay(): React.JSX.Element {
       rasterStylePatch.opacity = changes.highlightOpacity;
     if (changes.mosaicBlock !== undefined && selectedRaster?.kind === "mosaic")
       rasterStylePatch.mosaicBlock = changes.mosaicBlock * annotationScale;
+    if (
+      changes.textStyle !== undefined &&
+      selectedRaster?.kind === "arrow" &&
+      selectedRaster.style.arrowStyle === "label"
+    ) {
+      rasterStylePatch.arrowLabelStyle = {
+        ...changes.textStyle,
+        fontSize: changes.textStyle.fontSize * annotationScale,
+        strokeWidth: changes.textStyle.strokeWidth * annotationScale,
+      };
+    }
     const changesRaster = Boolean(
       selectedRaster &&
       (Object.keys(rasterStylePatch) as Array<keyof RasterAnnotation["style"]>).some(
@@ -2428,7 +2497,7 @@ function ScreenshotOverlay(): React.JSX.Element {
       });
       const fontSizeChanged = styleDelta.fontSize !== undefined;
       setTextStyle(changes.textStyle);
-      lastTextFontSize.current = changes.textStyle.fontSize;
+      lastTextFontSize.current = nearestTextSize(changes.textStyle.fontSize);
       setTextEditor((current) =>
         current
           ? {
@@ -2530,6 +2599,13 @@ function ScreenshotOverlay(): React.JSX.Element {
                   setFillOpacity(annotation.style.fillOpacity);
                   setArrowStyle(annotation.style.arrowStyle);
                   setArrowHeadSize(annotation.style.arrowHeadSize);
+                  if (annotation.style.arrowLabelStyle) {
+                    setTextStyle({
+                      ...annotation.style.arrowLabelStyle,
+                      fontSize: annotation.style.arrowLabelStyle.fontSize / scaleX,
+                      strokeWidth: annotation.style.arrowLabelStyle.strokeWidth / scaleX,
+                    });
+                  }
                   if (annotation.kind === "pen")
                     setPenWidth(Math.max(1, Math.round(annotation.style.strokeWidth / scaleX)));
                   if (annotation.kind === "highlight") {
@@ -2551,6 +2627,18 @@ function ScreenshotOverlay(): React.JSX.Element {
                     changed: false,
                   };
                   beginObjectMutation();
+                }}
+                onDoubleClick={(event) => {
+                  if (annotation.kind !== "arrow" || annotation.style.arrowStyle !== "label") return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  cancelObjectMutation();
+                  setArrowLabelDraft(annotation.style.arrowLabel ?? "");
+                  setArrowLabelEditor({
+                    id: annotation.id,
+                    original: annotation.style.arrowLabel ?? "",
+                    isNew: false,
+                  });
                 }}
               >
                 {selected &&
@@ -2579,6 +2667,42 @@ function ScreenshotOverlay(): React.JSX.Element {
               </div>
             );
           })}
+          {arrowLabelEditor && (() => {
+            const annotation = rasterAnnotations.find((item) => item.id === arrowLabelEditor.id);
+            const canvas = shotRef.current;
+            if (!annotation || !canvas) return null;
+            const first = annotation.points[0];
+            const last = annotation.points[annotation.points.length - 1] ?? first;
+            const scaleX = canvas.width / Math.max(1, selection.width);
+            const scaleY = canvas.height / Math.max(1, displayHeight);
+            const labelStyle = annotation.style.arrowLabelStyle ?? DEFAULT_TEXT_STYLE;
+            return <input
+              autoFocus
+              className="inline-arrow-label-editor"
+              value={arrowLabelDraft}
+              placeholder="输入箭头文字"
+              style={{
+                left: ((first.x + last.x) / 2) / scaleX,
+                top: ((first.y + last.y) / 2) / scaleY,
+                color: labelStyle.color,
+                fontFamily: fontFamily(labelStyle.font),
+                fontSize: labelStyle.fontSize / scaleX,
+                fontWeight: labelStyle.bold ? 700 : 400,
+              }}
+              onChange={(event) => setArrowLabelDraft(event.target.value)}
+              onPointerDown={(event) => event.stopPropagation()}
+              onBlur={commitArrowLabel}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  commitArrowLabel();
+                } else if (event.key === "Escape") {
+                  event.preventDefault();
+                  cancelArrowLabel();
+                }
+              }}
+            />;
+          })()}
           {textObjects.map((obj) => {
             if (textEditor?.id === obj.id) return null;
             const canvas = shotRef.current;
@@ -2991,6 +3115,7 @@ function ScreenshotOverlay(): React.JSX.Element {
             }}
             onToolChange={(next) => {
               if (textEditor) commitText(textDraft);
+              if (arrowLabelEditor) commitArrowLabel();
               if (objectMutationRef.current.active) {
                 commitObjectMutation(objectStyleChangedRef.current);
                 objectStyleChangedRef.current = false;

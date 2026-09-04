@@ -5,6 +5,7 @@ mod dxgi_capture;
 mod history;
 mod image_store;
 mod key_mapping;
+mod key_visualizer;
 mod ocr;
 mod runtime_health;
 mod scancode_mapper;
@@ -331,9 +332,9 @@ pub struct AppState {
     pub config: Mutex<config::AppConfig>,
     pub images: image_store::ImageStore,
     pub history: Arc<history::HistoryStore>,
-    config_path: PathBuf,
+    pub(crate) config_path: PathBuf,
     widget_width: Mutex<f64>,
-    mutation_lock: Mutex<()>,
+    pub(crate) mutation_lock: Mutex<()>,
     admin_operation_in_progress: AtomicBool,
 }
 
@@ -892,9 +893,9 @@ pub fn run() {
             let app_data_dir = app.path().app_data_dir()?;
             let config_path = app_data_dir.join("config.json");
             let loaded_config = config::load(&config_path);
+            let key_visualizer_config = loaded_config.key_visualizer_config.clone();
             let history = Arc::new(history::HistoryStore::new(app_data_dir.join("history"))?);
             let monitor_interval = loaded_config.widget_config.refresh_interval_secs;
-            let monitor_interface = loaded_config.widget_config.network_interface.clone();
             let state = AppState {
                 config: Mutex::new(loaded_config),
                 images: image_store::ImageStore::default(),
@@ -905,10 +906,8 @@ pub fn run() {
                 admin_operation_in_progress: AtomicBool::new(false),
             };
             app.manage(state);
-            app.manage(sys_monitor::SysMonitorControl::new(
-                monitor_interval,
-                monitor_interface,
-            ));
+            app.manage(key_visualizer::KeyVisualizerRuntime::default());
+            app.manage(sys_monitor::SysMonitorControl::new(monitor_interval));
             app.manage(ocr::OcrService::new(app.handle())?);
             if let Err(error) = screenshot::initialize(app.handle()) {
                 tracing::error!(target: "dock_mapper::shortcut", %error, "注册截图快捷键失败");
@@ -935,6 +934,11 @@ pub fn run() {
             }
 
             widget::setup_window(app)?;
+            key_visualizer::setup_window(app)?;
+
+            if let Err(error) = key_visualizer::initialize(app.handle(), &key_visualizer_config) {
+                tracing::error!(target: "dock_mapper::key_visualizer", %error, "启动按键文本失败");
+            }
 
             sys_monitor::start_sys_monitor(app.handle().clone());
             Ok(())
@@ -992,9 +996,12 @@ pub fn run() {
             decode_qr_selection,
             widget::refresh_widget_position,
             widget::get_widget_config,
-            widget::get_network_interfaces,
             widget::update_widget_config,
             widget::sync_widget_dynamic_width,
+            key_visualizer::get_key_visualizer_config,
+            key_visualizer::update_key_visualizer_config,
+            key_visualizer::get_key_visualizer_status,
+            key_visualizer::retry_key_visualizer,
             get_minimize_to_tray,
             set_minimize_to_tray,
         ])
@@ -1008,6 +1015,9 @@ pub fn run() {
         ) {
             if let Some(control) = app.try_state::<sys_monitor::SysMonitorControl>() {
                 control.shutdown();
+            }
+            if let Some(runtime) = app.try_state::<key_visualizer::KeyVisualizerRuntime>() {
+                runtime.stop();
             }
         }
     });

@@ -63,6 +63,19 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "visible": true
+      },
+      {
+        "label": "key_visualizer",
+        "url": "/key-visualizer.html",
+        "width": 360,
+        "height": 250,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": false,
+        "visible": false
       }
     ],
     "security": {

@@ -1,4 +1,6 @@
 fn main() {
+    println!("cargo:rerun-if-changed=icons/icon.ico");
+
     const COMMANDS: &[&str] = &[
         "get_supported_keys",
         "get_key_mappings",
@@ -51,11 +53,14 @@ fn main() {
         "decode_qr_selection",
         "refresh_widget_position",
         "get_widget_config",
-        "get_network_interfaces",
         "update_widget_config",
         "sync_widget_dynamic_width",
         "get_minimize_to_tray",
         "set_minimize_to_tray",
+        "get_key_visualizer_config",
+        "update_key_visualizer_config",
+        "get_key_visualizer_status",
+        "retry_key_visualizer",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

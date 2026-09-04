@@ -1,4 +1,4 @@
-import type { ArrowStyle } from "./annotationTypes";
+import type { ArrowStyle, TextStyle } from "./annotationTypes";
 import { drawArrow } from "./arrowGeometry";
 
 export interface ScenePoint {
@@ -14,6 +14,8 @@ export interface RasterAnnotationStyle {
   arrowHeadSize: number;
   opacity: number;
   mosaicBlock: number;
+  arrowLabel?: string;
+  arrowLabelStyle?: TextStyle;
 }
 
 export type RasterAnnotationKind = "rect" | "ellipse" | "arrow" | "pen" | "highlight" | "mosaic";
@@ -33,7 +35,10 @@ export interface SceneBounds {
 }
 
 function annotationPadding(annotation: RasterAnnotation): number {
-  return Math.max(4, annotation.style.strokeWidth / 2);
+  const labelPadding = annotation.kind === "arrow" && annotation.style.arrowStyle === "label"
+    ? (annotation.style.arrowLabelStyle?.fontSize ?? 0) / 2 + 6
+    : 0;
+  return Math.max(4, annotation.style.strokeWidth / 2, labelPadding);
 }
 
 export function annotationGeometryBounds(annotation: RasterAnnotation): SceneBounds {
@@ -55,7 +60,10 @@ export function cloneRasterAnnotations(items: RasterAnnotation[]): RasterAnnotat
   return items.map((item) => ({
     ...item,
     points: item.points.map((point) => ({ ...point })),
-    style: { ...item.style },
+    style: {
+      ...item.style,
+      arrowLabelStyle: item.style.arrowLabelStyle ? { ...item.style.arrowLabelStyle } : undefined,
+    },
   }));
 }
 
@@ -80,6 +88,21 @@ export function simplifyScenePoints(points: ScenePoint[], minimumDistance = 1): 
 export function annotationBounds(annotation: RasterAnnotation): SceneBounds {
   const geometry = annotationGeometryBounds(annotation);
   const padding = annotationPadding(annotation);
+  if (annotation.kind === "arrow" && annotation.style.arrowStyle === "label") {
+    const first = annotation.points[0];
+    const last = annotation.points[annotation.points.length - 1] ?? first;
+    const label = annotation.style.arrowLabel?.trim() ?? "";
+    const fontSize = annotation.style.arrowLabelStyle?.fontSize ?? 24;
+    const labelWidth = Math.max(fontSize * 1.5, label.length * fontSize * 0.68) + 16;
+    const labelHeight = fontSize + 12;
+    const labelX = (first.x + last.x) / 2 - labelWidth / 2;
+    const labelY = (first.y + last.y) / 2 - labelHeight / 2;
+    const left = Math.min(geometry.x - padding, labelX);
+    const top = Math.min(geometry.y - padding, labelY);
+    const right = Math.max(geometry.x + geometry.width + padding, labelX + labelWidth);
+    const bottom = Math.max(geometry.y + geometry.height + padding, labelY + labelHeight);
+    return { x: left, y: top, width: right - left, height: bottom - top };
+  }
   return {
     x: geometry.x - padding,
     y: geometry.y - padding,
@@ -119,8 +142,17 @@ export function resizeAnnotation(
   const targetY = nextBounds.y + padding;
   const scaleX = targetWidth / current.width;
   const scaleY = targetHeight / current.height;
+  const labelScale = Math.max(0.1, (Math.abs(scaleX) + Math.abs(scaleY)) / 2);
   return {
     ...annotation,
+    style: annotation.style.arrowLabelStyle ? {
+      ...annotation.style,
+      arrowLabelStyle: {
+        ...annotation.style.arrowLabelStyle,
+        fontSize: Math.max(8, Math.round(annotation.style.arrowLabelStyle.fontSize * labelScale)),
+        strokeWidth: annotation.style.arrowLabelStyle.strokeWidth * labelScale,
+      },
+    } : annotation.style,
     points: annotation.points.map((point) => ({
       x: targetX + (point.x - current.x) * scaleX,
       y: targetY + (point.y - current.y) * scaleY,
@@ -235,7 +267,7 @@ export function drawRasterAnnotation(
     }
     context.stroke();
   } else if (annotation.kind === "arrow") {
-    drawArrow(context, first, last, style.arrowStyle, style.arrowHeadSize, canvasScale);
+    drawArrow(context, first, last, style.arrowStyle, style.arrowHeadSize, canvasScale, style.arrowLabel, style.arrowLabelStyle);
   }
   context.restore();
 }

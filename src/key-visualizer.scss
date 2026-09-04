@@ -1,0 +1,87 @@
+:root {
+  font-family: "Segoe UI Variable", "Microsoft YaHei UI", sans-serif;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+}
+
+.key-visualizer-surface {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 0;
+  pointer-events: none;
+}
+
+.key-entry-list {
+  display: flex;
+  min-height: 0;
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  gap: 6px;
+  transform: scale(var(--visualizer-scale, 1));
+  transform-origin: bottom left;
+}
+
+.key-entry {
+  display: flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  overflow: hidden;
+  color: #fff;
+  font-size: var(--key-font-size, 28px);
+  font-weight: 650;
+  line-height: 1.18;
+  text-shadow: 0 1px 2px #000;
+  animation: key-entry-in 150ms ease-out;
+  transition: opacity 150ms linear;
+}
+
+.key-entry span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.key-entry strong {
+  flex: none;
+  color: #7dd3fc;
+  font-size: 0.62em;
+  font-variant-numeric: tabular-nums;
+}
+
+.key-visualizer-error,
+.key-visualizer-loading {
+  position: absolute;
+  inset: auto 12px 12px;
+  padding: 12px;
+  color: #fff;
+  text-align: center;
+  text-shadow: 0 1px 3px #000;
+}
+
+.key-visualizer-error small { color: #fca5a5; }
+
+@keyframes key-entry-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .key-entry { animation: none; }
+}

@@ -16,29 +16,30 @@
     "runtime:prepare": "node .github/scripts/prepare-vcredist.mjs"
   },
   "dependencies": {
-    "@ant-design/icons": "6.3.2",
+    "@ant-design/icons": "6.3.4",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-autostart": "^2.5.1",
-    "@tauri-apps/plugin-opener": "^2.5.4",
+    "@tauri-apps/plugin-opener": "^2.5.5",
     "@tauri-apps/plugin-process": "^2.3.1",
-    "@tauri-apps/plugin-updater": "^2.10.1",
+    "@tauri-apps/plugin-updater": "^2.11.0",
     "antd": "6.6.2",
-    "lucide-react": "1.37.0",
+    "echarts": "6.1.0",
+    "lucide-react": "1.41.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
-    "@rsbuild/core": "^2.2.1",
+    "@rsbuild/core": "^2.2.3",
     "@rsbuild/plugin-react": "^2.1.0",
     "@rsbuild/plugin-sass": "2.0.1",
     "@tauri-apps/cli": "^2.11.4",
     "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.5",
-    "oxfmt": "^0.65.0",
-    "oxlint": "^1.80.0",
-    "sass": "1.103.1",
+    "@types/react-dom": "^19.2.7",
+    "oxfmt": "^0.66.0",
+    "oxlint": "^1.81.0",
+    "sass": "1.104.0",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.0"
   },
   "packageManager": "pnpm@11.20.0"
 }

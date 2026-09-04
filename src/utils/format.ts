@@ -1,3 +1,5 @@
+import type { SpeedUnit } from "../types";
+
 export function formatSpeed(bytesPerSec: number): string {
   if (bytesPerSec < 1024) return `${bytesPerSec.toFixed(0)} B/s`;
   const kib = bytesPerSec / 1024;
@@ -5,9 +7,14 @@ export function formatSpeed(bytesPerSec: number): string {
   return `${(kib / 1024).toFixed(1)} MB/s`;
 }
 
-export function formatSpeedParts(bytesPerSec: number): { value: string; unit: string } {
+export function formatSpeedParts(
+  bytesPerSec: number,
+  unit: SpeedUnit = "auto",
+): { value: string; unit: string } {
+  if (unit === "kb") return { value: (bytesPerSec / 1024).toFixed(1), unit: "KB/s" };
+  if (unit === "mb") return { value: (bytesPerSec / 1024 / 1024).toFixed(1), unit: "MB/s" };
   if (bytesPerSec < 1024) return { value: bytesPerSec.toFixed(0), unit: "B/s" };
   const kib = bytesPerSec / 1024;
-  if (kib < 1024) return { value: kib.toFixed(1), unit: "K/s" };
-  return { value: (kib / 1024).toFixed(1), unit: "M/s" };
+  if (kib < 1024) return { value: kib.toFixed(1), unit: "KB/s" };
+  return { value: (kib / 1024).toFixed(1), unit: "MB/s" };
 }

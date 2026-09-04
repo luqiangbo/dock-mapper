@@ -64,4 +64,28 @@ describe("retained annotation scene", () => {
     );
     expect(annotationBounds(resized)).toEqual({ x: 5, y: 7, width: 120, height: 90 });
   });
+
+  it("includes a long horizontal arrow label in selection and hit testing", () => {
+    const labeled: RasterAnnotation = {
+      ...rectangle,
+      kind: "arrow",
+      points: [{ x: 40, y: 40 }, { x: 80, y: 40 }],
+      style: {
+        ...rectangle.style,
+        arrowStyle: "label",
+        arrowLabel: "需要一起移动的说明",
+        arrowLabelStyle: {
+          fontSize: 24,
+          color: "#fff",
+          font: "sans",
+          bold: false,
+          strokeColor: "#000",
+          strokeWidth: 1,
+        },
+      },
+    };
+    const bounds = annotationBounds(labeled);
+    expect(bounds.width).toBeGreaterThan(140);
+    expect(hitTestAnnotation(labeled, { x: bounds.x + 2, y: 40 })).toBe(true);
+  });
 });

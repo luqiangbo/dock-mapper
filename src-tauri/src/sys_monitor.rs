@@ -23,7 +23,6 @@ pub struct BatteryStatus {
 struct MonitorSettings {
     interval_secs: u8,
     shutdown: bool,
-    network_interface: Option<String>,
 }
 
 pub struct SysMonitorControl {
@@ -31,11 +30,10 @@ pub struct SysMonitorControl {
 }
 
 impl SysMonitorControl {
-    pub fn new(interval_secs: u8, network_interface: Option<String>) -> Self {
+    pub fn new(interval_secs: u8) -> Self {
         let (settings, _) = watch::channel(MonitorSettings {
             interval_secs: interval_secs.clamp(1, 5),
             shutdown: false,
-            network_interface,
         });
         Self { settings }
     }
@@ -51,11 +49,6 @@ impl SysMonitorControl {
             .send_modify(|settings| settings.shutdown = true);
     }
 
-    pub fn set_network_interface(&self, network_interface: Option<String>) {
-        self.settings.send_modify(|settings| {
-            settings.network_interface = network_interface;
-        });
-    }
 }
 
 pub fn start_sys_monitor(app: AppHandle) {
@@ -79,25 +72,21 @@ pub fn start_sys_monitor(app: AppHandle) {
             networks.refresh();
             sys.refresh_memory();
             sys.refresh_cpu_usage();
-            let selected = current.network_interface.as_deref();
-            let network_available = selected.map_or_else(
-                || networks.iter().any(|(name, _)| !is_virtual_adapter(name)),
-                |value| networks.iter().any(|(name, _)| value == *name),
-            );
+            let network_available = networks.iter().any(|(name, _)| !is_virtual_adapter(name));
             let total_rx = networks
                 .iter()
-                .filter(|(name, _)| selected.map_or_else(|| !is_virtual_adapter(name), |value| value == *name))
+                .filter(|(name, _)| !is_virtual_adapter(name))
                 .map(|(_, data)| data.total_received())
                 .sum::<u64>();
             let total_tx = networks
                 .iter()
-                .filter(|(name, _)| selected.map_or_else(|| !is_virtual_adapter(name), |value| value == *name))
+                .filter(|(name, _)| !is_virtual_adapter(name))
                 .map(|(_, data)| data.total_transmitted())
                 .sum::<u64>();
             let now = Instant::now();
             let elapsed = now.duration_since(previous_tick).as_secs_f64().max(0.001);
             let (upload_speed, download_speed) = baseline.sample(
-                current.network_interface.as_deref(),
+                None,
                 network_available,
                 total_rx,
                 total_tx,
@@ -218,7 +207,7 @@ mod tests {
 
     #[test]
     fn monitor_interval_is_clamped_and_shutdown_is_observable() {
-        let control = SysMonitorControl::new(0, None);
+        let control = SysMonitorControl::new(0);
         assert_eq!(control.settings.borrow().interval_secs, 1);
         control.set_interval(9);
         assert_eq!(control.settings.borrow().interval_secs, 5);

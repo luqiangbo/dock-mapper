@@ -17,6 +17,15 @@ pub type UsageScheme = MemoryScheme;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum SpeedUnit {
+    #[default]
+    Auto,
+    Kb,
+    Mb,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum WidgetMetricKind {
     #[default]
     Network,
@@ -51,7 +60,10 @@ pub struct WidgetConfig {
     pub memory_scheme: MemoryScheme,
     pub metrics: Vec<WidgetMetricConfig>,
     pub refresh_interval_secs: u8,
+    /// Retained for backwards-compatible reads. Automatic adapter selection is
+    /// now always used and normalization clears any legacy explicit value.
     pub network_interface: Option<String>,
+    pub speed_unit: SpeedUnit,
 }
 
 impl Default for WidgetConfig {
@@ -64,12 +76,20 @@ impl Default for WidgetConfig {
             ],
             refresh_interval_secs: 1,
             network_interface: None,
+            speed_unit: SpeedUnit::Auto,
         }
     }
 }
 
 impl WidgetConfig {
     pub fn normalize(&mut self) {
+        self.refresh_interval_secs = match self.refresh_interval_secs {
+            1 | 2 | 3 | 5 => self.refresh_interval_secs,
+            0 => 1,
+            4 => 3,
+            _ => 5,
+        };
+        self.network_interface = None;
         let mut normalized = Vec::new();
         for metric in std::mem::take(&mut self.metrics) {
             if metric.kind == WidgetMetricKind::DiskIoLegacy {
@@ -143,18 +163,6 @@ pub fn get_widget_config(state: State<'_, AppState>) -> Result<WidgetConfig, Str
 }
 
 #[tauri::command]
-pub fn get_network_interfaces() -> Vec<String> {
-    let networks = sysinfo::Networks::new_with_refreshed_list();
-    let mut names = networks
-        .iter()
-        .map(|(name, _)| name.to_string())
-        .collect::<Vec<_>>();
-    names.sort();
-    names.dedup();
-    names
-}
-
-#[tauri::command]
 pub fn update_widget_config(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -164,7 +172,6 @@ pub fn update_widget_config(
         .mutation_lock
         .lock()
         .map_err(|_| "配置写入锁已损坏".to_string())?;
-    config.refresh_interval_secs = config.refresh_interval_secs.clamp(1, 5);
     config.normalize();
     let previous_config = {
         let mut current = state
@@ -184,7 +191,6 @@ pub fn update_widget_config(
     }
     if let Some(control) = app.try_state::<sys_monitor::SysMonitorControl>() {
         control.set_interval(config.refresh_interval_secs);
-        control.set_network_interface(config.network_interface.clone());
     }
     let width = state
         .widget_width
@@ -318,5 +324,19 @@ mod tests {
             .metrics
             .iter()
             .any(|metric| metric.kind == WidgetMetricKind::Cpu && metric.enabled));
+    }
+
+    #[test]
+    fn normalize_migrates_explicit_adapter_and_unsupported_intervals_to_safe_options() {
+        let mut config = WidgetConfig {
+            refresh_interval_secs: 4,
+            network_interface: Some("Ethernet".into()),
+            speed_unit: SpeedUnit::Mb,
+            ..WidgetConfig::default()
+        };
+        config.normalize();
+        assert_eq!(config.refresh_interval_secs, 3);
+        assert_eq!(config.network_interface, None);
+        assert_eq!(config.speed_unit, SpeedUnit::Mb);
     }
 }
