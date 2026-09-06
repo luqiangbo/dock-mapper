@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-key-visualizer-ready"
+description = "Enables the key_visualizer_ready command without any pre-configured scope."
+commands.allow = ["key_visualizer_ready"]
+
+[[permission]]
+identifier = "deny-key-visualizer-ready"
+description = "Denies the key_visualizer_ready command without any pre-configured scope."
+commands.deny = ["key_visualizer_ready"]

@@ -1,0 +1,61 @@
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  pointer-events: none;
+}
+.presentation-surface {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+.presentation-halo {
+  position: absolute;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: #ffdc0040;
+  border: 1px solid #ffdc0080;
+  transform: translate(-50%, -50%);
+}
+.presentation-ring {
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  border: 3px solid #29b6ff;
+  border-radius: 50%;
+  animation: presentation-pulse 600ms ease-out both;
+}
+.presentation-ring.right {
+  border-color: #ff6e91;
+}
+.presentation-ring.middle {
+  border-color: #bc8aff;
+}
+.presentation-ring.locate {
+  width: 80px;
+  height: 80px;
+  border-color: #ffdc00;
+  border-width: 5px;
+  animation-duration: 1000ms;
+}
+@keyframes presentation-pulse {
+  from {
+    transform: translate(-50%, -50%) scale(0.5);
+    opacity: 1;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(2);
+    opacity: 0;
+  }
+}
+.presentation-error {
+  padding: 12px;
+  background: #641a1a;
+  color: white;
+  font: 14px system-ui;
+}

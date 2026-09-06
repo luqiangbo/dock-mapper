@@ -7,6 +7,9 @@ import type {
   KeyMapping,
   KeyVisualizerConfig,
   KeyVisualizerStatus,
+  KeyVisualizerSession,
+  PresentationConfig,
+  PresentationStatus,
   RuntimeHealth,
   ScancodeMapStatus,
   ScreenshotConfig,
@@ -24,6 +27,10 @@ export const MAIN_EVENTS = {
   shortcutStatusChanged: "shortcut-status-changed",
   keyVisualizerConfigChanged: "key-visualizer-config-changed",
   keyVisualizerInput: "key-visualizer-input",
+  keyVisualizerSession: "key-visualizer-session",
+  presentationStatus: "presentation-status",
+  presentationMouse: "presentation-mouse",
+  presentationLocks: "presentation-locks",
 } as const;
 
 export function errorMessage(error: unknown): string {
@@ -59,8 +66,7 @@ export const screenshotSettingsApi = {
   get: () => invoke<ScreenshotConfig>("get_screenshot_config"),
   update: (screenshotConfig: ScreenshotConfig) =>
     invoke<ScreenshotConfig>("update_screenshot_config", { screenshotConfig }),
-  shortcutStatuses: () =>
-    invoke<ShortcutRuntimeStatus[]>("get_screenshot_shortcut_statuses"),
+  shortcutStatuses: () => invoke<ShortcutRuntimeStatus[]>("get_screenshot_shortcut_statuses"),
   resetShortcuts: () => invoke<ScreenshotConfig>("reset_screenshot_shortcuts"),
   chooseSaveDirectory: () => invoke<string | null>("choose_screenshot_save_directory"),
   start: () => invoke<void>("start_screenshot"),
@@ -77,8 +83,7 @@ export const paletteApi = {
 
 export const generalSettingsApi = {
   minimizeToTray: () => invoke<boolean>("get_minimize_to_tray"),
-  setMinimizeToTray: (enabled: boolean) =>
-    invoke<void>("set_minimize_to_tray", { enabled }),
+  setMinimizeToTray: (enabled: boolean) => invoke<void>("set_minimize_to_tray", { enabled }),
   exportDiagnostics: () => invoke<string | null>("export_diagnostics"),
 };
 
@@ -88,11 +93,25 @@ export const widgetApi = {
 };
 
 export const keyVisualizerApi = {
+  ready: (generation: number) => invoke<void>("key_visualizer_ready", { generation }),
+  session: () => invoke<KeyVisualizerSession>("get_key_visualizer_session"),
   config: () => invoke<KeyVisualizerConfig>("get_key_visualizer_config"),
   update: (keyVisualizerConfig: KeyVisualizerConfig) =>
     invoke<KeyVisualizerConfig>("update_key_visualizer_config", { keyVisualizerConfig }),
   status: () => invoke<KeyVisualizerStatus>("get_key_visualizer_status"),
   retry: () => invoke<KeyVisualizerStatus>("retry_key_visualizer"),
+};
+
+export const presentationApi = {
+  config: () => invoke<PresentationConfig>("get_presentation_config"),
+  status: () => invoke<PresentationStatus>("get_presentation_status"),
+  update: (presentationConfig: PresentationConfig) =>
+    invoke<PresentationConfig>("update_presentation_config", { presentationConfig }),
+  setEnabled: (enabled: boolean) =>
+    invoke<PresentationStatus>("set_presentation_enabled", { enabled }),
+  retry: () => invoke<PresentationStatus>("retry_presentation"),
+  locate: () => invoke<void>("locate_presentation_mouse"),
+  ready: () => invoke<PresentationStatus>("presentation_ready"),
 };
 
 export const runtimeApi = {

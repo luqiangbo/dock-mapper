@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-presentation-enabled"
+description = "Enables the set_presentation_enabled command without any pre-configured scope."
+commands.allow = ["set_presentation_enabled"]
+
+[[permission]]
+identifier = "deny-set-presentation-enabled"
+description = "Denies the set_presentation_enabled command without any pre-configured scope."
+commands.deny = ["set_presentation_enabled"]

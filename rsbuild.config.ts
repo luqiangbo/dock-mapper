@@ -9,11 +9,13 @@ export default defineConfig({
       index: "./src/main-entry.tsx",
       screenshot: "./src/screenshot-entry.tsx",
       widget: "./src/widget-entry.tsx",
+      presentation: "./src/presentation-entry.tsx",
       "key-visualizer": "./src/key-visualizer-entry.tsx",
     },
   },
   html: {
     template({ entryName }) {
+      if (entryName === "presentation") return "./presentation.html";
       if (entryName === "widget") {
         return "./widget.html";
       }
@@ -25,7 +27,7 @@ export default defineConfig({
   },
   server: {
     host: "127.0.0.1",
-    port: 13301,
+    port: 1420,
     strictPort: true,
   },
 });

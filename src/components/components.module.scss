@@ -492,6 +492,53 @@ $compact-radius: 10px;
   gap: 14px;
 }
 
+.settingsForm {
+  :global(.ant-form-item) {
+    margin-bottom: 14px;
+  }
+
+  :global(.ant-form-item-label > label) {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+
+  :global(.ant-select) {
+    min-width: 140px;
+  }
+}
+
+.multiSelect {
+  width: 100%;
+}
+
+.formFieldGrid,
+.formSwitchGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+}
+
+.formSwitchGrid :global(.ant-form-item) {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--glass-surface) 70%, transparent);
+}
+
+.formSwitchGrid :global(.ant-form-item-label) {
+  flex: 1;
+  padding: 0;
+}
+
+.formSwitchGrid :global(.ant-form-item-control) {
+  flex: 0;
+}
+
 .centerState {
   display: grid;
   min-height: 280px;
@@ -559,17 +606,38 @@ $compact-radius: 10px;
   }
 }
 
-.visualizerControl {
+.numericConfigGrid {
   display: grid;
-  grid-template-columns: 150px minmax(180px, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.numericConfigItem {
+  display: flex;
+  min-width: 0;
   align-items: center;
-  gap: 16px;
-  margin-bottom: 12px;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--glass-surface) 70%, transparent);
 
   > div:first-child {
     display: flex;
-    justify-content: space-between;
-    gap: 12px;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  :global(.ant-form-item) {
+    flex: 0 0 92px;
+    margin: 0;
+  }
+
+  :global(.ant-input-number) {
+    width: 100%;
   }
 }
 
@@ -792,10 +860,16 @@ $compact-radius: 10px;
     grid-template-columns: 1fr;
   }
 
-  .visualizerControl {
+  .formFieldGrid,
+  .formSwitchGrid {
     grid-template-columns: 1fr;
-    gap: 4px;
   }
+
+  .numericConfigGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .numericConfigItem :global(.ant-form-item) { flex-basis: 120px; }
 }
 
 @media (forced-colors: active) {

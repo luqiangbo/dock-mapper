@@ -2,32 +2,12 @@ use crate::{config, AppState};
 use serde::Serialize;
 use std::{
     collections::HashSet,
-    mem::size_of,
     sync::{mpsc, Mutex},
     thread::{self, JoinHandle},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State};
-use windows::{
-    core::{w, PCWSTR},
-    Win32::{
-        Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM},
-        System::{LibraryLoader::GetModuleHandleW, Threading::GetCurrentThreadId},
-        UI::{
-            Input::{
-                GetRawInputData, RegisterRawInputDevices, HRAWINPUT, RAWINPUT, RAWINPUTDEVICE,
-                RIDEV_INPUTSINK, RIDEV_REMOVE, RID_INPUT, RIM_TYPEKEYBOARD,
-            },
-            WindowsAndMessaging::{
-                CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
-                GetWindowLongPtrW, PostThreadMessageW, RegisterClassW,
-                SetWindowLongPtrW, TranslateMessage, CREATESTRUCTW, GWLP_USERDATA, HWND_MESSAGE,
-                MSG, RI_KEY_BREAK, WINDOW_EX_STYLE, WINDOW_STYLE, WM_INPUT, WM_NCCREATE, WM_QUIT,
-                WNDCLASSW,
-            },
-        },
-    },
-};
+use windows::Win32::{Foundation::{LPARAM, WPARAM}, UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT}};
 
 const WINDOW_LABEL: &str = "key_visualizer";
 const EVENT_INPUT: &str = "key-visualizer-input";
@@ -50,6 +30,7 @@ pub struct KeyVisualizerInput {
     category: KeyCategory,
     repeat: u32,
     timestamp_ms: u64,
+    generation: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -66,6 +47,9 @@ struct ListenerHandle {
 pub struct KeyVisualizerRuntime {
     listener: Mutex<Option<ListenerHandle>>,
     status: Mutex<KeyVisualizerStatus>,
+    generation: std::sync::atomic::AtomicU64,
+    effective: Mutex<config::KeyVisualizerConfig>,
+    ready_generation: std::sync::atomic::AtomicU64,
 }
 
 impl Default for KeyVisualizerRuntime {
@@ -73,11 +57,18 @@ impl Default for KeyVisualizerRuntime {
         Self {
             listener: Mutex::new(None),
             status: Mutex::new(KeyVisualizerStatus::default()),
+            generation: std::sync::atomic::AtomicU64::new(0),
+            effective: Mutex::new(config::KeyVisualizerConfig::default()),
+            ready_generation: std::sync::atomic::AtomicU64::new(0),
         }
     }
 }
 
 impl KeyVisualizerRuntime {
+    pub(crate) fn is_ready(&self) -> bool {
+        !self.effective.lock().unwrap_or_else(|e| e.into_inner()).enabled || self.ready_generation.load(std::sync::atomic::Ordering::SeqCst) == self.generation.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
     fn status(&self) -> KeyVisualizerStatus {
         self.status.lock().map(|value| value.clone()).unwrap_or_else(|_| KeyVisualizerStatus {
             listening: false,
@@ -93,10 +84,11 @@ impl KeyVisualizerRuntime {
 
     fn start(&self, app: AppHandle, config: config::KeyVisualizerConfig) -> Result<(), String> {
         self.stop();
-        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        // Rendezvous prevents a timed-out listener from entering an orphaned message loop.
+        let (ready_tx, ready_rx) = mpsc::sync_channel(0);
         let join = match thread::Builder::new()
             .name("dockmapper-raw-input".into())
-            .spawn(move || raw_input_thread(app, config, ready_tx))
+            .spawn(move || crate::raw_input::raw_input_thread(app, config, ready_tx))
         {
             Ok(join) => join,
             Err(error) => {
@@ -135,12 +127,17 @@ impl KeyVisualizerRuntime {
         self.set_status(false, None);
     }
 
-    fn apply(&self, app: &AppHandle, config: &config::KeyVisualizerConfig) -> Result<(), String> {
+    pub(crate) fn apply(&self, app: &AppHandle, ordinary: &config::KeyVisualizerConfig) -> Result<(), String> {
+        self.stop();
+        self.generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let config = crate::presentation::effective_keys(app, ordinary);
+        *self.effective.lock().map_err(|_| "按键展示状态已损坏")? = config.clone();
+        let config = &config;
         if let Err(error) = configure_window(app, config) {
             self.set_status(false, Some(error.clone()));
             return Err(error);
         }
-        if config.enabled {
+        if config.enabled || crate::presentation::needs_input(app) {
             self.start(app.clone(), config.clone())?;
         } else {
             self.stop();
@@ -155,11 +152,12 @@ impl Drop for KeyVisualizerRuntime {
     }
 }
 
-struct InputProcessor {
+pub(crate) struct InputProcessor {
     app: AppHandle,
     config: config::KeyVisualizerConfig,
     classifier: KeyClassifier,
     repeat_tracker: RepeatTracker,
+    generation: u64,
 }
 
 #[derive(Default)]
@@ -176,8 +174,9 @@ struct RepeatTracker {
 }
 
 impl InputProcessor {
-    fn new(app: AppHandle, config: config::KeyVisualizerConfig) -> Self {
+    pub(crate) fn new(app: AppHandle, config: config::KeyVisualizerConfig) -> Self {
         Self {
+            generation: app.state::<KeyVisualizerRuntime>().generation.load(std::sync::atomic::Ordering::SeqCst),
             app,
             config,
             classifier: KeyClassifier::default(),
@@ -185,14 +184,14 @@ impl InputProcessor {
         }
     }
 
-    fn handle(&mut self, vkey: u16, is_down: bool) {
+    pub(crate) fn handle(&mut self, vkey: u16, is_down: bool) {
         if let Some((label, category)) = self.classifier.handle(vkey, is_down) {
             self.emit(label, category);
         }
     }
 
     fn emit(&mut self, label: String, category: KeyCategory) {
-        if !category_enabled(&self.config, &category) {
+        if !self.config.enabled || !category_enabled(&self.config, &category) {
             return;
         }
         let timestamp_ms = SystemTime::now()
@@ -205,6 +204,7 @@ impl InputProcessor {
             category,
             repeat,
             timestamp_ms,
+            generation: self.generation,
         });
     }
 }
@@ -343,112 +343,6 @@ fn key_label(vkey: u16) -> Option<(String, KeyCategory)> {
     Some((other.into(), KeyCategory::Other))
 }
 
-unsafe extern "system" fn raw_input_wnd_proc(
-    hwnd: HWND,
-    message: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
-    if message == WM_NCCREATE {
-        let create = &*(lparam.0 as *const CREATESTRUCTW);
-        SetWindowLongPtrW(hwnd, GWLP_USERDATA, create.lpCreateParams as isize);
-    } else if message == WM_INPUT {
-        let pointer = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut InputProcessor;
-        if !pointer.is_null() {
-            let mut input = RAWINPUT::default();
-            let mut size = size_of::<RAWINPUT>() as u32;
-            let read = GetRawInputData(
-                HRAWINPUT(lparam.0 as *mut _),
-                RID_INPUT,
-                Some((&mut input as *mut RAWINPUT).cast()),
-                &mut size,
-                size_of::<windows::Win32::UI::Input::RAWINPUTHEADER>() as u32,
-            );
-            if read != u32::MAX && input.header.dwType == RIM_TYPEKEYBOARD.0 {
-                let keyboard = input.data.keyboard;
-                (*pointer).handle(keyboard.VKey, keyboard.Flags as u32 & RI_KEY_BREAK == 0);
-            }
-        }
-    }
-    DefWindowProcW(hwnd, message, wparam, lparam)
-}
-
-fn raw_input_thread(
-    app: AppHandle,
-    config: config::KeyVisualizerConfig,
-    ready: mpsc::SyncSender<Result<u32, String>>,
-) {
-    unsafe {
-        let thread_id = GetCurrentThreadId();
-        let module = match GetModuleHandleW(PCWSTR::null()) {
-            Ok(module) => module,
-            Err(error) => {
-                let _ = ready.send(Err(format!("读取程序模块失败：{error}")));
-                return;
-            }
-        };
-        let class = WNDCLASSW {
-            hInstance: HINSTANCE(module.0),
-            lpszClassName: w!("DockMapperKeyVisualizerRawInput"),
-            lpfnWndProc: Some(raw_input_wnd_proc),
-            ..Default::default()
-        };
-        RegisterClassW(&class);
-        let mut processor = Box::new(InputProcessor::new(app, config));
-        let hwnd = match CreateWindowExW(
-            WINDOW_EX_STYLE::default(),
-            class.lpszClassName,
-            w!("DockMapper Raw Input"),
-            WINDOW_STYLE::default(),
-            0,
-            0,
-            0,
-            0,
-            Some(HWND_MESSAGE),
-            None,
-            Some(class.hInstance),
-            Some((&mut *processor as *mut InputProcessor).cast()),
-        ) {
-            Ok(hwnd) => hwnd,
-            Err(error) => {
-                let _ = ready.send(Err(format!("创建按键监听窗口失败：{error}")));
-                return;
-            }
-        };
-        let devices = [RAWINPUTDEVICE {
-            usUsagePage: 0x01,
-            usUsage: 0x06,
-            dwFlags: RIDEV_INPUTSINK,
-            hwndTarget: hwnd,
-        }];
-        if let Err(error) = RegisterRawInputDevices(&devices, size_of::<RAWINPUTDEVICE>() as u32) {
-            let _ = DestroyWindow(hwnd);
-            let _ = ready.send(Err(format!("注册 Raw Input 键盘失败：{error}")));
-            return;
-        }
-        let _ = ready.send(Ok(thread_id));
-        let mut message = MSG::default();
-        loop {
-            let result = GetMessageW(&mut message, None, 0, 0);
-            if result.0 <= 0 {
-                break;
-            }
-            let _ = TranslateMessage(&message);
-            DispatchMessageW(&message);
-        }
-        let _ = RegisterRawInputDevices(
-            &[RAWINPUTDEVICE {
-                usUsagePage: 0x01,
-                usUsage: 0x06,
-                dwFlags: RIDEV_REMOVE,
-                hwndTarget: HWND::default(),
-            }],
-            size_of::<RAWINPUTDEVICE>() as u32,
-        );
-        let _ = DestroyWindow(hwnd);
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ScreenBounds {
     x: i32,
@@ -514,11 +408,12 @@ fn configure_window(app: &AppHandle, config: &config::KeyVisualizerConfig) -> Re
         .map_err(|error| format!("启用鼠标穿透失败：{error}"))?;
     if config.enabled {
         sync_window_geometry(app, config)?;
-        window.show().map_err(|error| format!("显示按键文本窗口失败：{error}"))?;
+        window.hide().map_err(|error| format!("准备按键文本窗口失败：{error}"))?;
     } else {
         window.hide().map_err(|error| format!("隐藏按键文本窗口失败：{error}"))?;
     }
-    let _ = app.emit(EVENT_CONFIG, config);
+    window.set_focusable(false).map_err(|error| format!("设置按键窗口不抢焦点失败：{error}"))?;
+    app.emit("key-visualizer-session", get_key_visualizer_session(app.state())).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -535,6 +430,7 @@ fn reanchor_enabled_window(app: &AppHandle) {
     let Ok(config) = config else {
         return;
     };
+    let config = crate::presentation::effective_keys(app, &config);
     if !config.enabled {
         return;
     }
@@ -618,7 +514,7 @@ pub fn get_key_visualizer_status(
 }
 
 #[tauri::command]
-pub fn update_key_visualizer_config(
+pub async fn update_key_visualizer_config(
     app: AppHandle,
     state: State<'_, AppState>,
     runtime: State<'_, KeyVisualizerRuntime>,
@@ -626,6 +522,8 @@ pub fn update_key_visualizer_config(
 ) -> Result<config::KeyVisualizerConfig, String> {
     config::normalize_key_visualizer_config(&mut key_visualizer_config);
     let _mutation = state.mutation_lock.lock().map_err(|_| "配置写入锁已损坏".to_string())?;
+    let presentation = app.state::<crate::presentation::PresentationRuntime>();
+    let _operation = presentation.operation.lock().map_err(|_| "演示操作状态已损坏")?;
     let previous = state.config.lock().map_err(|_| "配置状态已损坏".to_string())?.clone();
     let mut next = previous.clone();
     next.key_visualizer_config = key_visualizer_config.clone();
@@ -636,15 +534,18 @@ pub fn update_key_visualizer_config(
         |value| config::save(&state.config_path, value),
     )?;
     *state.config.lock().map_err(|_| "配置状态已损坏".to_string())? = next;
+    let _ = app.emit(EVENT_CONFIG, &key_visualizer_config);
     Ok(key_visualizer_config)
 }
 
 #[tauri::command]
-pub fn retry_key_visualizer(
+pub async fn retry_key_visualizer(
     app: AppHandle,
     state: State<'_, AppState>,
     runtime: State<'_, KeyVisualizerRuntime>,
 ) -> Result<KeyVisualizerStatus, String> {
+    let presentation = app.state::<crate::presentation::PresentationRuntime>();
+    let _operation = presentation.operation.lock().map_err(|_| "演示操作状态已损坏")?;
     let config = get_key_visualizer_config(state)?;
     runtime.apply(&app, &config)?;
     Ok(runtime.status())
@@ -742,4 +643,28 @@ mod tests {
         assert_eq!(*applied.lock().unwrap(), vec![true, false]);
         assert_eq!(*saved.lock().unwrap(), vec![true, false]);
     }
+}
+
+#[derive(Clone, Serialize)]
+pub struct KeyVisualizerSession {
+    config: config::KeyVisualizerConfig,
+    generation: u64,
+}
+
+#[tauri::command]
+pub fn get_key_visualizer_session(runtime: State<'_, KeyVisualizerRuntime>) -> KeyVisualizerSession {
+    KeyVisualizerSession { config: runtime.effective.lock().unwrap_or_else(|e| e.into_inner()).clone(), generation: runtime.generation.load(std::sync::atomic::Ordering::SeqCst) }
+}
+
+#[tauri::command]
+pub async fn key_visualizer_ready(app: AppHandle, generation: u64) -> Result<(), String> {
+    let presentation = app.state::<crate::presentation::PresentationRuntime>();
+    let _operation = presentation.operation.lock().map_err(|_| "演示操作状态已损坏")?;
+    let runtime = app.state::<KeyVisualizerRuntime>();
+    if runtime.generation.load(std::sync::atomic::Ordering::SeqCst) != generation { return Ok(()); }
+    runtime.ready_generation.store(generation, std::sync::atomic::Ordering::SeqCst);
+    if runtime.effective.lock().map_err(|_| "按键状态已损坏")?.enabled {
+        app.get_webview_window(WINDOW_LABEL).ok_or("按键窗口不存在")?.show().map_err(|e| e.to_string())?;
+    }
+    crate::presentation::renderer_ready(&app)
 }

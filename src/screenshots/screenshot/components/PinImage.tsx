@@ -13,7 +13,10 @@ export default function PinImage(): React.JSX.Element {
   const pinId = new URLSearchParams(window.location.search).get("id") ?? getCurrentWindow().label;
   const [imageUrl, setImageUrl] = useState("");
   const [loadError, setLoadError] = useState("");
-  const [options, setOptions] = useState<PinOptions>({ opacity: 1, locked: false });
+  const [options, setOptions] = useState<PinOptions>({
+    opacity: 1,
+    locked: false,
+  });
   const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const imageUrlRef = useRef("");
   const scaleFrame = useRef<number | null>(null);
@@ -67,7 +70,27 @@ export default function PinImage(): React.JSX.Element {
   }, [pinId]);
 
   useEffect(() => {
-    void invoke<PinOptions>("get_pin_options", { id: pinId }).then(setOptions).catch(() => undefined);
+    let disposed = false;
+    let off: (() => void) | undefined;
+    void listen<{ id: string; options: PinOptions }>("pin-options-changed", ({ payload }) => {
+      if (payload.id === pinId && !disposed) setOptions(payload.options);
+    })
+      .then(async (unlisten) => {
+        if (disposed) {
+          unlisten();
+          return;
+        }
+        off = unlisten;
+        const value = await invoke<PinOptions>("get_pin_options", { id: pinId });
+        if (!disposed) setOptions(value);
+      })
+      .catch((error) => {
+        if (!disposed) setLoadError("贴图设置读取失败：" + String(error));
+      });
+    return () => {
+      disposed = true;
+      off?.();
+    };
   }, [pinId]);
 
   useEffect(() => {
@@ -96,7 +119,7 @@ export default function PinImage(): React.JSX.Element {
   };
 
   const updateOptions = async (next: PinOptions): Promise<void> => {
-    setOptions(next);
+    const previous = options;
     try {
       const saved = await invoke<PinOptions>("update_pin_options", {
         id: pinId,
@@ -105,6 +128,7 @@ export default function PinImage(): React.JSX.Element {
       });
       setOptions(saved);
     } catch (error) {
+      setOptions(previous);
       setLoadError(`贴图设置失败：${String(error)}`);
     }
   };
@@ -145,7 +169,9 @@ export default function PinImage(): React.JSX.Element {
   const scaleAtPointer = (event: React.WheelEvent<HTMLDivElement>): void => {
     event.preventDefault();
     const bounds = event.currentTarget.getBoundingClientRect();
-    const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? Math.max(1, bounds.height) : 1);
+    const delta =
+      event.deltaY *
+      (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? Math.max(1, bounds.height) : 1);
     const factor = Math.exp((-delta * Math.log(1.12)) / 100);
     const current = pendingScale.current;
     pendingScale.current = {
@@ -210,7 +236,10 @@ export default function PinImage(): React.JSX.Element {
               }
             />
           </label>
-          <button type="button" onClick={() => void updateOptions({ ...options, locked: !options.locked })}>
+          <button
+            type="button"
+            onClick={() => void updateOptions({ ...options, locked: !options.locked })}
+          >
             {options.locked ? "解除锁定" : "锁定位置"}
           </button>
           <button type="button" onClick={() => void runPinCommand("copy_pin_image")}>

@@ -59,6 +59,7 @@ pub struct AppConfig {
     pub screenshot_config: ScreenshotConfig,
     pub color_palette: ColorPaletteConfig,
     pub key_visualizer_config: KeyVisualizerConfig,
+    pub presentation_config: crate::presentation::PresentationConfig,
     /// 接管前 Scancode Map 的 Base64 备份；外部修改后再次接管时会更新。
     pub scancode_map_backup: Option<String>,
     /// DockMapper 最后一次成功写入的 Scancode Map，用于区分草稿与外部修改。
@@ -134,6 +135,7 @@ impl Default for AppConfig {
             screenshot_config: ScreenshotConfig::default(),
             color_palette: ColorPaletteConfig::default(),
             key_visualizer_config: KeyVisualizerConfig::default(),
+            presentation_config: crate::presentation::PresentationConfig::default(),
             scancode_map_backup: None,
             applied_scancode_map: None,
         }

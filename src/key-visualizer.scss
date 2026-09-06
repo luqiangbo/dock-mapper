@@ -85,3 +85,5 @@ body,
 @media (prefers-reduced-motion: reduce) {
   .key-entry { animation: none; }
 }
+
+.key-lock-status { color: white; background: #17202ee6; border-radius: 10px; padding: 8px 12px; font: 18px system-ui; margin-bottom: 8px; }

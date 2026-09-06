@@ -7,6 +7,8 @@ mod image_store;
 mod key_mapping;
 mod key_visualizer;
 mod ocr;
+mod raw_input;
+mod presentation;
 mod runtime_health;
 mod scancode_mapper;
 mod screenshot;
@@ -885,6 +887,7 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(screenshot::create_state())
+        .manage(presentation::PresentationRuntime::default())
         .setup(|app| {
             app.manage(diagnostics::initialize(app.handle())?);
             #[cfg(desktop)]
@@ -940,6 +943,7 @@ pub fn run() {
                 tracing::error!(target: "dock_mapper::key_visualizer", %error, "启动按键文本失败");
             }
 
+            presentation::initialize(app.handle());
             sys_monitor::start_sys_monitor(app.handle().clone());
             Ok(())
         })
@@ -998,6 +1002,15 @@ pub fn run() {
             widget::get_widget_config,
             widget::update_widget_config,
             widget::sync_widget_dynamic_width,
+            key_visualizer::key_visualizer_ready,
+            key_visualizer::get_key_visualizer_session,
+            presentation::get_presentation_config,
+            presentation::get_presentation_status,
+            presentation::set_presentation_enabled,
+            presentation::update_presentation_config,
+            presentation::retry_presentation,
+            presentation::locate_presentation_mouse,
+            presentation::presentation_ready,
             key_visualizer::get_key_visualizer_config,
             key_visualizer::update_key_visualizer_config,
             key_visualizer::get_key_visualizer_status,

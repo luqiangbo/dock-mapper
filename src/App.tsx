@@ -17,7 +17,7 @@ import {
 import Dashboard from "./components/Dashboard";
 import KeyMapper from "./components/KeyMapper";
 import WidgetSettings from "./components/WidgetSettings";
-import KeyVisualizerSettings from "./components/KeyVisualizerSettings";
+import PresentationSettings from "./components/PresentationSettings";
 import GeneralSettings from "./components/GeneralSettings";
 import ScreenshotSettings from "./components/ScreenshotSettings";
 import { useTheme } from "./ThemeContext";
@@ -53,7 +53,7 @@ interface PageItem {
 const PAGES: PageItem[] = [
   { key: "dashboard", label: "仪表盘", icon: <DashboardOutlined /> },
   { key: "keymapper", label: "按键映射", icon: <KeyOutlined /> },
-  { key: "keyvisualizer", label: "按键文本", icon: <FontSizeOutlined /> },
+  { key: "keyvisualizer", label: "演示辅助", icon: <FontSizeOutlined /> },
   { key: "screenshot", label: "截图", icon: <CameraOutlined /> },
   { key: "widget", label: "挂件设置", icon: <MenuOutlined /> },
   { key: "settings", label: "全局设置", icon: <SettingOutlined /> },
@@ -118,7 +118,7 @@ export default function App() {
       case "widget":
         return <WidgetSettings />;
       case "keyvisualizer":
-        return <KeyVisualizerSettings />;
+        return <PresentationSettings />;
       case "settings":
         return <GeneralSettings />;
       default:

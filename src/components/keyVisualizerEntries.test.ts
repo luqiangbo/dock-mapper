@@ -8,6 +8,7 @@ import {
 } from "./keyVisualizerEntries";
 
 const input = (label: string, repeat: number, timestamp_ms: number) => ({
+  generation: 1,
   label,
   repeat,
   timestamp_ms,

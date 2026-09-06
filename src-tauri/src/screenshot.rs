@@ -712,13 +712,10 @@ pub fn update_pin_options(
     let options = normalized_pin_options(opacity, locked);
     let state = app.state::<AppState>();
     let mut runtime = state.pin_runtime.lock_or_recover();
-    if !runtime.options.contains_key(&id) {
-        return Err("贴图窗口不存在".into());
-    }
+    if !runtime.options.contains_key(&id) { return Err("贴图窗口不存在".into()); }
     runtime.options.insert(id.clone(), options);
     drop(runtime);
-    app.get_webview_window(&id)
-        .ok_or_else(|| "贴图窗口不存在".to_string())?;
+    app.get_webview_window(&id).ok_or_else(|| "贴图窗口不存在".to_string())?;
     Ok(options)
 }
 

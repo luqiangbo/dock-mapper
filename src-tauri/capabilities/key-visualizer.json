@@ -2,10 +2,15 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "key-visualizer-window",
   "description": "按键文本悬浮窗仅拥有配置读取和事件监听权限",
-  "windows": ["key_visualizer"],
+  "windows": [
+    "key_visualizer"
+  ],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
-    "allow-get-key-visualizer-config"
+    "allow-get-key-visualizer-config",
+    "allow-get-key-visualizer-session",
+    "allow-get-presentation-status",
+    "allow-key-visualizer-ready"
   ]
 }

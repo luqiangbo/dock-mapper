@@ -2,7 +2,9 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-window",
   "description": "DockMapper 主配置窗口的最小权限",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
@@ -55,6 +57,13 @@
           "url": "https://github.com/luqiangbo/dock-mapper*"
         }
       ]
-    }
+    },
+    "allow-get-key-visualizer-session",
+    "allow-get-presentation-config",
+    "allow-get-presentation-status",
+    "allow-set-presentation-enabled",
+    "allow-update-presentation-config",
+    "allow-retry-presentation",
+    "allow-locate-presentation-mouse"
   ]
 }

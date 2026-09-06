@@ -3,7 +3,7 @@
   "identifier": "com.luqiangbo.dockmapper",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "http://127.0.0.1:13301",
+    "devUrl": "http://127.0.0.1:1420",
     "beforeDevCommand": "pnpm dev",
     "beforeBuildCommand": "pnpm build",
     "beforeBundleCommand": "pnpm runtime:prepare"

@@ -12,6 +12,7 @@ enum TrayAction {
     OpenHistory,
     PinRecent,
     ToggleLatestPin,
+    Presentation,
     Quit,
 }
 
@@ -22,6 +23,7 @@ fn tray_action(id: &str) -> Option<TrayAction> {
         "screenshot_history" => Some(TrayAction::OpenHistory),
         "pin_recent" => Some(TrayAction::PinRecent),
         "toggle_latest_pin" => Some(TrayAction::ToggleLatestPin),
+        "presentation" => Some(TrayAction::Presentation),
         "quit" => Some(TrayAction::Quit),
         _ => None,
     }
@@ -34,6 +36,8 @@ pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let pin_recent = MenuItemBuilder::with_id("pin_recent", "贴出最近截图").build(app)?;
     let toggle_pin =
         MenuItemBuilder::with_id("toggle_latest_pin", "显示/隐藏最近贴图").build(app)?;
+    let presentation = MenuItemBuilder::with_id("presentation", "启用演示模式").build(app)?;
+    app.manage(PresentationTray(presentation.clone()));
     let separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItemBuilder::with_id("quit", "退出").build(app)?;
     let menu = MenuBuilder::new(app)
@@ -42,6 +46,7 @@ pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .item(&history)
         .item(&pin_recent)
         .item(&toggle_pin)
+        .item(&presentation)
         .item(&separator)
         .item(&quit)
         .build()?;
@@ -60,6 +65,7 @@ pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             Some(TrayAction::OpenHistory) => screenshot::open_screenshot_history(app),
             Some(TrayAction::PinRecent) => screenshot::pin_recent_screenshot(app),
             Some(TrayAction::ToggleLatestPin) => screenshot::toggle_latest_pin(app),
+            Some(TrayAction::Presentation) => crate::presentation::dispatch_toggle(app),
             Some(TrayAction::Quit) => app.exit(0),
             None => {}
         })
@@ -103,5 +109,13 @@ mod tests {
             Some(TrayAction::ToggleLatestPin)
         );
         assert_eq!(tray_action("about"), None);
+    }
+}
+
+struct PresentationTray(tauri::menu::MenuItem<tauri::Wry>);
+pub fn sync_presentation(app: &tauri::AppHandle, enabled: bool, failed: bool) {
+    if let Some(item) = app.try_state::<PresentationTray>() {
+        let label = if enabled { "退出演示模式" } else if failed { "重试演示模式" } else { "启用演示模式" };
+        if let Err(error) = item.0.set_text(label) { tracing::warn!(%error, "更新演示托盘失败"); }
     }
 }

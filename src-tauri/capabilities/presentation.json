@@ -1,0 +1,13 @@
+{
+  "identifier": "presentation-effects",
+  "description": "演示效果只读状态、监听事件并确认自身就绪",
+  "windows": [
+    "presentation-*"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-get-presentation-status",
+    "allow-presentation-ready"
+  ]
+}

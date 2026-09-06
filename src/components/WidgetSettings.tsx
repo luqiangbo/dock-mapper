@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { App as AntApp, Button, Card, Segmented, Space, Spin, Switch, Table, Tag, Typography } from "antd";
+import { App as AntApp, Button, Card, Form, Select, Space, Spin, Switch, Table, Tag, Typography } from "antd";
 import { Battery, Cpu, MemoryStick } from "lucide-react";
 import type { SpeedUnit, SysStatus, WidgetConfig, WidgetMetricConfig, WidgetMetricKind } from "../types";
 import { formatSpeedParts } from "../utils/format";
@@ -58,16 +58,18 @@ function WidgetPreview({ config, status }: { config: WidgetConfig; status: SysSt
 }
 
 export default function WidgetSettings() {
+  const [form] = Form.useForm<WidgetConfig>();
   const [config, setConfig] = useState<WidgetConfig | null>(null);
+  const [savedConfig, setSavedConfig] = useState<WidgetConfig | null>(null);
   const [status, setStatus] = useState<SysStatus>(EMPTY_STATUS);
   const [saving, setSaving] = useState(false);
   const { notification } = AntApp.useApp();
 
   useEffect(() => {
-    void widgetApi.config().then(setConfig).catch((error) =>
+    void widgetApi.config().then((next) => { setConfig(next); setSavedConfig(next); form.setFieldsValue(next); form.resetFields(); }).catch((error) =>
       notification.error({ message: "加载挂件配置失败", description: errorMessage(error) }),
     );
-  }, [notification]);
+  }, [form, notification]);
 
   useEffect(() => {
     let disposed = false;
@@ -78,15 +80,18 @@ export default function WidgetSettings() {
     return () => { disposed = true; unlisten?.(); };
   }, [notification]);
 
-  const updateConfig = async (next: WidgetConfig) => {
+  const updateDraft = (next: WidgetConfig) => {
     if (!config || saving) return;
-    const previous = config;
     setConfig(next);
+    form.setFieldsValue(next);
+  };
+  const saveConfig = async (next: WidgetConfig) => {
+    if (!config || saving) return;
     setSaving(true);
     try {
-      setConfig(await widgetApi.update(next));
+      const saved = await widgetApi.update(next);
+      setConfig(saved); setSavedConfig(saved); form.setFieldsValue(saved); form.resetFields();
     } catch (error) {
-      setConfig(previous);
       notification.error({ message: "同步挂件设置失败", description: errorMessage(error) });
     } finally {
       setSaving(false);
@@ -97,7 +102,7 @@ export default function WidgetSettings() {
 
   const updateMetric = (index: number, change: Partial<WidgetMetricConfig>) => {
     const metrics = config.metrics.map((metric, itemIndex) => itemIndex === index ? { ...metric, ...change } : metric);
-    void updateConfig({
+    updateDraft({
       ...config,
       metrics,
       memory_scheme: config.metrics[index].kind === "memory" && change.usage_scheme ? change.usage_scheme : config.memory_scheme,
@@ -112,7 +117,7 @@ export default function WidgetSettings() {
     const target = visibleMetricIndexes[targetVisibleIndex];
     const metrics = [...config.metrics];
     [metrics[index], metrics[target]] = [metrics[target], metrics[index]];
-    void updateConfig({ ...config, metrics });
+    updateDraft({ ...config, metrics });
   };
   const metricRows: WidgetMetricRow[] = visibleMetricIndexes.map((index, visibleIndex) => ({
     ...config.metrics[index], index, visibleIndex, lastEnabled: config.metrics[index].enabled && enabledCount === 1,
@@ -120,12 +125,12 @@ export default function WidgetSettings() {
   const metricColumns = [
     {
       title: "启用", dataIndex: "enabled", width: 76,
-      render: (_: boolean, metric: WidgetMetricRow) => <Switch aria-label={`${METRIC_LABELS[metric.kind]} 指标开关`} checked={metric.enabled} disabled={saving || metric.lastEnabled} onChange={(enabled) => updateMetric(metric.index, { enabled })} />,
+      render: (_: boolean, metric: WidgetMetricRow) => <Form.Item noStyle name={["metrics", metric.index, "enabled"]} valuePropName="checked"><Switch aria-label={`${METRIC_LABELS[metric.kind]} 指标开关`} disabled={saving || metric.lastEnabled} onChange={(enabled) => updateMetric(metric.index, { enabled })} /></Form.Item>,
     },
     { title: "指标", dataIndex: "kind", width: 112, render: (kind: WidgetMetricRow["kind"]) => METRIC_LABELS[kind] },
     {
       title: "展示样式", dataIndex: "usage_scheme",
-      render: (_: WidgetMetricRow["usage_scheme"], metric: WidgetMetricRow) => metric.kind === "network" ? <Text type="secondary">双行固定槽位</Text> : <Segmented size="small" value={metric.usage_scheme} disabled={saving || !metric.enabled} options={USAGE_SCHEME_OPTIONS} onChange={(usage_scheme) => updateMetric(metric.index, { usage_scheme })} />,
+      render: (_: WidgetMetricRow["usage_scheme"], metric: WidgetMetricRow) => metric.kind === "network" ? <Text type="secondary">双行固定槽位</Text> : <Form.Item noStyle name={["metrics", metric.index, "usage_scheme"]}><Select size="small" disabled={saving || !metric.enabled} options={USAGE_SCHEME_OPTIONS} onChange={(usage_scheme) => updateMetric(metric.index, { usage_scheme })} /></Form.Item>,
     },
     {
       title: "顺序", width: 148,
@@ -136,7 +141,7 @@ export default function WidgetSettings() {
     },
   ];
 
-  return <div className={styles.page}>
+  return <Form form={form} layout="vertical" className={`${styles.page} ${styles.settingsForm}`} onFinish={(next) => void saveConfig(next)}>
     <Card className={styles.surfaceCard}>
       <div className={styles.settingsGroup}>
         <div className={styles.widgetPreviewHeader}>
@@ -149,14 +154,15 @@ export default function WidgetSettings() {
         <div className={styles.widgetOptionGrid}>
           <div className={styles.widgetOptionCard}>
             <div><Text strong>刷新间隔</Text><span className={styles.description}>控制网速和资源数据的采样频率</span></div>
-            <Segmented value={config.refresh_interval_secs} disabled={saving} options={[1, 2, 3, 5].map((value) => ({ value, label: `${value} 秒` }))} onChange={(refresh_interval_secs) => void updateConfig({ ...config, refresh_interval_secs })} />
+            <Form.Item noStyle name="refresh_interval_secs"><Select disabled={saving} options={[1, 2, 3, 5].map((value) => ({ value, label: `${value} 秒` }))} onChange={(refresh_interval_secs) => updateDraft({ ...config, refresh_interval_secs })} /></Form.Item>
           </div>
           <div className={styles.widgetOptionCard}>
             <div><Text strong>网速单位</Text><span className={styles.description}>固定单位时数值不再跨单位切换</span></div>
-            <Segmented value={config.speed_unit} disabled={saving} options={[{ value: "auto", label: "自动" }, { value: "kb", label: "KB/s" }, { value: "mb", label: "MB/s" }]} onChange={(speed_unit) => void updateConfig({ ...config, speed_unit: speed_unit as SpeedUnit })} />
+            <Form.Item noStyle name="speed_unit"><Select disabled={saving} options={[{ value: "auto", label: "自动" }, { value: "kb", label: "KB/s" }, { value: "mb", label: "MB/s" }]} onChange={(speed_unit) => updateDraft({ ...config, speed_unit: speed_unit as SpeedUnit })} /></Form.Item>
           </div>
         </div>
+        <Space><Button type="primary" htmlType="submit" loading={saving}>保存挂件设置</Button><Button disabled={saving || !savedConfig} onClick={() => { if (savedConfig) { setConfig(savedConfig); form.setFieldsValue(savedConfig); form.resetFields(); } }}>撤销修改</Button></Space>
       </div>
     </Card>
-  </div>;
+  </Form>;
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-retry-presentation"
+description = "Enables the retry_presentation command without any pre-configured scope."
+commands.allow = ["retry_presentation"]
+
+[[permission]]
+identifier = "deny-retry-presentation"
+description = "Denies the retry_presentation command without any pre-configured scope."
+commands.deny = ["retry_presentation"]

@@ -453,6 +453,12 @@
           "markdownDescription": "Enables the get_key_visualizer_config command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_key_visualizer_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-key-visualizer-session",
+          "markdownDescription": "Enables the get_key_visualizer_session command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_key_visualizer_status command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-key-visualizer-status",
@@ -475,6 +481,18 @@
           "type": "string",
           "const": "allow-get-pin-options",
           "markdownDescription": "Enables the get_pin_options command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_presentation_config command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-presentation-config",
+          "markdownDescription": "Enables the get_presentation_config command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_presentation_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-presentation-status",
+          "markdownDescription": "Enables the get_presentation_status command without any pre-configured scope."
         },
         {
           "description": "Enables the get_runtime_health command without any pre-configured scope.",
@@ -525,10 +543,22 @@
           "markdownDescription": "Enables the get_widget_config command without any pre-configured scope."
         },
         {
+          "description": "Enables the key_visualizer_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-key-visualizer-ready",
+          "markdownDescription": "Enables the key_visualizer_ready command without any pre-configured scope."
+        },
+        {
           "description": "Enables the list_screenshot_history command without any pre-configured scope.",
           "type": "string",
           "const": "allow-list-screenshot-history",
           "markdownDescription": "Enables the list_screenshot_history command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the locate_presentation_mouse command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-locate-presentation-mouse",
+          "markdownDescription": "Enables the locate_presentation_mouse command without any pre-configured scope."
         },
         {
           "description": "Enables the open_url command without any pre-configured scope.",
@@ -559,6 +589,12 @@
           "type": "string",
           "const": "allow-pin-screenshot-history",
           "markdownDescription": "Enables the pin_screenshot_history command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the presentation_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-presentation-ready",
+          "markdownDescription": "Enables the presentation_ready command without any pre-configured scope."
         },
         {
           "description": "Enables the recognize_selection command without any pre-configured scope.",
@@ -609,6 +645,12 @@
           "markdownDescription": "Enables the retry_key_visualizer command without any pre-configured scope."
         },
         {
+          "description": "Enables the retry_presentation command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-retry-presentation",
+          "markdownDescription": "Enables the retry_presentation command without any pre-configured scope."
+        },
+        {
           "description": "Enables the save_image command without any pre-configured scope.",
           "type": "string",
           "const": "allow-save-image",
@@ -637,6 +679,12 @@
           "type": "string",
           "const": "allow-set-palette-favorite",
           "markdownDescription": "Enables the set_palette_favorite command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_presentation_enabled command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-presentation-enabled",
+          "markdownDescription": "Enables the set_presentation_enabled command without any pre-configured scope."
         },
         {
           "description": "Enables the set_screenshot_history_favorite command without any pre-configured scope.",
@@ -679,6 +727,12 @@
           "type": "string",
           "const": "allow-update-pin-options",
           "markdownDescription": "Enables the update_pin_options command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_presentation_config command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-update-presentation-config",
+          "markdownDescription": "Enables the update_presentation_config command without any pre-configured scope."
         },
         {
           "description": "Enables the update_screenshot_config command without any pre-configured scope.",
@@ -807,6 +861,12 @@
           "markdownDescription": "Denies the get_key_visualizer_config command without any pre-configured scope."
         },
         {
+          "description": "Denies the get_key_visualizer_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-key-visualizer-session",
+          "markdownDescription": "Denies the get_key_visualizer_session command without any pre-configured scope."
+        },
+        {
           "description": "Denies the get_key_visualizer_status command without any pre-configured scope.",
           "type": "string",
           "const": "deny-get-key-visualizer-status",
@@ -829,6 +889,18 @@
           "type": "string",
           "const": "deny-get-pin-options",
           "markdownDescription": "Denies the get_pin_options command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_presentation_config command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-presentation-config",
+          "markdownDescription": "Denies the get_presentation_config command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_presentation_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-presentation-status",
+          "markdownDescription": "Denies the get_presentation_status command without any pre-configured scope."
         },
         {
           "description": "Denies the get_runtime_health command without any pre-configured scope.",
@@ -879,10 +951,22 @@
           "markdownDescription": "Denies the get_widget_config command without any pre-configured scope."
         },
         {
+          "description": "Denies the key_visualizer_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-key-visualizer-ready",
+          "markdownDescription": "Denies the key_visualizer_ready command without any pre-configured scope."
+        },
+        {
           "description": "Denies the list_screenshot_history command without any pre-configured scope.",
           "type": "string",
           "const": "deny-list-screenshot-history",
           "markdownDescription": "Denies the list_screenshot_history command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the locate_presentation_mouse command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-locate-presentation-mouse",
+          "markdownDescription": "Denies the locate_presentation_mouse command without any pre-configured scope."
         },
         {
           "description": "Denies the open_url command without any pre-configured scope.",
@@ -913,6 +997,12 @@
           "type": "string",
           "const": "deny-pin-screenshot-history",
           "markdownDescription": "Denies the pin_screenshot_history command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the presentation_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-presentation-ready",
+          "markdownDescription": "Denies the presentation_ready command without any pre-configured scope."
         },
         {
           "description": "Denies the recognize_selection command without any pre-configured scope.",
@@ -963,6 +1053,12 @@
           "markdownDescription": "Denies the retry_key_visualizer command without any pre-configured scope."
         },
         {
+          "description": "Denies the retry_presentation command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-retry-presentation",
+          "markdownDescription": "Denies the retry_presentation command without any pre-configured scope."
+        },
+        {
           "description": "Denies the save_image command without any pre-configured scope.",
           "type": "string",
           "const": "deny-save-image",
@@ -991,6 +1087,12 @@
           "type": "string",
           "const": "deny-set-palette-favorite",
           "markdownDescription": "Denies the set_palette_favorite command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_presentation_enabled command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-presentation-enabled",
+          "markdownDescription": "Denies the set_presentation_enabled command without any pre-configured scope."
         },
         {
           "description": "Denies the set_screenshot_history_favorite command without any pre-configured scope.",
@@ -1033,6 +1135,12 @@
           "type": "string",
           "const": "deny-update-pin-options",
           "markdownDescription": "Denies the update_pin_options command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_presentation_config command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-update-presentation-config",
+          "markdownDescription": "Denies the update_presentation_config command without any pre-configured scope."
         },
         {
           "description": "Denies the update_screenshot_config command without any pre-configured scope.",

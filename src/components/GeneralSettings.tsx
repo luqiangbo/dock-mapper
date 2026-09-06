@@ -8,7 +8,7 @@ import {
 } from "@tauri-apps/plugin-autostart";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
-import { Alert, App as AntApp, Button, Card, ColorPicker, Spin, Switch, Typography } from "antd";
+import { Alert, App as AntApp, Button, Card, ColorPicker, Form, Spin, Switch, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useTheme } from "../ThemeContext";
 import styles from "./components.module.scss";
@@ -18,6 +18,7 @@ const { Text } = Typography;
 const REPOSITORY_URL = "https://github.com/luqiangbo/dock-mapper";
 
 export default function GeneralSettings() {
+  const [form] = Form.useForm<{ autoStart: boolean; minimizeToTray: boolean; accentColor: string }>();
   const [autoStart, setAutoStart] = useState(false);
   const [autoStartLoading, setAutoStartLoading] = useState(true);
   const [minimizeToTray, setMinimizeToTray] = useState(true);
@@ -30,14 +31,14 @@ export default function GeneralSettings() {
 
   useEffect(() => {
     void isAutostartEnabled()
-      .then(setAutoStart)
+      .then((value) => { setAutoStart(value); form.setFieldValue("autoStart", value); })
       .catch((error) =>
         notification.error({ message: "读取开机启动状态失败", description: errorMessage(error) }),
       )
       .finally(() => setAutoStartLoading(false));
     void generalSettingsApi
       .minimizeToTray()
-      .then(setMinimizeToTray)
+      .then((value) => { setMinimizeToTray(value); form.setFieldValue("minimizeToTray", value); })
       .catch((error) =>
         notification.error({ message: "读取托盘设置失败", description: errorMessage(error) }),
       )
@@ -45,7 +46,8 @@ export default function GeneralSettings() {
     void getVersion()
       .then(setVersion)
       .catch(() => setVersion("未知"));
-  }, [notification]);
+    form.setFieldValue("accentColor", accentColor);
+  }, [accentColor, form, notification]);
 
   const changeAutostart = useCallback(async (checked: boolean) => {
     setAutoStartLoading(true);
@@ -53,8 +55,10 @@ export default function GeneralSettings() {
       if (checked) await enableAutostart();
       else await disableAutostart();
       setAutoStart(checked);
+      form.setFieldValue("autoStart", checked);
       notification.success({ message: checked ? "开机自启已开启" : "开机自启已关闭" });
     } catch (error) {
+      form.setFieldValue("autoStart", autoStart);
       notification.error({ message: "操作失败", description: errorMessage(error) });
     } finally {
       setAutoStartLoading(false);
@@ -66,7 +70,9 @@ export default function GeneralSettings() {
     try {
       await generalSettingsApi.setMinimizeToTray(checked);
       setMinimizeToTray(checked);
+      form.setFieldValue("minimizeToTray", checked);
     } catch (error) {
+      form.setFieldValue("minimizeToTray", minimizeToTray);
       notification.error({ message: "操作失败", description: errorMessage(error) });
     } finally {
       setMinimizeLoading(false);
@@ -112,6 +118,7 @@ export default function GeneralSettings() {
 
   return (
     <div className={styles.page}>
+      <Form form={form} layout="vertical" className={styles.settingsForm}>
       <Card className={styles.surfaceCard} title="通用">
         <div className={styles.settingsGroup}>
           <div className={styles.settingRow}>
@@ -122,7 +129,7 @@ export default function GeneralSettings() {
             {autoStartLoading ? (
               <Spin size="small" />
             ) : (
-              <Switch checked={autoStart} onChange={(value) => void changeAutostart(value)} />
+              <Form.Item noStyle name="autoStart" valuePropName="checked"><Switch onChange={(value) => void changeAutostart(value)} /></Form.Item>
             )}
           </div>
           <div className={styles.settingRow}>
@@ -133,7 +140,7 @@ export default function GeneralSettings() {
             {minimizeLoading ? (
               <Spin size="small" />
             ) : (
-              <Switch checked={minimizeToTray} onChange={(value) => void changeMinimize(value)} />
+              <Form.Item noStyle name="minimizeToTray" valuePropName="checked"><Switch onChange={(value) => void changeMinimize(value)} /></Form.Item>
             )}
           </div>
           <div className={styles.settingRow}>
@@ -157,11 +164,11 @@ export default function GeneralSettings() {
               <Text strong>主题色</Text>
               <span className={styles.description}>自定义按钮、选中状态和交互反馈的强调色</span>
             </div>
-            <ColorPicker
+            <Form.Item noStyle name="accentColor"><ColorPicker
               value={accentColor}
               showText
               onChangeComplete={(color) => setAccentColor(color.toHexString())}
-            />
+            /></Form.Item>
           </div>
         </div>
       </Card>
@@ -197,6 +204,7 @@ export default function GeneralSettings() {
         message="管理员权限说明"
         description="应用或恢复系统按键映射时会按需请求 Windows UAC；主应用始终保持普通用户权限。"
       />
+      </Form>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, App as AntApp, Button, Modal, Select, Switch, Table, Tag, Typography } from "antd";
+import { Alert, App as AntApp, Button, Form, Modal, Select, Switch, Table, Tag, Typography } from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import type { KeyCode, KeyMapping, ScancodeMapStatus, SupportedKey } from "../types";
 import { errorMessage, keyMappingApi } from "../api/commands";
@@ -12,8 +12,7 @@ export default function KeyMapper() {
   const [supportedKeys, setSupportedKeys] = useState<SupportedKey[]>([]);
   const [mapStatus, setMapStatus] = useState<ScancodeMapStatus | null>(null);
   const [addVisible, setAddVisible] = useState(false);
-  const [newSource, setNewSource] = useState<KeyCode | null>(null);
-  const [newTarget, setNewTarget] = useState<KeyCode | null>(null);
+  const [addForm] = Form.useForm<{ source: KeyCode; target: KeyCode }>();
   const [saving, setSaving] = useState(false);
   const { modal, notification } = AntApp.useApp();
 
@@ -78,11 +77,7 @@ export default function KeyMapper() {
     [notification],
   );
 
-  const addMapping = async () => {
-    if (!newSource || !newTarget) {
-      notification.warning({ message: "请选择源按键和目标按键" });
-      return;
-    }
+  const addMapping = async ({ source: newSource, target: newTarget }: { source: KeyCode; target: KeyCode }) => {
     if (newSource === newTarget) {
       notification.warning({ message: "源按键与目标按键不能相同" });
       return;
@@ -103,8 +98,7 @@ export default function KeyMapper() {
     ]);
     if (success) {
       setAddVisible(false);
-      setNewSource(null);
-      setNewTarget(null);
+      addForm.resetFields();
     }
   };
 
@@ -260,38 +254,19 @@ export default function KeyMapper() {
       <Modal
         title="添加按键映射"
         open={addVisible}
-        onOk={() => void addMapping()}
+        onOk={() => void addForm.submit()}
         onCancel={() => {
           setAddVisible(false);
-          setNewSource(null);
-          setNewTarget(null);
+          addForm.resetFields();
         }}
         confirmLoading={saving}
         okText="添加"
         cancelText="取消"
       >
-        <div className={styles.modalFields}>
-          <label className={styles.field}>
-            <Text strong>源按键（物理按键）</Text>
-            <Select
-              placeholder="请选择"
-              value={newSource ?? undefined}
-              options={sourceKeyOptions}
-              onChange={(value) => setNewSource(value as KeyCode)}
-              className={styles.fullWidth}
-            />
-          </label>
-          <label className={styles.field}>
-            <Text strong>目标按键（映射为）</Text>
-            <Select
-              placeholder="请选择"
-              value={newTarget ?? undefined}
-              options={keyOptions}
-              onChange={(value) => setNewTarget(value as KeyCode)}
-              className={styles.fullWidth}
-            />
-          </label>
-        </div>
+        <Form form={addForm} layout="vertical" className={styles.settingsForm} onFinish={(values) => void addMapping(values)}>
+          <Form.Item name="source" label="源按键（物理按键）" rules={[{ required: true, message: "请选择源按键" }, { validator: (_, value) => !value || !mappings.some((mapping) => mapping.source_key === value) ? Promise.resolve() : Promise.reject(new Error("该源按键已有映射规则")) }]}><Select placeholder="请选择" options={sourceKeyOptions} /></Form.Item>
+          <Form.Item name="target" label="目标按键（映射为）" dependencies={["source"]} rules={[{ required: true, message: "请选择目标按键" }, ({ getFieldValue }) => ({ validator: (_, value) => value !== getFieldValue("source") ? Promise.resolve() : Promise.reject(new Error("源按键与目标按键不能相同")) })]}><Select placeholder="请选择" options={keyOptions} /></Form.Item>
+        </Form>
       </Modal>
     </div>
   );

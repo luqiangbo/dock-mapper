@@ -77,9 +77,62 @@ export interface KeyVisualizerStatus {
 }
 
 export interface KeyVisualizerInput {
+  generation: number;
   label: string;
   category: KeyVisualizerCategory;
   repeat: number;
+  timestamp_ms: number;
+}
+
+export interface KeyVisualizerSession {
+  config: KeyVisualizerConfig;
+  generation: number;
+}
+
+export interface PresentationConfig {
+  keyboard: boolean;
+  clicks: boolean;
+  highlight: boolean;
+  lock_keys: boolean;
+  show_characters: boolean;
+  show_modifiers: boolean;
+  toggle_shortcut: string;
+  locate_shortcut: string;
+}
+
+export interface PresentationScreen {
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  scale: number;
+}
+
+export interface PresentationStatus {
+  enabled: boolean;
+  suspended: boolean;
+  generation: number;
+  phase: "off" | "starting" | "running";
+  error: string | null;
+  shortcut_error: string | null;
+  config: PresentationConfig;
+  screens: PresentationScreen[];
+  locks: PresentationLocks | null;
+}
+
+export interface PresentationMouse {
+  generation: number;
+  x: number;
+  y: number;
+  kind: "move" | "left" | "right" | "middle" | "locate";
+  timestamp_ms: number;
+}
+
+export interface PresentationLocks {
+  generation: number;
+  caps: boolean;
+  num: boolean;
   timestamp_ms: number;
 }
 
