@@ -1,44 +1,13 @@
-//! Local presentation aids. Preferences are durable; the active session is not.
+//! Runtime for the unified key visualizer and its optional pointer effects.
 use crate::{config, key_visualizer, AppState};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::{
     sync::Mutex,
     time::{Duration, Instant},
 };
 use tauri::{
-    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewUrl,
-    WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder,
 };
-
-mod shortcuts;
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct PresentationConfig {
-    pub keyboard: bool,
-    pub clicks: bool,
-    pub highlight: bool,
-    pub lock_keys: bool,
-    pub show_characters: bool,
-    pub show_modifiers: bool,
-    pub toggle_shortcut: String,
-    pub locate_shortcut: String,
-}
-
-impl Default for PresentationConfig {
-    fn default() -> Self {
-        Self {
-            keyboard: true,
-            clicks: true,
-            highlight: true,
-            lock_keys: true,
-            show_characters: false,
-            show_modifiers: false,
-            toggle_shortcut: "Ctrl+Alt+P".into(),
-            locate_shortcut: "Ctrl+Alt+L".into(),
-        }
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Screen {
@@ -51,19 +20,18 @@ pub struct Screen {
 }
 
 #[derive(Clone, Serialize)]
-pub struct PresentationStatus {
+pub struct VisualizerEffectsStatus {
     pub enabled: bool,
     pub suspended: bool,
     pub generation: u64,
     pub phase: String,
     pub error: Option<String>,
-    pub shortcut_error: Option<String>,
-    pub config: PresentationConfig,
+    pub config: config::KeyVisualizerConfig,
     pub screens: Vec<Screen>,
     pub locks: Option<LockState>,
 }
 
-impl Default for PresentationStatus {
+impl Default for VisualizerEffectsStatus {
     fn default() -> Self {
         Self {
             enabled: false,
@@ -71,8 +39,7 @@ impl Default for PresentationStatus {
             generation: 0,
             phase: "off".into(),
             error: None,
-            shortcut_error: None,
-            config: PresentationConfig::default(),
+            config: config::KeyVisualizerConfig::default(),
             screens: vec![],
             locks: None,
         }
@@ -80,16 +47,16 @@ impl Default for PresentationStatus {
 }
 
 #[derive(Default)]
-pub struct PresentationRuntime {
-    state: Mutex<PresentationStatus>,
+pub struct VisualizerEffectsRuntime {
+    state: Mutex<VisualizerEffectsStatus>,
     pub(crate) operation: Mutex<()>,
     ready: Mutex<std::collections::HashSet<String>>,
     started: Mutex<Option<Instant>>,
-    shortcuts: Mutex<Vec<(String, bool)>>,
+    capture_token: Mutex<u64>,
 }
 
-pub fn snapshot(app: &AppHandle) -> PresentationStatus {
-    app.state::<PresentationRuntime>()
+pub fn snapshot(app: &AppHandle) -> VisualizerEffectsStatus {
+    app.state::<VisualizerEffectsRuntime>()
         .state
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -98,24 +65,22 @@ pub fn snapshot(app: &AppHandle) -> PresentationStatus {
 
 fn publish(app: &AppHandle) {
     let status = snapshot(app);
-    if let Err(error) = app.emit("presentation-status", &status) {
-        tracing::error!(%error, "发布演示状态失败");
+    if let Err(error) = app.emit("key-visualizer-effects-status", &status) {
+        tracing::error!(%error, "发布按键展示状态失败");
     }
-    crate::tray::sync_presentation(app, status.enabled, status.error.is_some());
 }
 
 pub fn effective_key_config(
-    ordinary: &config::KeyVisualizerConfig,
-    status: &PresentationStatus,
+    config: &config::KeyVisualizerConfig,
+    status: &VisualizerEffectsStatus,
 ) -> config::KeyVisualizerConfig {
-    let mut value = ordinary.clone();
-    if status.enabled {
-        value.enabled = status.config.keyboard || status.config.lock_keys;
-        value.show_combinations = status.config.keyboard;
-        value.show_other = status.config.keyboard;
-        value.show_characters = status.config.keyboard && status.config.show_characters;
-        value.show_modifiers = status.config.keyboard && status.config.show_modifiers;
-    }
+    let mut value = config.clone();
+    value.enabled = status.enabled
+        && (config.show_modifiers
+            || config.show_combinations
+            || config.show_characters
+            || config.show_other
+            || config.lock_keys);
     if status.suspended {
         value.enabled = false;
     }
@@ -133,19 +98,19 @@ pub fn needs_input(app: &AppHandle) -> bool {
     let s = snapshot(app);
     s.enabled
         && !s.suspended
-        && (s.config.keyboard || s.config.clicks || s.config.highlight || s.config.lock_keys)
+        && (s.config.show_modifiers
+            || s.config.show_combinations
+            || s.config.show_characters
+            || s.config.show_other
+            || s.config.clicks
+            || s.config.highlight
+            || s.config.lock_keys)
 }
 
 fn apply_keys(app: &AppHandle) -> Result<(), String> {
-    let ordinary = app
-        .state::<AppState>()
-        .config
-        .lock()
-        .map_err(|_| "配置状态已损坏")?
-        .key_visualizer_config
-        .clone();
+    let config = snapshot(app).config;
     app.state::<key_visualizer::KeyVisualizerRuntime>()
-        .apply(app, &ordinary)
+        .apply(app, &config)
 }
 
 fn screen_specs(app: &AppHandle) -> Result<Vec<Screen>, String> {
@@ -157,7 +122,7 @@ fn screen_specs(app: &AppHandle) -> Result<Vec<Screen>, String> {
         .into_iter()
         .enumerate()
         .map(|(index, monitor)| Screen {
-            label: format!("presentation-{index}"),
+            label: format!("key-visualizer-effect-{index}"),
             x: monitor.position().x,
             y: monitor.position().y,
             width: monitor.size().width,
@@ -170,16 +135,16 @@ fn screen_specs(app: &AppHandle) -> Result<Vec<Screen>, String> {
 fn close_windows(app: &AppHandle) -> Result<(), String> {
     let mut errors = vec![];
     for (label, window) in app.webview_windows() {
-        if label.starts_with("presentation-") {
+        if label.starts_with("key-visualizer-effect-") {
             if let Err(error) = window.destroy() {
                 errors.push(format!("关闭鼠标效果失败：{error}"));
             }
         }
     }
-    app.state::<PresentationRuntime>()
+    app.state::<VisualizerEffectsRuntime>()
         .ready
         .lock()
-        .map_err(|_| "演示窗口状态已损坏")?
+        .map_err(|_| "按键展示窗口状态已损坏")?
         .clear();
     if errors.is_empty() {
         Ok(())
@@ -192,10 +157,10 @@ fn prepare_windows(app: &AppHandle) -> Result<(), String> {
     let status = snapshot(app);
     if !status.enabled || !(status.config.clicks || status.config.highlight) {
         close_windows(app)?;
-        app.state::<PresentationRuntime>()
+        app.state::<VisualizerEffectsRuntime>()
             .state
             .lock()
-            .map_err(|_| "演示状态已损坏")?
+            .map_err(|_| "按键展示状态已损坏")?
             .screens
             .clear();
         return sync_visibility(app);
@@ -203,32 +168,32 @@ fn prepare_windows(app: &AppHandle) -> Result<(), String> {
     let screens = screen_specs(app)?;
     if status.screens != screens {
         close_windows(app)?;
-        let runtime = app.state::<PresentationRuntime>();
-        let mut state = runtime.state.lock().map_err(|_| "演示状态已损坏")?;
+        let runtime = app.state::<VisualizerEffectsRuntime>();
+        let mut state = runtime.state.lock().map_err(|_| "按键展示状态已损坏")?;
         state.generation += 1;
         state.screens = screens.clone();
         state.phase = "starting".into();
-        *runtime.started.lock().map_err(|_| "演示状态已损坏")? = Some(Instant::now());
+        *runtime.started.lock().map_err(|_| "按键展示状态已损坏")? = Some(Instant::now());
     }
     for screen in &screens {
         if app.get_webview_window(&screen.label).is_none() {
-            let runtime = app.state::<PresentationRuntime>();
+            let runtime = app.state::<VisualizerEffectsRuntime>();
             if runtime
                 .ready
                 .lock()
-                .map_err(|_| "演示窗口状态已损坏")?
+                .map_err(|_| "按键展示窗口状态已损坏")?
                 .remove(&screen.label)
             {
                 runtime
                     .state
                     .lock()
-                    .map_err(|_| "演示状态已损坏")?
+                    .map_err(|_| "按键展示状态已损坏")?
                     .generation += 1;
             }
             let window = WebviewWindowBuilder::new(
                 app,
                 &screen.label,
-                WebviewUrl::App("presentation.html".into()),
+                WebviewUrl::App("key-visualizer-effects.html".into()),
             )
             .title("DockMapper 鼠标效果")
             .visible(false)
@@ -257,15 +222,15 @@ fn prepare_windows(app: &AppHandle) -> Result<(), String> {
 }
 
 fn sync_visibility(app: &AppHandle) -> Result<(), String> {
-    let runtime = app.state::<PresentationRuntime>();
+    let runtime = app.state::<VisualizerEffectsRuntime>();
     let ready = runtime
         .ready
         .lock()
-        .map_err(|_| "演示窗口状态已损坏")?
+        .map_err(|_| "按键展示窗口状态已损坏")?
         .clone();
     let status = snapshot(app);
     if !status.enabled {
-        *runtime.started.lock().map_err(|_| "演示状态已损坏")? = None;
+        *runtime.started.lock().map_err(|_| "按键展示状态已损坏")? = None;
     }
     let all_ready = status
         .screens
@@ -285,22 +250,30 @@ fn sync_visibility(app: &AppHandle) -> Result<(), String> {
         }
     }
     if status.enabled && !all_ready {
-        runtime.state.lock().map_err(|_| "演示状态已损坏")?.phase = "starting".into();
+        runtime
+            .state
+            .lock()
+            .map_err(|_| "按键展示状态已损坏")?
+            .phase = "starting".into();
         runtime
             .started
             .lock()
-            .map_err(|_| "演示状态已损坏")?
+            .map_err(|_| "按键展示状态已损坏")?
             .get_or_insert_with(Instant::now);
     }
     if status.enabled && all_ready {
-        runtime.state.lock().map_err(|_| "演示状态已损坏")?.phase = "running".into();
-        *runtime.started.lock().map_err(|_| "演示状态已损坏")? = None;
+        runtime
+            .state
+            .lock()
+            .map_err(|_| "按键展示状态已损坏")?
+            .phase = "running".into();
+        *runtime.started.lock().map_err(|_| "按键展示状态已损坏")? = None;
     }
     Ok(())
 }
 
 fn rollback(app: &AppHandle, error: String) -> String {
-    let runtime = app.state::<PresentationRuntime>();
+    let runtime = app.state::<VisualizerEffectsRuntime>();
     {
         let mut state = runtime.state.lock().unwrap_or_else(|e| e.into_inner());
         failed_session(&mut state, &error);
@@ -311,7 +284,7 @@ fn rollback(app: &AppHandle, error: String) -> String {
         errors.push(error);
     }
     if let Err(error) = apply_keys(app) {
-        errors.push(format!("恢复普通按键展示失败：{error}"));
+        errors.push(format!("恢复按键展示失败：{error}"));
     }
     let error = errors.join("；");
     runtime
@@ -323,56 +296,13 @@ fn rollback(app: &AppHandle, error: String) -> String {
     error
 }
 
-fn failed_session(state: &mut PresentationStatus, error: &str) {
+fn failed_session(state: &mut VisualizerEffectsStatus, error: &str) {
     state.enabled = false;
     state.generation += 1;
     state.phase = "off".into();
     state.screens.clear();
     state.locks = None;
     state.error = Some(error.into());
-}
-
-pub fn set_enabled(app: &AppHandle, enabled: bool) -> Result<PresentationStatus, String> {
-    let runtime = app.state::<PresentationRuntime>();
-    let _operation = runtime.operation.lock().map_err(|_| "演示操作状态已损坏")?;
-    {
-        let mut state = runtime.state.lock().map_err(|_| "演示状态已损坏")?;
-        if !transition(&mut state, enabled) {
-            return Ok(state.clone());
-        }
-    }
-    publish(app);
-    let result = prepare_windows(app)
-        .and_then(|_| apply_keys(app))
-        .and_then(|_| sync_visibility(app));
-    if let Err(error) = result {
-        return Err(rollback(app, error));
-    }
-    publish(app);
-    Ok(snapshot(app))
-}
-
-fn transition(state: &mut PresentationStatus, enabled: bool) -> bool {
-    if state.enabled == enabled && state.error.is_none() {
-        return false;
-    }
-    state.enabled = enabled;
-    state.generation += 1;
-    state.error = None;
-    state.locks = None;
-    state.phase = if enabled { "starting" } else { "off" }.into();
-    true
-}
-
-pub fn dispatch_toggle(app: &AppHandle) {
-    let app = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Err(error) = set_enabled(&app, !snapshot(&app).enabled) {
-            tracing::error!(%error, "切换演示模式失败");
-            crate::screenshot::show_main_window(&app);
-            let _ = app.emit("navigate-main", serde_json::json!({"page":"keyvisualizer"}));
-        }
-    });
 }
 
 #[derive(Clone, Serialize)]
@@ -418,13 +348,13 @@ pub fn mouse(app: &AppHandle, generation: u64, x: i32, y: i32, kind: &'static st
         timestamp_ms: now_ms(),
     };
     for screen in &status.screens {
-        if let Err(error) = app.emit_to(&screen.label, "presentation-mouse", &effect) {
+        if let Err(error) = app.emit_to(&screen.label, "key-visualizer-mouse", &effect) {
             report_input_error(app, generation, format!("发送鼠标效果失败：{error}"));
         }
     }
 }
 
-fn accepts_event(status: &PresentationStatus, generation: u64) -> bool {
+fn accepts_event(status: &VisualizerEffectsStatus, generation: u64) -> bool {
     status.enabled && !status.suspended && status.generation == generation
 }
 
@@ -439,25 +369,21 @@ pub fn lock_state(app: &AppHandle, generation: u64, caps: bool, num: bool) {
         num,
         timestamp_ms: now_ms(),
     };
-    app.state::<PresentationRuntime>()
+    app.state::<VisualizerEffectsRuntime>()
         .state
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .locks = Some(value.clone());
-    if let Err(error) = app.emit_to("key_visualizer", "presentation-locks", value) {
+    if let Err(error) = app.emit_to("key_visualizer", "key-visualizer-locks", value) {
         report_input_error(app, generation, format!("发送锁定键状态失败：{error}"));
     }
-}
-
-pub fn report_error(app: &AppHandle, error: String) {
-    report_input_error(app, snapshot(app).generation, error);
 }
 
 pub fn report_input_error(app: &AppHandle, generation: u64, error: String) {
     // The input thread must never wait for the UI thread (stop joins this thread).
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let runtime = app.state::<PresentationRuntime>();
+        let runtime = app.state::<VisualizerEffectsRuntime>();
         let Ok(_operation) = runtime.operation.lock() else {
             return;
         };
@@ -468,45 +394,15 @@ pub fn report_input_error(app: &AppHandle, generation: u64, error: String) {
 }
 
 #[tauri::command]
-pub fn get_presentation_status(app: AppHandle) -> PresentationStatus {
+pub fn get_key_visualizer_effects_status(app: AppHandle) -> VisualizerEffectsStatus {
     snapshot(&app)
 }
 
 #[tauri::command]
-pub fn get_presentation_config(state: State<'_, AppState>) -> Result<PresentationConfig, String> {
-    Ok(state
-        .config
-        .lock()
-        .map_err(|_| "配置状态已损坏")?
-        .presentation_config
-        .clone())
-}
-
-#[tauri::command]
-pub async fn set_presentation_enabled(
-    app: AppHandle,
-    enabled: bool,
-) -> Result<PresentationStatus, String> {
-    set_enabled(&app, enabled)
-}
-
-#[tauri::command]
-pub async fn retry_presentation(app: AppHandle) -> Result<PresentationStatus, String> {
-    {
-        let state = app.state::<AppState>();
-        let _mutation = state.mutation_lock.lock().map_err(|_| "配置写入锁已损坏")?;
-        let runtime = app.state::<PresentationRuntime>();
-        let _operation = runtime.operation.lock().map_err(|_| "演示操作状态已损坏")?;
-        shortcuts::initialize(&app);
-    }
-    set_enabled(&app, true)
-}
-
-#[tauri::command]
-pub async fn locate_presentation_mouse(app: AppHandle) -> Result<(), String> {
+pub async fn locate_key_visualizer_mouse(app: AppHandle) -> Result<(), String> {
     let state = snapshot(&app);
     if !state.enabled || state.suspended {
-        return Err("请先启用演示模式，并结束截图".into());
+        return Err("请先启用按键展示，并结束截图".into());
     }
     if !state.config.highlight {
         return Err("请先启用鼠标高亮与定位".into());
@@ -519,23 +415,26 @@ pub async fn locate_presentation_mouse(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn presentation_ready(
+pub async fn key_visualizer_effects_ready(
     app: AppHandle,
     window: tauri::WebviewWindow,
-) -> Result<PresentationStatus, String> {
-    let runtime = app.state::<PresentationRuntime>();
-    let _operation = runtime.operation.lock().map_err(|_| "演示操作状态已损坏")?;
+) -> Result<VisualizerEffectsStatus, String> {
+    let runtime = app.state::<VisualizerEffectsRuntime>();
+    let _operation = runtime
+        .operation
+        .lock()
+        .map_err(|_| "按键展示操作状态已损坏")?;
     if !snapshot(&app)
         .screens
         .iter()
         .any(|screen| screen.label == window.label())
     {
-        return Err("演示窗口会话已结束".into());
+        return Err("按键展示窗口会话已结束".into());
     }
     runtime
         .ready
         .lock()
-        .map_err(|_| "演示窗口状态已损坏")?
+        .map_err(|_| "按键展示窗口状态已损坏")?
         .insert(window.label().into());
     if let Err(error) = sync_visibility(&app) {
         return Err(rollback(&app, error));
@@ -544,71 +443,158 @@ pub async fn presentation_ready(
     Ok(snapshot(&app))
 }
 
-#[tauri::command]
-pub async fn update_presentation_config(
-    app: AppHandle,
-    mut presentation_config: PresentationConfig,
-) -> Result<PresentationConfig, String> {
-    presentation_config.toggle_shortcut = presentation_config.toggle_shortcut.trim().into();
-    presentation_config.locate_shortcut = presentation_config.locate_shortcut.trim().into();
-    shortcuts::validate(&presentation_config)?;
-    let app_state = app.state::<AppState>();
-    let _mutation = app_state
-        .mutation_lock
+pub fn replace_config(
+    app: &AppHandle,
+    next: &config::KeyVisualizerConfig,
+) -> Result<VisualizerEffectsStatus, String> {
+    let runtime = app.state::<VisualizerEffectsRuntime>();
+    let _operation = runtime
+        .operation
         .lock()
-        .map_err(|_| "配置写入锁已损坏")?;
-    let runtime = app.state::<PresentationRuntime>();
-    let _operation = runtime.operation.lock().map_err(|_| "演示操作状态已损坏")?;
-    let previous = app_state
-        .config
-        .lock()
-        .map_err(|_| "配置状态已损坏")?
-        .clone();
-    let mut next = previous.clone();
-    next.presentation_config = presentation_config.clone();
-    // Register before saving; a conflict must not replace the user's working binding.
-    commit_preferences(
-        &previous.presentation_config,
-        &presentation_config,
-        |value| shortcuts::replace(&app, value),
-        || config::save(&app_state.config_path, &next),
-    )?;
-    *app_state.config.lock().map_err(|_| "配置状态已损坏")? = next;
+        .map_err(|_| "按键展示操作状态已损坏")?;
+    let previous = snapshot(app);
     {
-        let mut state = runtime.state.lock().map_err(|_| "演示状态已损坏")?;
-        state.config = presentation_config.clone();
+        let mut state = runtime.state.lock().map_err(|_| "按键展示状态已损坏")?;
+        state.config = next.clone();
+        state.enabled = next.enabled;
+        state.suspended = previous.suspended && next.enabled;
         state.generation += 1;
         state.error = None;
+        state.locks = None;
+        state.phase = if next.enabled { "starting" } else { "off" }.into();
     }
-    if let Err(error) = prepare_windows(&app)
-        .and_then(|_| apply_keys(&app))
-        .and_then(|_| sync_visibility(&app))
+    if !next.enabled {
+        *runtime
+            .capture_token
+            .lock()
+            .map_err(|_| "截图暂停状态已损坏")? = 0;
+    }
+    if let Err(error) = prepare_windows(app)
+        .and_then(|_| apply_keys(app))
+        .and_then(|_| sync_visibility(app))
     {
-        // The preference was saved successfully; report the failed activation and restore ordinary mode.
-        return Err(rollback(&app, format!("偏好已保存，但启用失败：{error}")));
-    }
-    publish(&app);
-    Ok(presentation_config)
-}
-
-fn commit_preferences<R, S>(
-    previous: &PresentationConfig,
-    next: &PresentationConfig,
-    mut register: R,
-    save: S,
-) -> Result<(), String>
-where
-    R: FnMut(&PresentationConfig) -> Result<(), String>,
-    S: FnOnce() -> Result<(), String>,
-{
-    register(next)?;
-    if let Err(error) = save() {
-        return Err(match register(previous) {
+        *runtime.state.lock().unwrap_or_else(|e| e.into_inner()) = previous;
+        let restored = prepare_windows(app)
+            .and_then(|_| apply_keys(app))
+            .and_then(|_| sync_visibility(app));
+        publish(app);
+        return Err(match restored {
             Ok(()) => error,
-            Err(restore) => format!("{error}；恢复快捷键失败：{restore}"),
+            Err(restore) => format!("{error}；恢复旧按键展示失败：{restore}"),
         });
     }
-    Ok(())
+    publish(app);
+    Ok(snapshot(app))
+}
+
+pub fn retry(app: &AppHandle) -> Result<VisualizerEffectsStatus, String> {
+    let config = snapshot(app).config;
+    replace_config(app, &config)
+}
+
+pub fn suspend_for_capture(app: &AppHandle) -> Result<Option<u64>, String> {
+    let runtime = app.state::<VisualizerEffectsRuntime>();
+    let _operation = runtime
+        .operation
+        .lock()
+        .map_err(|_| "按键展示操作状态已损坏")?;
+    let previous = snapshot(app);
+    let previous_token = *runtime
+        .capture_token
+        .lock()
+        .map_err(|_| "截图暂停状态已损坏")?;
+    let token = {
+        let mut state = runtime.state.lock().map_err(|_| "按键展示状态已损坏")?;
+        let mut active = runtime
+            .capture_token
+            .lock()
+            .map_err(|_| "截图暂停状态已损坏")?;
+        begin_capture_suspension(&mut state, &mut active)?
+    };
+    let Some(token) = token else {
+        return Ok(None);
+    };
+    if previous.suspended {
+        return Ok(Some(token));
+    }
+    if let Err(error) = apply_keys(app).and_then(|_| sync_visibility(app)) {
+        *runtime.state.lock().unwrap_or_else(|e| e.into_inner()) = previous;
+        *runtime
+            .capture_token
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = previous_token;
+        let restored = apply_keys(app).and_then(|_| sync_visibility(app));
+        publish(app);
+        return Err(match restored {
+            Ok(()) => error,
+            Err(restore) => format!("{error}；恢复截图前按键展示失败：{restore}"),
+        });
+    }
+    publish(app);
+    Ok(Some(token))
+}
+
+fn begin_capture_suspension(
+    state: &mut VisualizerEffectsStatus,
+    active: &mut u64,
+) -> Result<Option<u64>, String> {
+    if !state.enabled {
+        return Ok(None);
+    }
+    if state.suspended {
+        return if *active == 0 {
+            Err("按键展示暂停代次已丢失，请重试".into())
+        } else {
+            Ok(Some(*active))
+        };
+    }
+    state.suspended = true;
+    state.generation += 1;
+    state.locks = None;
+    *active = state.generation;
+    Ok(Some(*active))
+}
+
+pub fn resume_after_capture(app: &AppHandle, token: u64) -> Result<bool, String> {
+    let runtime = app.state::<VisualizerEffectsRuntime>();
+    let _operation = runtime
+        .operation
+        .lock()
+        .map_err(|_| "按键展示操作状态已损坏")?;
+    {
+        let mut active = runtime
+            .capture_token
+            .lock()
+            .map_err(|_| "截图暂停状态已损坏")?;
+        if !consume_capture_token(&mut active, token) {
+            return Ok(false);
+        }
+    }
+    {
+        let mut state = runtime.state.lock().map_err(|_| "按键展示状态已损坏")?;
+        if !state.suspended {
+            return Ok(false);
+        }
+        state.suspended = false;
+        state.generation += 1;
+        state.phase = if state.enabled { "starting" } else { "off" }.into();
+    }
+    if let Err(error) = prepare_windows(app)
+        .and_then(|_| apply_keys(app))
+        .and_then(|_| sync_visibility(app))
+    {
+        return Err(rollback(app, error));
+    }
+    publish(app);
+    Ok(true)
+}
+
+fn consume_capture_token(active: &mut u64, token: u64) -> bool {
+    if *active != token {
+        return false;
+    }
+    *active = 0;
+    true
 }
 
 pub fn initialize(app: &AppHandle) {
@@ -617,14 +603,11 @@ pub fn initialize(app: &AppHandle) {
         .config
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .presentation_config
+        .key_visualizer_config
         .clone();
-    app.state::<PresentationRuntime>()
-        .state
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .config = config;
-    shortcuts::initialize(app);
+    if let Err(error) = replace_config(app, &config) {
+        tracing::error!(target: "dock_mapper::key_visualizer", %error, "启动按键展示失败");
+    }
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         loop {
@@ -634,7 +617,7 @@ pub fn initialize(app: &AppHandle) {
             }
             let worker = app.clone();
             let _ = tauri::async_runtime::spawn_blocking(move || {
-                let runtime = worker.state::<PresentationRuntime>();
+                let runtime = worker.state::<VisualizerEffectsRuntime>();
                 let Ok(_operation) = runtime.operation.lock() else {
                     return;
                 };
@@ -670,29 +653,61 @@ pub fn initialize(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
-    fn old_preferences_start_with_presentation_off_and_safe_key_filters() {
+    fn default_preferences_start_disabled_with_visible_key_categories() {
         let config: config::AppConfig = serde_json::from_str("{}").unwrap();
-        assert!(config.presentation_config.keyboard);
-        assert!(!config.presentation_config.show_characters);
-        assert!(!PresentationStatus::default().enabled);
+        assert!(!config.key_visualizer_config.enabled);
+        assert!(config.key_visualizer_config.show_characters);
+        assert!(!VisualizerEffectsStatus::default().enabled);
     }
+
     #[test]
-    fn leaving_presentation_restores_the_ordinary_key_preferences() {
-        let ordinary = config::KeyVisualizerConfig::default();
-        let mut status = PresentationStatus {
+    fn screenshot_suspension_hides_keys_without_discarding_preferences() {
+        let mut ordinary = config::KeyVisualizerConfig::default();
+        ordinary.enabled = true;
+        let mut status = VisualizerEffectsStatus {
             enabled: true,
+            config: ordinary.clone(),
             ..Default::default()
         };
+        assert!(effective_key_config(&ordinary, &status).enabled);
+        status.suspended = true;
         let effective = effective_key_config(&ordinary, &status);
-        assert!(effective.show_combinations);
-        assert!(!effective.show_characters);
-        status.enabled = false;
-        assert_eq!(effective_key_config(&ordinary, &status), ordinary);
+        assert!(!effective.enabled);
+        assert!(effective.show_characters);
     }
+
+    #[test]
+    fn stale_screenshot_cannot_resume_a_newer_visualizer_session() {
+        let mut active = 7;
+        assert!(!consume_capture_token(&mut active, 6));
+        assert_eq!(active, 7);
+        assert!(consume_capture_token(&mut active, 7));
+        assert_eq!(active, 0);
+    }
+
+    #[test]
+    fn consecutive_screenshots_share_one_suspension_until_the_matching_resume() {
+        let mut status = VisualizerEffectsStatus {
+            enabled: true,
+            generation: 4,
+            ..Default::default()
+        };
+        let mut active = 0;
+        let first = begin_capture_suspension(&mut status, &mut active).unwrap();
+        let second = begin_capture_suspension(&mut status, &mut active).unwrap();
+        assert_eq!(first, Some(5));
+        assert_eq!(second, first);
+        assert_eq!(status.generation, 5);
+        assert!(!consume_capture_token(&mut active, 4));
+        assert!(status.suspended);
+        assert!(consume_capture_token(&mut active, 5));
+    }
+
     #[test]
     fn old_mouse_events_cannot_reappear_after_stop_or_restart() {
-        let mut status = PresentationStatus {
+        let mut status = VisualizerEffectsStatus {
             enabled: true,
             generation: 3,
             ..Default::default()
@@ -705,60 +720,11 @@ mod tests {
         status.enabled = false;
         assert!(!accepts_event(&status, 3));
     }
+
     #[test]
-    fn repeated_start_and_stop_do_not_create_extra_sessions() {
-        let mut status = PresentationStatus::default();
-        assert!(transition(&mut status, true));
-        let generation = status.generation;
-        assert!(!transition(&mut status, true));
-        assert_eq!(status.generation, generation);
-        assert!(transition(&mut status, false));
-        assert!(!transition(&mut status, false));
-        assert!(!accepts_event(&status, generation));
-    }
-    #[test]
-    fn failed_preference_save_restores_the_previous_shortcuts() {
-        let previous = PresentationConfig::default();
-        let next = PresentationConfig {
-            toggle_shortcut: "Ctrl+Alt+T".into(),
-            ..previous.clone()
-        };
-        let mut registrations = vec![];
-        let result = commit_preferences(
-            &previous,
-            &next,
-            |value| {
-                registrations.push(value.toggle_shortcut.clone());
-                Ok(())
-            },
-            || Err("磁盘写入失败".into()),
-        );
-        assert_eq!(result.unwrap_err(), "磁盘写入失败");
-        assert_eq!(
-            registrations,
-            vec![next.toggle_shortcut, previous.toggle_shortcut]
-        );
-    }
-    #[test]
-    fn shortcut_conflict_does_not_write_preferences() {
-        let config = PresentationConfig::default();
-        let mut saved = false;
-        assert!(commit_preferences(
-            &config,
-            &config,
-            |_| Err("已占用".into()),
-            || {
-                saved = true;
-                Ok(())
-            }
-        )
-        .is_err());
-        assert!(!saved);
-    }
-    #[test]
-    fn failed_start_restores_ordinary_keys_and_invalidates_pending_effects() {
+    fn failed_start_hides_keys_and_invalidates_pending_effects() {
         let ordinary = config::KeyVisualizerConfig::default();
-        let mut state = PresentationStatus {
+        let mut state = VisualizerEffectsStatus {
             enabled: true,
             generation: 8,
             phase: "starting".into(),
@@ -768,19 +734,26 @@ mod tests {
         assert_eq!(state.phase, "off");
         assert_eq!(state.error.as_deref(), Some("窗口启动失败"));
         assert!(!accepts_event(&state, 8));
-        assert_eq!(effective_key_config(&ordinary, &state), ordinary);
+        assert!(!effective_key_config(&ordinary, &state).enabled);
     }
+
     #[test]
     fn locks_can_remain_visible_without_showing_keyboard_input() {
-        let status = PresentationStatus {
+        let config = config::KeyVisualizerConfig {
             enabled: true,
-            config: PresentationConfig {
-                keyboard: false,
-                ..Default::default()
-            },
+            show_modifiers: false,
+            show_combinations: false,
+            show_characters: false,
+            show_other: false,
+            lock_keys: true,
             ..Default::default()
         };
-        let keys = effective_key_config(&config::KeyVisualizerConfig::default(), &status);
+        let status = VisualizerEffectsStatus {
+            enabled: true,
+            config: config.clone(),
+            ..Default::default()
+        };
+        let keys = effective_key_config(&config, &status);
         assert!(keys.enabled);
         assert!(
             !keys.show_combinations

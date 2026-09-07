@@ -1,30 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { shortcutFromKeyEvent } from "./shortcut";
+import { duplicateShortcutFields, parseShortcut, serializeShortcut } from "./shortcut";
 
-describe("shortcut recorder", () => {
-  it("records stable Tauri accelerator names", () => {
-    expect(
-      shortcutFromKeyEvent({
-        ctrlKey: true,
-        altKey: false,
-        shiftKey: true,
-        metaKey: false,
-        code: "KeyA",
-        key: "a",
-      }),
-    ).toBe("Control+Shift+A");
+describe("shortcut select values", () => {
+  it("round-trips two and three key shortcuts in canonical order", () => {
+    expect(serializeShortcut({ modifiers: ["Shift", "Control"], key: "S" })).toBe(
+      "Control+Shift+S",
+    );
+    expect(parseShortcut("Ctrl+S")).toEqual({ modifiers: ["Control"], key: "S" });
+    expect(parseShortcut("Win+Esc")).toEqual({ modifiers: ["Super"], key: "Escape" });
   });
 
-  it("rejects a key without a modifier", () => {
+  it("rejects duplicate modifiers and unsupported legacy values", () => {
+    expect(parseShortcut("Control+Control+S")).toBeNull();
+    expect(parseShortcut("Control+ArrowUp")).toBeNull();
+  });
+
+  it("marks every field that shares a shortcut", () => {
     expect(
-      shortcutFromKeyEvent({
-        ctrlKey: false,
-        altKey: false,
-        shiftKey: false,
-        metaKey: false,
-        code: "KeyA",
-        key: "a",
-      }),
-    ).toBeNull();
+      duplicateShortcutFields({ capture: "Ctrl+1", pin: "Control+1", history: "Control+2" }, [
+        "capture",
+        "pin",
+        "history",
+      ]),
+    ).toEqual(["capture", "pin"]);
   });
 });

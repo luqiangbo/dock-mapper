@@ -59,11 +59,7 @@
       ]
     },
     "allow-get-key-visualizer-session",
-    "allow-get-presentation-config",
-    "allow-get-presentation-status",
-    "allow-set-presentation-enabled",
-    "allow-update-presentation-config",
-    "allow-retry-presentation",
-    "allow-locate-presentation-mouse"
+    "allow-get-key-visualizer-effects-status",
+    "allow-locate-key-visualizer-mouse"
   ]
 }

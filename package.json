@@ -9,8 +9,8 @@
     "tauri": "pnpm exec tauri",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
-    "format": "oxfmt src index.html screenshot.html widget.html rsbuild.config.ts tsconfig.json package.json .oxfmtrc.json .oxlintrc.json",
-    "format:check": "oxfmt --check src index.html screenshot.html widget.html rsbuild.config.ts tsconfig.json package.json .oxfmtrc.json .oxlintrc.json",
+    "format": "oxfmt src index.html screenshot.html widget.html key-visualizer-effects.html rsbuild.config.ts tsconfig.json package.json .oxfmtrc.json .oxlintrc.json",
+    "format:check": "oxfmt --check src index.html screenshot.html widget.html key-visualizer-effects.html rsbuild.config.ts tsconfig.json package.json .oxfmtrc.json .oxlintrc.json",
     "test": "vitest run --passWithNoTests",
     "version:sync": "node .github/scripts/sync-version.mjs",
     "runtime:prepare": "node .github/scripts/prepare-vcredist.mjs"

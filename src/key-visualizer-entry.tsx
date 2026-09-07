@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { listen } from "@tauri-apps/api/event";
-import { MAIN_EVENTS, errorMessage, keyVisualizerApi, presentationApi } from "./api/commands";
+import { MAIN_EVENTS, errorMessage, keyVisualizerApi } from "./api/commands";
 import type {
   KeyVisualizerConfig,
   KeyVisualizerInput,
   KeyVisualizerSession,
-  PresentationStatus,
-  PresentationLocks,
+  KeyVisualizerEffectsStatus,
+  KeyVisualizerLocks,
 } from "./types";
 import {
   appendKeyVisualizerEntry,
@@ -24,8 +24,8 @@ function KeyVisualizerWindow() {
   const [error, setError] = useState<string | null>(null);
 
   const session = useRef<KeyVisualizerSession | null>(null);
-  const presentation = useRef<PresentationStatus | null>(null);
-  const [locks, setLocks] = useState<PresentationLocks | null>(null);
+  const effectsStatus = useRef<KeyVisualizerEffectsStatus | null>(null);
+  const [locks, setLocks] = useState<KeyVisualizerLocks | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -41,8 +41,8 @@ function KeyVisualizerWindow() {
       setConfig(next.config);
       setError(null);
     };
-    const receiveLocks = (value: PresentationLocks) => {
-      const status = presentation.current;
+    const receiveLocks = (value: KeyVisualizerLocks) => {
+      const status = effectsStatus.current;
       if (
         !disposed &&
         status?.enabled &&
@@ -52,12 +52,12 @@ function KeyVisualizerWindow() {
       )
         setLocks(value);
     };
-    const receivePresentation = (next: PresentationStatus) => {
-      if (disposed || (presentation.current && next.generation < presentation.current.generation))
+    const receiveEffectsStatus = (next: KeyVisualizerEffectsStatus) => {
+      if (disposed || (effectsStatus.current && next.generation < effectsStatus.current.generation))
         return;
-      if (next.generation !== presentation.current?.generation || !next.enabled || next.suspended)
+      if (next.generation !== effectsStatus.current?.generation || !next.enabled || next.suspended)
         setLocks(null);
-      presentation.current = next;
+      effectsStatus.current = next;
       if (next.locks) receiveLocks(next.locks);
     };
     const subscribe = async <T,>(name: string, receive: (value: T) => void) => {
@@ -78,12 +78,15 @@ function KeyVisualizerWindow() {
         }
       });
       if (disposed) return;
-      await subscribe<PresentationStatus>(MAIN_EVENTS.presentationStatus, receivePresentation);
+      await subscribe<KeyVisualizerEffectsStatus>(
+        MAIN_EVENTS.keyVisualizerEffectsStatus,
+        receiveEffectsStatus,
+      );
       if (disposed) return;
-      await subscribe<PresentationLocks>(MAIN_EVENTS.presentationLocks, receiveLocks);
+      await subscribe<KeyVisualizerLocks>(MAIN_EVENTS.keyVisualizerLocks, receiveLocks);
       if (disposed) return;
       receiveSession(await keyVisualizerApi.session());
-      receivePresentation(await presentationApi.status());
+      receiveEffectsStatus(await keyVisualizerApi.effectsStatus());
     };
     void start().catch((reason) => {
       if (!disposed) setError(errorMessage(reason));

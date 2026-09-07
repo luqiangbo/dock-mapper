@@ -59,7 +59,8 @@ pub struct AppConfig {
     pub screenshot_config: ScreenshotConfig,
     pub color_palette: ColorPaletteConfig,
     pub key_visualizer_config: KeyVisualizerConfig,
-    pub presentation_config: crate::presentation::PresentationConfig,
+    #[serde(default, rename = "presentation_config", skip_serializing)]
+    legacy_presentation_config: Option<LegacyPresentationConfig>,
     /// 接管前 Scancode Map 的 Base64 备份；外部修改后再次接管时会更新。
     pub scancode_map_backup: Option<String>,
     /// DockMapper 最后一次成功写入的 Scancode Map，用于区分草稿与外部修改。
@@ -74,6 +75,9 @@ pub struct KeyVisualizerConfig {
     pub show_combinations: bool,
     pub show_characters: bool,
     pub show_other: bool,
+    pub clicks: bool,
+    pub highlight: bool,
+    pub lock_keys: bool,
     pub font_size: u16,
     pub scale_percent: u16,
     pub text_opacity: u8,
@@ -87,6 +91,9 @@ impl Default for KeyVisualizerConfig {
             show_combinations: true,
             show_characters: true,
             show_other: true,
+            clicks: true,
+            highlight: true,
+            lock_keys: true,
             font_size: 28,
             scale_percent: 100,
             text_opacity: 100,
@@ -135,7 +142,7 @@ impl Default for AppConfig {
             screenshot_config: ScreenshotConfig::default(),
             color_palette: ColorPaletteConfig::default(),
             key_visualizer_config: KeyVisualizerConfig::default(),
-            presentation_config: crate::presentation::PresentationConfig::default(),
+            legacy_presentation_config: None,
             scancode_map_backup: None,
             applied_scancode_map: None,
         }
@@ -274,12 +281,35 @@ pub fn normalize_screenshot_config(config: &mut ScreenshotConfig) {
 }
 
 fn normalize_loaded_config(config: &mut AppConfig) {
+    if let Some(legacy) = config.legacy_presentation_config.take() {
+        config.key_visualizer_config.clicks = legacy.clicks;
+        config.key_visualizer_config.highlight = legacy.highlight;
+        config.key_visualizer_config.lock_keys = legacy.lock_keys;
+    }
     config.widget_config.refresh_interval_secs =
         config.widget_config.refresh_interval_secs.clamp(1, 5);
     normalize_screenshot_config(&mut config.screenshot_config);
     normalize_palette(&mut config.color_palette);
     config.widget_config.normalize();
     normalize_key_visualizer_config(&mut config.key_visualizer_config);
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+struct LegacyPresentationConfig {
+    clicks: bool,
+    highlight: bool,
+    lock_keys: bool,
+}
+
+impl Default for LegacyPresentationConfig {
+    fn default() -> Self {
+        Self {
+            clicks: true,
+            highlight: true,
+            lock_keys: true,
+        }
+    }
 }
 
 pub fn normalize_key_visualizer_config(config: &mut KeyVisualizerConfig) {
@@ -316,10 +346,7 @@ pub fn normalize_palette(palette: &mut ColorPaletteConfig) {
     normalize(&mut palette.favorites, 5);
 }
 
-pub fn record_palette_color(
-    palette: &mut ColorPaletteConfig,
-    value: &str,
-) -> Result<(), String> {
+pub fn record_palette_color(palette: &mut ColorPaletteConfig, value: &str) -> Result<(), String> {
     let color = normalize_color(value).ok_or_else(|| "颜色必须为 #RRGGBB".to_string())?;
     palette.recent.retain(|item| item != &color);
     palette.recent.insert(0, color);
@@ -464,10 +491,9 @@ mod tests {
 
     #[test]
     fn screenshot_size_unit_defaults_to_px_for_existing_config() {
-        let config: ScreenshotConfig = serde_json::from_str(
-            r#"{"shortcut":"Control+1","color_copy_format":"hex"}"#,
-        )
-        .expect("old screenshot config remains readable");
+        let config: ScreenshotConfig =
+            serde_json::from_str(r#"{"shortcut":"Control+1","color_copy_format":"hex"}"#)
+                .expect("old screenshot config remains readable");
         assert_eq!(config.capture_size_unit, CaptureSizeUnit::Px);
     }
 
@@ -497,11 +523,40 @@ mod tests {
     }
 
     #[test]
+    fn legacy_presentation_effects_migrate_into_the_single_visualizer_config() {
+        let mut config: AppConfig = serde_json::from_str(
+            r#"{
+                "key_visualizer_config": { "enabled": true, "highlight": true },
+                "presentation_config": {
+                    "clicks": false,
+                    "highlight": false,
+                    "lock_keys": true,
+                    "toggle_shortcut": "Ctrl+Alt+P"
+                }
+            }"#,
+        )
+        .expect("legacy presentation settings remain readable");
+        normalize_loaded_config(&mut config);
+        assert!(config.key_visualizer_config.enabled);
+        assert!(!config.key_visualizer_config.clicks);
+        assert!(!config.key_visualizer_config.highlight);
+        assert!(config.key_visualizer_config.lock_keys);
+        let serialized = serde_json::to_value(config).expect("serialize migrated config");
+        assert!(serialized.get("presentation_config").is_none());
+    }
+
+    #[test]
     fn key_visualizer_opacity_is_normalized_to_supported_range() {
-        let mut low = KeyVisualizerConfig { text_opacity: 1, ..KeyVisualizerConfig::default() };
+        let mut low = KeyVisualizerConfig {
+            text_opacity: 1,
+            ..KeyVisualizerConfig::default()
+        };
         normalize_key_visualizer_config(&mut low);
         assert_eq!(low.text_opacity, 20);
-        let mut high = KeyVisualizerConfig { text_opacity: 255, ..KeyVisualizerConfig::default() };
+        let mut high = KeyVisualizerConfig {
+            text_opacity: 255,
+            ..KeyVisualizerConfig::default()
+        };
         normalize_key_visualizer_config(&mut high);
         assert_eq!(high.text_opacity, 100);
     }
@@ -544,7 +599,14 @@ mod tests {
 
         assert_eq!(palette.recent.len(), 5);
         assert_eq!(palette.recent[0], "#000005");
-        assert_eq!(palette.recent.iter().filter(|color| *color == "#000005").count(), 1);
+        assert_eq!(
+            palette
+                .recent
+                .iter()
+                .filter(|color| *color == "#000005")
+                .count(),
+            1
+        );
         assert!(!palette.recent.contains(&"#000000".to_string()));
     }
 

@@ -19,19 +19,19 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder
 mod capture;
 mod clipboard;
 use capture::*;
-mod runtime;
-mod pin_runtime;
-mod overlay;
 pub(crate) mod output;
+mod overlay;
+mod pin_runtime;
+mod runtime;
 mod shortcut;
-use overlay::*;
 use output::*;
 pub use output::{copy_png_bytes, pin_external_image};
-use pin_runtime::*;
+use overlay::*;
 pub use pin_runtime::PinOptions;
+use pin_runtime::*;
+use runtime::URI_CAPTURE;
 pub use runtime::{runtime_status, RuntimeStatus};
 pub use shortcut::ShortcutRuntimeStatus;
-use runtime::URI_CAPTURE;
 #[path = "screenshot/windows.rs"]
 mod window_candidates;
 
@@ -104,11 +104,11 @@ pub struct AppState {
     active_overlay: Mutex<Option<String>>,
     capture_in_progress: AtomicBool,
     capture_generation: AtomicU64,
+    visualizer_suspend_token: Mutex<Option<u64>>,
     capture_timings: Mutex<Vec<CaptureTiming>>,
     dxgi_fallback_count: AtomicU64,
     dxgi_capture: Mutex<crate::dxgi_capture::CaptureManager>,
 }
-
 
 pub fn create_state() -> AppState {
     AppState {
@@ -121,6 +121,7 @@ pub fn create_state() -> AppState {
         active_overlay: Mutex::new(None),
         capture_in_progress: AtomicBool::new(false),
         capture_generation: AtomicU64::new(0),
+        visualizer_suspend_token: Mutex::new(None),
         capture_timings: Mutex::new(Vec::with_capacity(20)),
         dxgi_fallback_count: AtomicU64::new(0),
         dxgi_capture: Mutex::new(crate::dxgi_capture::CaptureManager::default()),
@@ -150,7 +151,6 @@ pub fn initialize(app: &AppHandle) -> Result<(), String> {
     shortcut::register_initial(app, &shortcuts);
     Ok(())
 }
-
 
 pub fn start_capture(app: &AppHandle) {
     handle_start_capture(app);
@@ -221,7 +221,6 @@ pub struct FullScreenshot {
     mode: CaptureMode,
 }
 
-
 pub fn serve_capture_uri(request: Request<Vec<u8>>) -> Response<std::borrow::Cow<'static, [u8]>> {
     let path = request.uri().path().trim_start_matches('/');
     let Some(raw_generation) = path
@@ -265,8 +264,6 @@ pub fn serve_capture_uri(request: Request<Vec<u8>>) -> Response<std::borrow::Cow
     }
 }
 
-
-
 fn build_pin_window(
     app: &AppHandle,
     id: &str,
@@ -307,7 +304,6 @@ fn release_pin_runtime(app: &AppHandle, id: &str, destroy_window: bool) {
         .remove(id);
 }
 
-
 pub fn update_shortcuts(
     app: &AppHandle,
     previous: &crate::config::ScreenshotConfig,
@@ -323,9 +319,7 @@ pub fn replace_all_shortcuts(
     shortcut::replace_all(app, config)
 }
 
-pub fn shortcut_statuses(
-    app: &AppHandle,
-) -> Result<Vec<shortcut::ShortcutRuntimeStatus>, String> {
+pub fn shortcut_statuses(app: &AppHandle) -> Result<Vec<shortcut::ShortcutRuntimeStatus>, String> {
     let config = app
         .state::<crate::AppState>()
         .config
@@ -712,10 +706,13 @@ pub fn update_pin_options(
     let options = normalized_pin_options(opacity, locked);
     let state = app.state::<AppState>();
     let mut runtime = state.pin_runtime.lock_or_recover();
-    if !runtime.options.contains_key(&id) { return Err("贴图窗口不存在".into()); }
+    if !runtime.options.contains_key(&id) {
+        return Err("贴图窗口不存在".into());
+    }
     runtime.options.insert(id.clone(), options);
     drop(runtime);
-    app.get_webview_window(&id).ok_or_else(|| "贴图窗口不存在".to_string())?;
+    app.get_webview_window(&id)
+        .ok_or_else(|| "贴图窗口不存在".to_string())?;
     Ok(options)
 }
 

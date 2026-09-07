@@ -1,29 +1,387 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Alert, Button, Card, Form, InputNumber, Select, Space, Spin, Switch, Tag, Typography, message } from "antd";
+import {
+  Alert,
+  App as AntApp,
+  Button,
+  Card,
+  Form,
+  InputNumber,
+  Spin,
+  Switch,
+  Tag,
+  Typography,
+} from "antd";
+import { AimOutlined, UndoOutlined } from "@ant-design/icons";
 import { errorMessage, keyVisualizerApi, MAIN_EVENTS } from "../api/commands";
-import type { KeyVisualizerConfig, KeyVisualizerStatus } from "../types";
+import type {
+  KeyVisualizerConfig,
+  KeyVisualizerEffectsStatus,
+  KeyVisualizerStatus,
+} from "../types";
 import styles from "./components.module.scss";
 
-type KeyFormValues = Omit<KeyVisualizerConfig, "show_modifiers" | "show_combinations" | "show_characters" | "show_other"> & { categories: string[] };
-const toForm = (config: KeyVisualizerConfig): KeyFormValues => ({ ...config, categories: [["modifiers", config.show_modifiers], ["combinations", config.show_combinations], ["characters", config.show_characters], ["other", config.show_other]].filter(([, enabled]) => enabled).map(([name]) => name) as string[] });
-const toConfig = (values: KeyFormValues): KeyVisualizerConfig => {
-  const { categories: selectedCategories = [], ...config } = values;
-  return { ...config, show_modifiers: selectedCategories.includes("modifiers"), show_combinations: selectedCategories.includes("combinations"), show_characters: selectedCategories.includes("characters"), show_other: selectedCategories.includes("other") };
-};
+const { Text, Title } = Typography;
 
-export default function KeyVisualizerSettings({ disabled = false }: { disabled?: boolean }) {
-  const [form] = Form.useForm<KeyFormValues>(); const [saved, setSaved] = useState<KeyVisualizerConfig | null>(null); const [status, setStatus] = useState<KeyVisualizerStatus | null>(null); const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false); const [loadError, setLoadError] = useState<string | null>(null); const values = Form.useWatch([], form);
-  const load = useCallback(async () => { setLoading(true); setLoadError(null); try { const [config, nextStatus] = await Promise.all([keyVisualizerApi.config(), keyVisualizerApi.status()]); setSaved(config); form.setFieldsValue(toForm(config)); form.resetFields(); setStatus(nextStatus); } catch (error) { setLoadError(errorMessage(error)); } finally { setLoading(false); } }, [form]);
-  useEffect(() => { void load(); }, [load]);
-  useEffect(() => { let disposed = false; let off: (() => void) | undefined; void listen<KeyVisualizerConfig>(MAIN_EVENTS.keyVisualizerConfigChanged, ({ payload }) => { if (!disposed) { setSaved(payload); form.setFieldsValue(toForm(payload)); form.resetFields(); } }).then((unlisten) => { if (disposed) unlisten(); else off = unlisten; }).catch((reason) => { if (!disposed) setLoadError(`监听按键设置失败：${errorMessage(reason)}`); }); return () => { disposed = true; off?.(); }; }, [form]);
-  if (loading) return <div className={styles.centerState}><Spin tip="读取按键文本设置…" /></div>;
-  if (loadError || !saved) return <Alert type="error" showIcon message="按键文本设置读取失败" description={loadError} action={<Button onClick={() => void load()}>重试</Button>} />;
-  const dirty = JSON.stringify(toConfig(values ?? toForm(saved))) !== JSON.stringify(saved);
-  const save = async (next: KeyFormValues) => { setSaving(true); try { const config = await keyVisualizerApi.update(toConfig(next)); setSaved(config); form.setFieldsValue(toForm(config)); form.resetFields(); setStatus(await keyVisualizerApi.status()); message.success("按键展示设置已保存"); } catch (error) { message.error(`按键文本设置未保存：${errorMessage(error)}`); } finally { setSaving(false); } };
-  return <Form form={form} layout="vertical" className={styles.settingsForm} disabled={disabled || saving} onFinish={(next) => void save(next)}>
-    <Card className={styles.glassCard} bordered={false}><div className={styles.sectionHeader}><div><Typography.Title level={4}>普通按键展示</Typography.Title><Typography.Text type="secondary">只显示键帽名称，不解析输入内容，也不会记录或上传。</Typography.Text></div><Space><Tag color={status?.listening ? "success" : saved.enabled ? "error" : "default"}>{status?.listening ? "原生监听中" : saved.enabled ? "监听异常" : "已停用"}</Tag><Form.Item noStyle name="enabled" valuePropName="checked"><Switch checkedChildren="显示" unCheckedChildren="隐藏" /></Form.Item></Space></div>{status?.error && <Alert className={styles.inlineAlert} type="error" showIcon message="原生监听启动失败" description={status.error} action={<Button size="small" disabled={disabled} onClick={() => void keyVisualizerApi.retry().then(setStatus).catch((error) => message.error(errorMessage(error)))}>重试</Button>} />}</Card>
-    <Card className={styles.glassCard} bordered={false} title="展示内容"><Form.Item name="categories"><Select mode="multiple" showSearch={false} placeholder="请选择需展示的按键类别" className={styles.multiSelect} options={[{ value: "modifiers", label: "修饰键" }, { value: "combinations", label: "组合键" }, { value: "characters", label: "字符键" }, { value: "other", label: "其他键" }]} /></Form.Item></Card>
-    <Card className={styles.glassCard} bordered={false} title="显示与交互"><div className={styles.numericConfigGrid}><div className={styles.numericConfigItem}><div><Typography.Text strong>字号</Typography.Text><span className={styles.description}>16–48 px</span></div><Form.Item name="font_size" rules={[{ required: true, type: "number", min: 16, max: 48, message: "字号需在 16–48 px 之间" }]}><InputNumber min={16} max={48} suffix="px" /></Form.Item></div><div className={styles.numericConfigItem}><div><Typography.Text strong>整体缩放</Typography.Text><span className={styles.description}>75–200%</span></div><Form.Item name="scale_percent" rules={[{ required: true, type: "number", min: 75, max: 200, message: "缩放需在 75–200% 之间" }]}><InputNumber min={75} max={200} step={5} suffix="%" /></Form.Item></div><div className={styles.numericConfigItem}><div><Typography.Text strong>文本透明度</Typography.Text><span className={styles.description}>20–100%</span></div><Form.Item name="text_opacity" rules={[{ required: true, type: "number", min: 20, max: 100, message: "透明度需在 20–100% 之间" }]}><InputNumber min={20} max={100} step={5} suffix="%" /></Form.Item></div></div><Space><Button type="primary" htmlType="submit" loading={saving} disabled={!dirty}>保存普通按键设置</Button><Button disabled={saving || !dirty} onClick={() => { form.setFieldsValue(toForm(saved)); form.resetFields(); }}>撤销修改</Button></Space></Card>
-  </Form>;
+const CONTENT_FIELDS: Array<{
+  name: keyof Pick<
+    KeyVisualizerConfig,
+    | "show_modifiers"
+    | "show_combinations"
+    | "show_characters"
+    | "show_other"
+    | "clicks"
+    | "highlight"
+    | "lock_keys"
+  >;
+  label: string;
+  description: string;
+}> = [
+  { name: "show_combinations", label: "组合键", description: "例如 Ctrl + Shift + S" },
+  { name: "show_modifiers", label: "修饰键", description: "单独按下 Ctrl、Shift、Alt、Win" },
+  {
+    name: "show_characters",
+    label: "字符键",
+    description: "连续合并并低频混入 *，字母区分大小写",
+  },
+  { name: "show_other", label: "其他按键", description: "Enter、方向键和功能键" },
+  { name: "clicks", label: "鼠标点击", description: "以不同颜色标记左、中、右键" },
+  { name: "highlight", label: "鼠标高亮", description: "跟随光圈和页内定位动画" },
+  { name: "lock_keys", label: "锁定键", description: "显示 CapsLock 和 NumLock 状态" },
+];
+
+function hasVisibleContent(config: KeyVisualizerConfig): boolean {
+  return CONTENT_FIELDS.some(({ name }) => config[name]);
+}
+
+function hasValidStyle(config: KeyVisualizerConfig): boolean {
+  return (
+    Number.isFinite(config.font_size) &&
+    config.font_size >= 16 &&
+    config.font_size <= 48 &&
+    Number.isFinite(config.scale_percent) &&
+    config.scale_percent >= 75 &&
+    config.scale_percent <= 200 &&
+    Number.isFinite(config.text_opacity) &&
+    config.text_opacity >= 20 &&
+    config.text_opacity <= 100
+  );
+}
+
+function statusDisplay(status: KeyVisualizerStatus | null, enabled: boolean) {
+  if (status?.error) return { color: "error", label: "运行异常" } as const;
+  if (status?.suspended) return { color: "warning", label: "截图中暂停" } as const;
+  if (status?.phase === "starting") return { color: "processing", label: "正在启动" } as const;
+  if (enabled && status?.listening) return { color: "success", label: "运行中" } as const;
+  if (enabled) return { color: "processing", label: "等待监听" } as const;
+  return { color: "default", label: "已关闭" } as const;
+}
+
+export default function KeyVisualizerSettings() {
+  const { notification } = AntApp.useApp();
+  const [form] = Form.useForm<KeyVisualizerConfig>();
+  const [saved, setSaved] = useState<KeyVisualizerConfig | null>(null);
+  const [status, setStatus] = useState<KeyVisualizerStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const values = Form.useWatch([], form);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveRevision = useRef(0);
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const ownSaveInFlight = useRef(false);
+  const statusRefreshRevision = useRef(0);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [config, nextStatus] = await Promise.all([
+        keyVisualizerApi.config(),
+        keyVisualizerApi.status(),
+      ]);
+      setSaved(config);
+      form.setFieldsValue(config);
+      setStatus(nextStatus);
+    } catch (reason) {
+      setError(errorMessage(reason));
+    } finally {
+      setLoading(false);
+    }
+  }, [form]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    let disposed = false;
+    const offs: (() => void)[] = [];
+    const subscribe = async () => {
+      const offConfig = await listen<KeyVisualizerConfig>(
+        MAIN_EVENTS.keyVisualizerConfigChanged,
+        ({ payload }) => {
+          if (disposed || ownSaveInFlight.current) return;
+          saveRevision.current += 1;
+          if (saveTimer.current) clearTimeout(saveTimer.current);
+          setSaved(payload);
+          form.setFieldsValue(payload);
+        },
+      );
+      if (disposed) offConfig();
+      else offs.push(offConfig);
+
+      const offStatus = await listen<KeyVisualizerEffectsStatus>(
+        MAIN_EVENTS.keyVisualizerEffectsStatus,
+        () => {
+          const request = ++statusRefreshRevision.current;
+          void keyVisualizerApi
+            .status()
+            .then((next) => {
+              if (!disposed && request === statusRefreshRevision.current) setStatus(next);
+            })
+            .catch((reason) => {
+              if (!disposed) setError(`刷新按键展示状态失败：${errorMessage(reason)}`);
+            });
+        },
+      );
+      if (disposed) offStatus();
+      else offs.push(offStatus);
+    };
+    void subscribe().catch((reason) => {
+      if (!disposed) setError(`监听按键展示状态失败：${errorMessage(reason)}`);
+    });
+    return () => {
+      disposed = true;
+      saveRevision.current += 1;
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      offs.forEach((off) => off());
+    };
+  }, [form]);
+
+  const dirty = useMemo(
+    () => !!saved && !!values && JSON.stringify(values) !== JSON.stringify(saved),
+    [saved, values],
+  );
+
+  const scheduleSave = useCallback(
+    (next: KeyVisualizerConfig) => {
+      const revision = ++saveRevision.current;
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      setError(null);
+      form.setFields([{ name: "enabled", errors: [] }]);
+      if (next.enabled && !hasVisibleContent(next)) {
+        setSaving(false);
+        form.setFields([{ name: "enabled", errors: ["启用时至少选择一种展示内容"] }]);
+        setError("启用按键展示时至少选择一种展示内容");
+        return;
+      }
+      if (!hasValidStyle(next)) {
+        setSaving(false);
+        setError("请填写有效的字号、缩放和透明度后再自动保存");
+        return;
+      }
+      saveTimer.current = setTimeout(() => {
+        saveQueue.current = saveQueue.current.then(async () => {
+          if (revision !== saveRevision.current) return;
+          setSaving(true);
+          ownSaveInFlight.current = true;
+          try {
+            const config = await keyVisualizerApi.update(next);
+            setSaved(config);
+            if (revision === saveRevision.current) {
+              form.setFieldsValue(config);
+              setError(null);
+            }
+            const request = ++statusRefreshRevision.current;
+            try {
+              const nextStatus = await keyVisualizerApi.status();
+              if (request === statusRefreshRevision.current) setStatus(nextStatus);
+            } catch (reason) {
+              if (revision === saveRevision.current) {
+                setError(`设置已保存，但刷新运行状态失败：${errorMessage(reason)}`);
+              }
+            }
+          } catch (reason) {
+            if (revision === saveRevision.current) setError(errorMessage(reason));
+          } finally {
+            ownSaveInFlight.current = false;
+            if (revision === saveRevision.current) setSaving(false);
+          }
+        });
+      }, 450);
+    },
+    [form],
+  );
+
+  if (loading) {
+    return (
+      <div className={styles.centerState}>
+        <Spin tip="读取按键展示设置…" />
+      </div>
+    );
+  }
+
+  if (!saved) {
+    return (
+      <Alert
+        type="error"
+        showIcon
+        message="按键展示设置读取失败"
+        description={error}
+        action={<Button onClick={() => void load()}>重试</Button>}
+      />
+    );
+  }
+
+  const retry = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      setStatus(await keyVisualizerApi.retry());
+      notification.success({ message: "按键展示已重新启动" });
+    } catch (reason) {
+      setError(errorMessage(reason));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const locate = async () => {
+    setError(null);
+    try {
+      await keyVisualizerApi.locate();
+    } catch (reason) {
+      setError(errorMessage(reason));
+    }
+  };
+
+  const display = statusDisplay(status, saved.enabled);
+  const visibleError = error ?? status?.error ?? null;
+
+  return (
+    <div className={`${styles.page} ${styles.visualizerPage}`}>
+      {visibleError && (
+        <Alert
+          type="error"
+          showIcon
+          message="操作未完成"
+          description={visibleError}
+          action={status?.error ? <Button onClick={() => void retry()}>重试</Button> : undefined}
+        />
+      )}
+      <Form
+        form={form}
+        layout="inline"
+        className={`${styles.settingsForm} ${styles.visualizerForm}`}
+        onValuesChange={(_, next) => scheduleSave(next)}
+      >
+        <Card className={styles.glassCard} bordered={false}>
+          <div className={styles.visualizerHeader}>
+            <div>
+              <Title level={4}>按键展示</Title>
+              <Text type="secondary">在屏幕上展示按键，并按需开启鼠标和锁定键辅助效果。</Text>
+            </div>
+            <div className={styles.visualizerHeaderActions}>
+              <Tag color={display.color}>{display.label}</Tag>
+              <Form.Item name="enabled" valuePropName="checked">
+                <Switch checkedChildren="已开启" unCheckedChildren="已关闭" />
+              </Form.Item>
+            </div>
+          </div>
+
+          <section className={styles.visualizerSection}>
+            <div className={styles.compactSectionTitle}>
+              <Text strong>展示内容</Text>
+              <Text type="secondary">至少选择一种内容</Text>
+            </div>
+            <div className={styles.visualizerOptionGrid}>
+              {CONTENT_FIELDS.map((item) => (
+                <div className={styles.visualizerOption} key={item.name}>
+                  <div>
+                    <Text strong>{item.label}</Text>
+                    <span className={styles.description}>{item.description}</span>
+                  </div>
+                  <Form.Item name={item.name} valuePropName="checked">
+                    <Switch />
+                  </Form.Item>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className={styles.visualizerSection}>
+            <div className={styles.compactSectionTitle}>
+              <Text strong>显示样式</Text>
+              <Text type="secondary">修改后自动同步到悬浮窗</Text>
+            </div>
+            <div className={styles.visualizerMetricGrid}>
+              <label className={styles.visualizerMetric}>
+                <span>字号</span>
+                <Form.Item
+                  name="font_size"
+                  rules={[{ required: true, type: "number", min: 16, max: 48 }]}
+                >
+                  <InputNumber min={16} max={48} suffix="px" />
+                </Form.Item>
+              </label>
+              <label className={styles.visualizerMetric}>
+                <span>整体缩放</span>
+                <Form.Item
+                  name="scale_percent"
+                  rules={[{ required: true, type: "number", min: 75, max: 200 }]}
+                >
+                  <InputNumber min={75} max={200} step={5} suffix="%" />
+                </Form.Item>
+              </label>
+              <label className={styles.visualizerMetric}>
+                <span>文本透明度</span>
+                <Form.Item
+                  name="text_opacity"
+                  rules={[{ required: true, type: "number", min: 20, max: 100 }]}
+                >
+                  <InputNumber min={20} max={100} step={5} suffix="%" />
+                </Form.Item>
+              </label>
+            </div>
+          </section>
+
+          <div className={styles.visualizerFooter}>
+            <div className={styles.visualizerFooterStatus}>
+              {saving ? "正在自动保存…" : dirty ? "等待自动保存…" : "已自动保存"}
+            </div>
+            <div className={styles.visualizerFooterActions}>
+              <Button
+                icon={<AimOutlined />}
+                disabled={
+                  dirty ||
+                  saving ||
+                  !saved.enabled ||
+                  !saved.highlight ||
+                  status?.suspended ||
+                  status?.phase === "starting"
+                }
+                onClick={() => void locate()}
+              >
+                定位鼠标
+              </Button>
+              <Button
+                icon={<UndoOutlined />}
+                disabled={!dirty || saving}
+                onClick={() => {
+                  saveRevision.current += 1;
+                  if (saveTimer.current) clearTimeout(saveTimer.current);
+                  form.setFieldsValue(saved);
+                  form.setFields([{ name: "enabled", errors: [] }]);
+                  setError(null);
+                }}
+              >
+                撤销
+              </Button>
+            </div>
+          </div>
+        </Card>
+      </Form>
+    </div>
+  );
 }

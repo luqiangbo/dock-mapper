@@ -8,27 +8,24 @@ mod key_mapping;
 mod key_visualizer;
 mod ocr;
 mod raw_input;
-mod presentation;
 mod runtime_health;
 mod scancode_mapper;
 mod screenshot;
 mod sys_monitor;
 mod taskbar;
 mod tray;
+mod visualizer_effects;
 mod widget;
 
 use serde::{Deserialize, Serialize};
 use std::{
     path::PathBuf,
-    sync::{
-        atomic::AtomicBool,
-        Arc, Mutex,
-    },
+    sync::{atomic::AtomicBool, Arc, Mutex},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
-pub use widget::{MemoryScheme, UsageScheme, WidgetConfig, WidgetMetricConfig, WidgetMetricKind};
 pub use key_mapping::{ScancodeMapState, ScancodeMapStatus};
+pub use widget::{MemoryScheme, UsageScheme, WidgetConfig, WidgetMetricConfig, WidgetMetricKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum KeyCode {
@@ -751,25 +748,43 @@ async fn recognize_selection(
 
 #[tauri::command]
 fn get_color_palette(state: State<'_, AppState>) -> Result<config::ColorPaletteConfig, String> {
-    state.config.lock().map(|config| config.color_palette.clone()).map_err(|_| "配置状态已损坏".to_string())
+    state
+        .config
+        .lock()
+        .map(|config| config.color_palette.clone())
+        .map_err(|_| "配置状态已损坏".to_string())
 }
 
 fn mutate_palette(
     state: &AppState,
     change: impl FnOnce(&mut config::ColorPaletteConfig) -> Result<(), String>,
 ) -> Result<config::ColorPaletteConfig, String> {
-    let _mutation = state.mutation_lock.lock().map_err(|_| "配置写入锁已损坏".to_string())?;
-    let previous = state.config.lock().map_err(|_| "配置状态已损坏".to_string())?.clone();
+    let _mutation = state
+        .mutation_lock
+        .lock()
+        .map_err(|_| "配置写入锁已损坏".to_string())?;
+    let previous = state
+        .config
+        .lock()
+        .map_err(|_| "配置状态已损坏".to_string())?
+        .clone();
     let mut next = previous.clone();
     change(&mut next.color_palette)?;
     config::normalize_palette(&mut next.color_palette);
     config::save(&state.config_path, &next)?;
-    *state.config.lock().map_err(|_| "配置状态已损坏".to_string())? = next.clone();
+    *state
+        .config
+        .lock()
+        .map_err(|_| "配置状态已损坏".to_string())? = next.clone();
     Ok(next.color_palette)
 }
 
 #[tauri::command]
-fn record_palette_color(app: AppHandle, state: State<'_, AppState>, color: String) -> Result<config::ColorPaletteConfig, String> {
+fn record_palette_color(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    color: String,
+) -> Result<config::ColorPaletteConfig, String> {
     let palette = mutate_palette(&state, |palette| {
         config::record_palette_color(palette, &color)
     })?;
@@ -778,7 +793,12 @@ fn record_palette_color(app: AppHandle, state: State<'_, AppState>, color: Strin
 }
 
 #[tauri::command]
-fn set_palette_favorite(app: AppHandle, state: State<'_, AppState>, color: String, favorite: bool) -> Result<config::ColorPaletteConfig, String> {
+fn set_palette_favorite(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    color: String,
+    favorite: bool,
+) -> Result<config::ColorPaletteConfig, String> {
     let palette = mutate_palette(&state, |palette| {
         config::set_palette_favorite(palette, &color, favorite)
     })?;
@@ -787,7 +807,10 @@ fn set_palette_favorite(app: AppHandle, state: State<'_, AppState>, color: Strin
 }
 
 #[tauri::command]
-fn clear_recent_palette(app: AppHandle, state: State<'_, AppState>) -> Result<config::ColorPaletteConfig, String> {
+fn clear_recent_palette(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<config::ColorPaletteConfig, String> {
     let palette = mutate_palette(&state, |palette| {
         config::clear_recent_palette(palette);
         Ok(())
@@ -887,7 +910,7 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(screenshot::create_state())
-        .manage(presentation::PresentationRuntime::default())
+        .manage(visualizer_effects::VisualizerEffectsRuntime::default())
         .setup(|app| {
             app.manage(diagnostics::initialize(app.handle())?);
             #[cfg(desktop)]
@@ -896,7 +919,6 @@ pub fn run() {
             let app_data_dir = app.path().app_data_dir()?;
             let config_path = app_data_dir.join("config.json");
             let loaded_config = config::load(&config_path);
-            let key_visualizer_config = loaded_config.key_visualizer_config.clone();
             let history = Arc::new(history::HistoryStore::new(app_data_dir.join("history"))?);
             let monitor_interval = loaded_config.widget_config.refresh_interval_secs;
             let state = AppState {
@@ -939,11 +961,7 @@ pub fn run() {
             widget::setup_window(app)?;
             key_visualizer::setup_window(app)?;
 
-            if let Err(error) = key_visualizer::initialize(app.handle(), &key_visualizer_config) {
-                tracing::error!(target: "dock_mapper::key_visualizer", %error, "启动按键文本失败");
-            }
-
-            presentation::initialize(app.handle());
+            visualizer_effects::initialize(app.handle());
             sys_monitor::start_sys_monitor(app.handle().clone());
             Ok(())
         })
@@ -1004,13 +1022,9 @@ pub fn run() {
             widget::sync_widget_dynamic_width,
             key_visualizer::key_visualizer_ready,
             key_visualizer::get_key_visualizer_session,
-            presentation::get_presentation_config,
-            presentation::get_presentation_status,
-            presentation::set_presentation_enabled,
-            presentation::update_presentation_config,
-            presentation::retry_presentation,
-            presentation::locate_presentation_mouse,
-            presentation::presentation_ready,
+            visualizer_effects::get_key_visualizer_effects_status,
+            visualizer_effects::locate_key_visualizer_mouse,
+            visualizer_effects::key_visualizer_effects_ready,
             key_visualizer::get_key_visualizer_config,
             key_visualizer::update_key_visualizer_config,
             key_visualizer::get_key_visualizer_status,

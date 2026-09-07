@@ -49,11 +49,11 @@ impl LockTracker {
 
 impl NativeProcessor {
     fn tick(&mut self) {
-          if self.mouse {
+        if self.mouse {
             let mut point = POINT::default();
             match unsafe { GetCursorPos(&mut point) } {
                 Ok(()) => {
-                    crate::presentation::mouse(
+                    crate::visualizer_effects::mouse(
                         &self.app,
                         self.generation,
                         point.x,
@@ -61,7 +61,7 @@ impl NativeProcessor {
                         "move",
                     );
                 }
-                Err(error) => crate::presentation::report_input_error(
+                Err(error) => crate::visualizer_effects::report_input_error(
                     &self.app,
                     self.generation,
                     format!("读取鼠标位置失败：{error}"),
@@ -74,7 +74,7 @@ impl NativeProcessor {
             // the state from the number of raw key-down or auto-repeat messages.
             let value = unsafe { (GetKeyState(0x14) & 1 != 0, GetKeyState(0x90) & 1 != 0) };
             if self.lock_tracker.observe(value) {
-                crate::presentation::lock_state(&self.app, self.generation, value.0, value.1);
+                crate::visualizer_effects::lock_state(&self.app, self.generation, value.0, value.1);
             }
         }
     }
@@ -117,7 +117,7 @@ unsafe extern "system" fn raw_input_wnd_proc(
                 if GetCursorPos(&mut point).is_ok() {
                     for (flag, kind) in [(1, "left"), (4, "right"), (16, "middle")] {
                         if flags & flag != 0 {
-                            crate::presentation::mouse(
+                            crate::visualizer_effects::mouse(
                                 &(*pointer).app,
                                 (*pointer).generation,
                                 point.x,
@@ -154,7 +154,7 @@ pub(crate) fn raw_input_thread(
             ..Default::default()
         };
         RegisterClassW(&class);
-        let status = crate::presentation::snapshot(&app);
+        let status = crate::visualizer_effects::snapshot(&app);
         let active = status.enabled && !status.suspended;
         let mouse = active && (status.config.clicks || status.config.highlight);
         let locks = active && status.config.lock_keys;
@@ -206,7 +206,7 @@ pub(crate) fn raw_input_thread(
             let _ = ready.send(Err(format!("注册 Raw Input 键盘失败：{error}")));
             return;
         }
-          let timer_needed = processor.mouse || locks;
+        let timer_needed = processor.mouse || locks;
         if timer_needed
             && SetTimer(Some(hwnd), 1, if processor.mouse { 17 } else { 100 }, None) == 0
         {
@@ -216,7 +216,7 @@ pub(crate) fn raw_input_thread(
             }
             let _ = RegisterRawInputDevices(&devices, size_of::<RAWINPUTDEVICE>() as u32);
             let _ = DestroyWindow(hwnd);
-            let _ = ready.send(Err("启动演示采样定时器失败".into()));
+            let _ = ready.send(Err("启动按键展示采样定时器失败".into()));
             return;
         }
         let accepted = ready.send(Ok(thread_id)).is_ok();

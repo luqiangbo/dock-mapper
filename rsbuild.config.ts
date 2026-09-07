@@ -9,13 +9,13 @@ export default defineConfig({
       index: "./src/main-entry.tsx",
       screenshot: "./src/screenshot-entry.tsx",
       widget: "./src/widget-entry.tsx",
-      presentation: "./src/presentation-entry.tsx",
+      "key-visualizer-effects": "./src/key-visualizer-effects-entry.tsx",
       "key-visualizer": "./src/key-visualizer-entry.tsx",
     },
   },
   html: {
     template({ entryName }) {
-      if (entryName === "presentation") return "./presentation.html";
+      if (entryName === "key-visualizer-effects") return "./key-visualizer-effects.html";
       if (entryName === "widget") {
         return "./widget.html";
       }

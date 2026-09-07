@@ -66,12 +66,19 @@ export interface KeyVisualizerConfig {
   show_combinations: boolean;
   show_characters: boolean;
   show_other: boolean;
+  clicks: boolean;
+  highlight: boolean;
+  lock_keys: boolean;
   font_size: number;
   scale_percent: number;
   text_opacity: number;
 }
 
 export interface KeyVisualizerStatus {
+  enabled: boolean;
+  suspended: boolean;
+  generation: number;
+  phase: "off" | "starting" | "running";
   listening: boolean;
   error: string | null;
 }
@@ -89,18 +96,7 @@ export interface KeyVisualizerSession {
   generation: number;
 }
 
-export interface PresentationConfig {
-  keyboard: boolean;
-  clicks: boolean;
-  highlight: boolean;
-  lock_keys: boolean;
-  show_characters: boolean;
-  show_modifiers: boolean;
-  toggle_shortcut: string;
-  locate_shortcut: string;
-}
-
-export interface PresentationScreen {
+export interface KeyVisualizerScreen {
   label: string;
   x: number;
   y: number;
@@ -109,19 +105,18 @@ export interface PresentationScreen {
   scale: number;
 }
 
-export interface PresentationStatus {
+export interface KeyVisualizerEffectsStatus {
   enabled: boolean;
   suspended: boolean;
   generation: number;
   phase: "off" | "starting" | "running";
   error: string | null;
-  shortcut_error: string | null;
-  config: PresentationConfig;
-  screens: PresentationScreen[];
-  locks: PresentationLocks | null;
+  config: KeyVisualizerConfig;
+  screens: KeyVisualizerScreen[];
+  locks: KeyVisualizerLocks | null;
 }
 
-export interface PresentationMouse {
+export interface KeyVisualizerMouse {
   generation: number;
   x: number;
   y: number;
@@ -129,7 +124,7 @@ export interface PresentationMouse {
   timestamp_ms: number;
 }
 
-export interface PresentationLocks {
+export interface KeyVisualizerLocks {
   generation: number;
   caps: boolean;
   num: boolean;

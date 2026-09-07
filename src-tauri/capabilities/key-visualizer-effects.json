@@ -1,0 +1,13 @@
+{
+  "identifier": "key-visualizer-effects",
+  "description": "按键展示的鼠标效果窗口只读状态、监听事件并确认自身就绪",
+  "windows": [
+    "key-visualizer-effect-*"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-get-key-visualizer-effects-status",
+    "allow-key-visualizer-effects-ready"
+  ]
+}

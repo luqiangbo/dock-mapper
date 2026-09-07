@@ -7,7 +7,13 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State};
-use windows::Win32::{Foundation::{LPARAM, WPARAM}, UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT}};
+use windows::Win32::{
+    Foundation::{LPARAM, WPARAM},
+    UI::{
+        Input::KeyboardAndMouse::GetKeyState,
+        WindowsAndMessaging::{PostThreadMessageW, WM_QUIT},
+    },
+};
 
 const WINDOW_LABEL: &str = "key_visualizer";
 const EVENT_INPUT: &str = "key-visualizer-input";
@@ -34,7 +40,7 @@ pub struct KeyVisualizerInput {
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
-pub struct KeyVisualizerStatus {
+struct ListenerStatus {
     pub listening: bool,
     pub error: Option<String>,
 }
@@ -46,7 +52,7 @@ struct ListenerHandle {
 
 pub struct KeyVisualizerRuntime {
     listener: Mutex<Option<ListenerHandle>>,
-    status: Mutex<KeyVisualizerStatus>,
+    status: Mutex<ListenerStatus>,
     generation: std::sync::atomic::AtomicU64,
     effective: Mutex<config::KeyVisualizerConfig>,
     ready_generation: std::sync::atomic::AtomicU64,
@@ -56,7 +62,7 @@ impl Default for KeyVisualizerRuntime {
     fn default() -> Self {
         Self {
             listener: Mutex::new(None),
-            status: Mutex::new(KeyVisualizerStatus::default()),
+            status: Mutex::new(ListenerStatus::default()),
             generation: std::sync::atomic::AtomicU64::new(0),
             effective: Mutex::new(config::KeyVisualizerConfig::default()),
             ready_generation: std::sync::atomic::AtomicU64::new(0),
@@ -66,19 +72,30 @@ impl Default for KeyVisualizerRuntime {
 
 impl KeyVisualizerRuntime {
     pub(crate) fn is_ready(&self) -> bool {
-        !self.effective.lock().unwrap_or_else(|e| e.into_inner()).enabled || self.ready_generation.load(std::sync::atomic::Ordering::SeqCst) == self.generation.load(std::sync::atomic::Ordering::SeqCst)
+        !self
+            .effective
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .enabled
+            || self
+                .ready_generation
+                .load(std::sync::atomic::Ordering::SeqCst)
+                == self.generation.load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    fn status(&self) -> KeyVisualizerStatus {
-        self.status.lock().map(|value| value.clone()).unwrap_or_else(|_| KeyVisualizerStatus {
-            listening: false,
-            error: Some("按键监听状态已损坏".into()),
-        })
+    fn status(&self) -> ListenerStatus {
+        self.status
+            .lock()
+            .map(|value| value.clone())
+            .unwrap_or_else(|_| ListenerStatus {
+                listening: false,
+                error: Some("按键监听状态已损坏".into()),
+            })
     }
 
     fn set_status(&self, listening: bool, error: Option<String>) {
         if let Ok(mut status) = self.status.lock() {
-            *status = KeyVisualizerStatus { listening, error };
+            *status = ListenerStatus { listening, error };
         }
     }
 
@@ -99,7 +116,10 @@ impl KeyVisualizerRuntime {
         };
         match ready_rx.recv_timeout(Duration::from_secs(3)) {
             Ok(Ok(thread_id)) => {
-                *self.listener.lock().map_err(|_| "按键监听状态已损坏".to_string())? =
+                *self
+                    .listener
+                    .lock()
+                    .map_err(|_| "按键监听状态已损坏".to_string())? =
                     Some(ListenerHandle { thread_id, join });
                 self.set_status(true, None);
                 Ok(())
@@ -127,17 +147,22 @@ impl KeyVisualizerRuntime {
         self.set_status(false, None);
     }
 
-    pub(crate) fn apply(&self, app: &AppHandle, ordinary: &config::KeyVisualizerConfig) -> Result<(), String> {
+    pub(crate) fn apply(
+        &self,
+        app: &AppHandle,
+        ordinary: &config::KeyVisualizerConfig,
+    ) -> Result<(), String> {
         self.stop();
-        self.generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let config = crate::presentation::effective_keys(app, ordinary);
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let config = crate::visualizer_effects::effective_keys(app, ordinary);
         *self.effective.lock().map_err(|_| "按键展示状态已损坏")? = config.clone();
         let config = &config;
         if let Err(error) = configure_window(app, config) {
             self.set_status(false, Some(error.clone()));
             return Err(error);
         }
-        if config.enabled || crate::presentation::needs_input(app) {
+        if config.enabled || crate::visualizer_effects::needs_input(app) {
             self.start(app.clone(), config.clone())?;
         } else {
             self.stop();
@@ -164,6 +189,8 @@ pub(crate) struct InputProcessor {
 struct KeyClassifier {
     modifiers: Vec<u16>,
     used_modifiers: HashSet<u16>,
+    caps_lock: bool,
+    caps_pressed: bool,
 }
 
 #[derive(Default)]
@@ -176,10 +203,16 @@ struct RepeatTracker {
 impl InputProcessor {
     pub(crate) fn new(app: AppHandle, config: config::KeyVisualizerConfig) -> Self {
         Self {
-            generation: app.state::<KeyVisualizerRuntime>().generation.load(std::sync::atomic::Ordering::SeqCst),
+            generation: app
+                .state::<KeyVisualizerRuntime>()
+                .generation
+                .load(std::sync::atomic::Ordering::SeqCst),
             app,
             config,
-            classifier: KeyClassifier::default(),
+            classifier: KeyClassifier {
+                caps_lock: unsafe { GetKeyState(0x14) & 1 != 0 },
+                ..Default::default()
+            },
             repeat_tracker: RepeatTracker::default(),
         }
     }
@@ -199,19 +232,32 @@ impl InputProcessor {
             .unwrap_or_default()
             .as_millis() as u64;
         let repeat = self.repeat_tracker.update(&label, timestamp_ms);
-        let _ = self.app.emit_to(WINDOW_LABEL, EVENT_INPUT, KeyVisualizerInput {
-            label,
-            category,
-            repeat,
-            timestamp_ms,
-            generation: self.generation,
-        });
+        let _ = self.app.emit_to(
+            WINDOW_LABEL,
+            EVENT_INPUT,
+            KeyVisualizerInput {
+                label,
+                category,
+                repeat,
+                timestamp_ms,
+                generation: self.generation,
+            },
+        );
     }
 }
 
 impl KeyClassifier {
     fn handle(&mut self, vkey: u16, is_down: bool) -> Option<(String, KeyCategory)> {
         let vkey = normalize_modifier(vkey);
+        if vkey == 0x14 {
+            if is_down && !self.caps_pressed {
+                self.caps_lock = !self.caps_lock;
+                self.caps_pressed = true;
+            } else if !is_down {
+                self.caps_pressed = false;
+                return None;
+            }
+        }
         if modifier_label(vkey).is_some() {
             if is_down {
                 if !self.modifiers.contains(&vkey) {
@@ -234,10 +280,26 @@ impl KeyClassifier {
         let Some((key, base_category)) = key_label(vkey) else {
             return None;
         };
+        if matches!(base_category, KeyCategory::Character)
+            && self.modifiers.iter().all(|modifier| *modifier == 0x10)
+        {
+            let shift = self.modifiers.contains(&0x10);
+            if shift {
+                self.used_modifiers.insert(0x10);
+            }
+            return Some((
+                character_case(key, shift, self.caps_lock),
+                KeyCategory::Character,
+            ));
+        }
         if self.modifiers.is_empty() {
             return Some((key, base_category));
         }
-        let mut labels: Vec<&str> = self.modifiers.iter().filter_map(|key| modifier_label(*key)).collect();
+        let mut labels: Vec<&str> = self
+            .modifiers
+            .iter()
+            .filter_map(|key| modifier_label(*key))
+            .collect();
         labels.sort_by_key(|label| match *label {
             "Ctrl" => 0,
             "Shift" => 1,
@@ -252,6 +314,18 @@ impl KeyClassifier {
         label.push_str(" + ");
         label.push_str(&key);
         Some((label, KeyCategory::Combination))
+    }
+}
+
+fn character_case(label: String, shift: bool, caps_lock: bool) -> String {
+    if label.len() == 1 && label.as_bytes()[0].is_ascii_alphabetic() {
+        if shift ^ caps_lock {
+            label.to_ascii_uppercase()
+        } else {
+            label.to_ascii_lowercase()
+        }
+    } else {
+        label
     }
 }
 
@@ -300,10 +374,10 @@ fn modifier_label(vkey: u16) -> Option<&'static str> {
 
 fn key_label(vkey: u16) -> Option<(String, KeyCategory)> {
     if (0x41..=0x5A).contains(&vkey) || (0x30..=0x39).contains(&vkey) {
-        return char::from_u32(vkey as u32).map(|value| (value.to_string(), KeyCategory::Character));
+        return char::from_u32(vkey as u32)
+            .map(|value| (value.to_string(), KeyCategory::Character));
     }
     let character = match vkey {
-        0x20 => Some("Space"),
         0xBA => Some(";"),
         0xBB => Some("="),
         0xBC => Some(","),
@@ -326,6 +400,7 @@ fn key_label(vkey: u16) -> Option<(String, KeyCategory)> {
         0x0D => "Enter",
         0x14 => "Caps Lock",
         0x1B => "Esc",
+        0x20 => "Space",
         0x21 => "Page Up",
         0x22 => "Page Down",
         0x23 => "End",
@@ -355,14 +430,18 @@ fn fixed_bottom_left_position(
     work_area: Option<ScreenBounds>,
 ) -> Result<PhysicalPosition<i32>, String> {
     let height = WINDOW_BASE_HEIGHT * i32::from(scale_percent) / 100;
-    let work_area = work_area.ok_or_else(|| "未检测到主显示器，无法定位按键文本窗口".to_string())?;
+    let work_area =
+        work_area.ok_or_else(|| "未检测到主显示器，无法定位按键文本窗口".to_string())?;
     Ok(PhysicalPosition::new(
         work_area.x,
         work_area.y + work_area.height - height.min(work_area.height),
     ))
 }
 
-fn sync_window_geometry(app: &AppHandle, config: &config::KeyVisualizerConfig) -> Result<(), String> {
+fn sync_window_geometry(
+    app: &AppHandle,
+    config: &config::KeyVisualizerConfig,
+) -> Result<(), String> {
     let window = app
         .get_webview_window(WINDOW_LABEL)
         .ok_or_else(|| "按键文本窗口不存在".to_string())?;
@@ -383,12 +462,20 @@ fn sync_window_geometry(app: &AppHandle, config: &config::KeyVisualizerConfig) -
         }
     });
     let target_position = fixed_bottom_left_position(config.scale_percent, work_area)?;
-    if window.inner_size().map_err(|error| format!("读取按键文本窗口尺寸失败：{error}"))? != target_size {
+    if window
+        .inner_size()
+        .map_err(|error| format!("读取按键文本窗口尺寸失败：{error}"))?
+        != target_size
+    {
         window
             .set_size(target_size)
             .map_err(|error| format!("调整按键文本窗口失败：{error}"))?;
     }
-    if window.outer_position().map_err(|error| format!("读取按键文本窗口位置失败：{error}"))? != target_position {
+    if window
+        .outer_position()
+        .map_err(|error| format!("读取按键文本窗口位置失败：{error}"))?
+        != target_position
+    {
         window
             .set_position(target_position)
             .map_err(|error| format!("移动按键文本窗口失败：{error}"))?;
@@ -408,17 +495,23 @@ fn configure_window(app: &AppHandle, config: &config::KeyVisualizerConfig) -> Re
         .map_err(|error| format!("启用鼠标穿透失败：{error}"))?;
     if config.enabled {
         sync_window_geometry(app, config)?;
-        window.hide().map_err(|error| format!("准备按键文本窗口失败：{error}"))?;
+        window
+            .hide()
+            .map_err(|error| format!("准备按键文本窗口失败：{error}"))?;
     } else {
-        window.hide().map_err(|error| format!("隐藏按键文本窗口失败：{error}"))?;
+        window
+            .hide()
+            .map_err(|error| format!("隐藏按键文本窗口失败：{error}"))?;
     }
-    window.set_focusable(false).map_err(|error| format!("设置按键窗口不抢焦点失败：{error}"))?;
-    app.emit("key-visualizer-session", get_key_visualizer_session(app.state())).map_err(|e| e.to_string())?;
+    window
+        .set_focusable(false)
+        .map_err(|error| format!("设置按键窗口不抢焦点失败：{error}"))?;
+    app.emit(
+        "key-visualizer-session",
+        get_key_visualizer_session(app.state()),
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
-}
-
-pub fn initialize(app: &AppHandle, config: &config::KeyVisualizerConfig) -> Result<(), String> {
-    app.state::<KeyVisualizerRuntime>().apply(app, config)
 }
 
 fn reanchor_enabled_window(app: &AppHandle) {
@@ -430,13 +523,17 @@ fn reanchor_enabled_window(app: &AppHandle) {
     let Ok(config) = config else {
         return;
     };
-    let config = crate::presentation::effective_keys(app, &config);
+    let config = crate::visualizer_effects::effective_keys(app, &config);
     if !config.enabled {
         return;
     }
-    if let Err(error) = sync_window_geometry(app, &config) {
-        let runtime = app.state::<KeyVisualizerRuntime>();
-        runtime.set_status(runtime.status().listening, Some(error));
+    let runtime = app.state::<KeyVisualizerRuntime>();
+    match sync_window_geometry(app, &config) {
+        Ok(()) => runtime.set_status(runtime.status().listening, None),
+        Err(error) => {
+            tracing::warn!(target: "dock_mapper::key_visualizer", %error, "重新定位按键展示窗口失败");
+            runtime.set_status(runtime.status().listening, Some(error));
+        }
     }
 }
 
@@ -479,17 +576,11 @@ where
     A: FnMut(&config::KeyVisualizerConfig) -> Result<(), String>,
     S: FnMut(&config::AppConfig) -> Result<(), String>,
 {
-    save(next)?;
-    if let Err(error) = apply(&next.key_visualizer_config) {
-        let runtime_rollback = apply(&previous.key_visualizer_config).err();
-        let config_rollback = save(previous).err();
-        return Err(match (runtime_rollback, config_rollback) {
-            (None, None) => error,
-            (Some(runtime), None) => format!("{error}；同时恢复监听失败：{runtime}"),
-            (None, Some(config)) => format!("{error}；同时恢复配置失败：{config}"),
-            (Some(runtime), Some(config)) => {
-                format!("{error}；同时恢复监听失败：{runtime}；恢复配置失败：{config}")
-            }
+    apply(&next.key_visualizer_config)?;
+    if let Err(error) = save(next) {
+        return Err(match apply(&previous.key_visualizer_config) {
+            Ok(()) => error,
+            Err(runtime) => format!("{error}；同时恢复按键展示失败：{runtime}"),
         });
     }
     Ok(())
@@ -508,32 +599,74 @@ pub fn get_key_visualizer_config(
 
 #[tauri::command]
 pub fn get_key_visualizer_status(
+    app: AppHandle,
     runtime: State<'_, KeyVisualizerRuntime>,
 ) -> KeyVisualizerStatus {
-    runtime.status()
+    combined_status(&app, &runtime)
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct KeyVisualizerStatus {
+    pub enabled: bool,
+    pub suspended: bool,
+    pub generation: u64,
+    pub phase: String,
+    pub listening: bool,
+    pub error: Option<String>,
+}
+
+fn combined_status(app: &AppHandle, runtime: &KeyVisualizerRuntime) -> KeyVisualizerStatus {
+    let effects = crate::visualizer_effects::snapshot(app);
+    let listener = runtime.status();
+    KeyVisualizerStatus {
+        enabled: effects.enabled,
+        suspended: effects.suspended,
+        generation: effects.generation,
+        phase: effects.phase,
+        listening: listener.listening,
+        error: effects.error.or(listener.error),
+    }
 }
 
 #[tauri::command]
 pub async fn update_key_visualizer_config(
     app: AppHandle,
     state: State<'_, AppState>,
-    runtime: State<'_, KeyVisualizerRuntime>,
     mut key_visualizer_config: config::KeyVisualizerConfig,
 ) -> Result<config::KeyVisualizerConfig, String> {
     config::normalize_key_visualizer_config(&mut key_visualizer_config);
-    let _mutation = state.mutation_lock.lock().map_err(|_| "配置写入锁已损坏".to_string())?;
-    let presentation = app.state::<crate::presentation::PresentationRuntime>();
-    let _operation = presentation.operation.lock().map_err(|_| "演示操作状态已损坏")?;
-    let previous = state.config.lock().map_err(|_| "配置状态已损坏".to_string())?.clone();
+    if key_visualizer_config.enabled
+        && !(key_visualizer_config.show_modifiers
+            || key_visualizer_config.show_combinations
+            || key_visualizer_config.show_characters
+            || key_visualizer_config.show_other
+            || key_visualizer_config.clicks
+            || key_visualizer_config.highlight
+            || key_visualizer_config.lock_keys)
+    {
+        return Err("启用按键展示时至少选择一种展示内容".into());
+    }
+    let _mutation = state
+        .mutation_lock
+        .lock()
+        .map_err(|_| "配置写入锁已损坏".to_string())?;
+    let previous = state
+        .config
+        .lock()
+        .map_err(|_| "配置状态已损坏".to_string())?
+        .clone();
     let mut next = previous.clone();
     next.key_visualizer_config = key_visualizer_config.clone();
     commit_key_visualizer_change_with(
         &previous,
         &next,
-        |value| runtime.apply(&app, value),
+        |value| crate::visualizer_effects::replace_config(&app, value).map(|_| ()),
         |value| config::save(&state.config_path, value),
     )?;
-    *state.config.lock().map_err(|_| "配置状态已损坏".to_string())? = next;
+    *state
+        .config
+        .lock()
+        .map_err(|_| "配置状态已损坏".to_string())? = next;
     let _ = app.emit(EVENT_CONFIG, &key_visualizer_config);
     Ok(key_visualizer_config)
 }
@@ -541,14 +674,10 @@ pub async fn update_key_visualizer_config(
 #[tauri::command]
 pub async fn retry_key_visualizer(
     app: AppHandle,
-    state: State<'_, AppState>,
     runtime: State<'_, KeyVisualizerRuntime>,
 ) -> Result<KeyVisualizerStatus, String> {
-    let presentation = app.state::<crate::presentation::PresentationRuntime>();
-    let _operation = presentation.operation.lock().map_err(|_| "演示操作状态已损坏")?;
-    let config = get_key_visualizer_config(state)?;
-    runtime.apply(&app, &config)?;
-    Ok(runtime.status())
+    crate::visualizer_effects::retry(&app)?;
+    Ok(combined_status(&app, &runtime))
 }
 
 #[cfg(test)]
@@ -587,6 +716,32 @@ mod tests {
     }
 
     #[test]
+    fn character_input_preserves_shift_and_caps_lock_case() {
+        let mut classifier = KeyClassifier::default();
+        assert_eq!(classifier.handle(0x41, true).unwrap().0, "a");
+
+        assert!(classifier.handle(0x10, true).is_none());
+        assert_eq!(classifier.handle(0x41, true).unwrap().0, "A");
+        assert!(classifier.handle(0x10, false).is_none());
+
+        assert_eq!(classifier.handle(0x14, true).unwrap().0, "Caps Lock");
+        assert!(classifier.handle(0x14, false).is_none());
+        assert_eq!(classifier.handle(0x41, true).unwrap().0, "A");
+
+        assert!(classifier.handle(0x10, true).is_none());
+        assert_eq!(classifier.handle(0x41, true).unwrap().0, "a");
+        assert!(classifier.handle(0x10, false).is_none());
+    }
+
+    #[test]
+    fn space_is_an_independent_other_key_instead_of_joining_character_input() {
+        assert!(matches!(
+            key_label(0x20),
+            Some((label, KeyCategory::Other)) if label == "Space"
+        ));
+    }
+
+    #[test]
     fn standalone_modifier_emits_on_release_and_repeated_input_is_counted() {
         let mut classifier = KeyClassifier::default();
         assert!(classifier.handle(0x11, true).is_none());
@@ -602,13 +757,23 @@ mod tests {
     fn fixed_position_uses_primary_work_area_bottom_left() {
         let position = fixed_bottom_left_position(
             100,
-            Some(ScreenBounds { x: -1920, y: 0, height: 1040 }),
-        ).expect("primary monitor");
+            Some(ScreenBounds {
+                x: -1920,
+                y: 0,
+                height: 1040,
+            }),
+        )
+        .expect("primary monitor");
         assert_eq!(position, PhysicalPosition::new(-1920, 790));
         let scaled = fixed_bottom_left_position(
             200,
-            Some(ScreenBounds { x: 0, y: 40, height: 1040 }),
-        ).expect("scaled position");
+            Some(ScreenBounds {
+                x: 0,
+                y: 40,
+                height: 1040,
+            }),
+        )
+        .expect("scaled position");
         assert_eq!(scaled, PhysicalPosition::new(0, 580));
     }
 
@@ -621,7 +786,7 @@ mod tests {
     }
 
     #[test]
-    fn config_transaction_restores_saved_config_when_runtime_apply_fails() {
+    fn config_transaction_does_not_save_when_runtime_apply_fails() {
         let previous = config::AppConfig::default();
         let mut next = previous.clone();
         next.key_visualizer_config.enabled = true;
@@ -632,16 +797,42 @@ mod tests {
             &next,
             |value| {
                 applied.lock().unwrap().push(value.enabled);
-                if value.enabled { Err("监听失败".into()) } else { Ok(()) }
+                if value.enabled {
+                    Err("监听失败".into())
+                } else {
+                    Ok(())
+                }
             },
             |value| {
-                saved.lock().unwrap().push(value.key_visualizer_config.enabled);
+                saved
+                    .lock()
+                    .unwrap()
+                    .push(value.key_visualizer_config.enabled);
                 Ok(())
             },
         );
         assert_eq!(result.unwrap_err(), "监听失败");
+        assert_eq!(*applied.lock().unwrap(), vec![true]);
+        assert!(saved.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn config_transaction_restores_runtime_when_atomic_save_fails() {
+        let previous = config::AppConfig::default();
+        let mut next = previous.clone();
+        next.key_visualizer_config.enabled = true;
+        let applied = Mutex::new(Vec::new());
+        let result = commit_key_visualizer_change_with(
+            &previous,
+            &next,
+            |value| {
+                applied.lock().unwrap().push(value.enabled);
+                Ok(())
+            },
+            |_| Err("磁盘写入失败".into()),
+        );
+        assert_eq!(result.unwrap_err(), "磁盘写入失败");
         assert_eq!(*applied.lock().unwrap(), vec![true, false]);
-        assert_eq!(*saved.lock().unwrap(), vec![true, false]);
     }
 }
 
@@ -652,19 +843,43 @@ pub struct KeyVisualizerSession {
 }
 
 #[tauri::command]
-pub fn get_key_visualizer_session(runtime: State<'_, KeyVisualizerRuntime>) -> KeyVisualizerSession {
-    KeyVisualizerSession { config: runtime.effective.lock().unwrap_or_else(|e| e.into_inner()).clone(), generation: runtime.generation.load(std::sync::atomic::Ordering::SeqCst) }
+pub fn get_key_visualizer_session(
+    runtime: State<'_, KeyVisualizerRuntime>,
+) -> KeyVisualizerSession {
+    KeyVisualizerSession {
+        config: runtime
+            .effective
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone(),
+        generation: runtime.generation.load(std::sync::atomic::Ordering::SeqCst),
+    }
 }
 
 #[tauri::command]
 pub async fn key_visualizer_ready(app: AppHandle, generation: u64) -> Result<(), String> {
-    let presentation = app.state::<crate::presentation::PresentationRuntime>();
-    let _operation = presentation.operation.lock().map_err(|_| "演示操作状态已损坏")?;
+    let effects = app.state::<crate::visualizer_effects::VisualizerEffectsRuntime>();
+    let _operation = effects
+        .operation
+        .lock()
+        .map_err(|_| "按键展示操作状态已损坏")?;
     let runtime = app.state::<KeyVisualizerRuntime>();
-    if runtime.generation.load(std::sync::atomic::Ordering::SeqCst) != generation { return Ok(()); }
-    runtime.ready_generation.store(generation, std::sync::atomic::Ordering::SeqCst);
-    if runtime.effective.lock().map_err(|_| "按键状态已损坏")?.enabled {
-        app.get_webview_window(WINDOW_LABEL).ok_or("按键窗口不存在")?.show().map_err(|e| e.to_string())?;
+    if runtime.generation.load(std::sync::atomic::Ordering::SeqCst) != generation {
+        return Ok(());
     }
-    crate::presentation::renderer_ready(&app)
+    runtime
+        .ready_generation
+        .store(generation, std::sync::atomic::Ordering::SeqCst);
+    if runtime
+        .effective
+        .lock()
+        .map_err(|_| "按键状态已损坏")?
+        .enabled
+    {
+        app.get_webview_window(WINDOW_LABEL)
+            .ok_or("按键窗口不存在")?
+            .show()
+            .map_err(|e| e.to_string())?;
+    }
+    crate::visualizer_effects::renderer_ready(&app)
 }

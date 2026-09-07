@@ -8,8 +8,7 @@ import type {
   KeyVisualizerConfig,
   KeyVisualizerStatus,
   KeyVisualizerSession,
-  PresentationConfig,
-  PresentationStatus,
+  KeyVisualizerEffectsStatus,
   RuntimeHealth,
   ScancodeMapStatus,
   ScreenshotConfig,
@@ -28,9 +27,9 @@ export const MAIN_EVENTS = {
   keyVisualizerConfigChanged: "key-visualizer-config-changed",
   keyVisualizerInput: "key-visualizer-input",
   keyVisualizerSession: "key-visualizer-session",
-  presentationStatus: "presentation-status",
-  presentationMouse: "presentation-mouse",
-  presentationLocks: "presentation-locks",
+  keyVisualizerEffectsStatus: "key-visualizer-effects-status",
+  keyVisualizerMouse: "key-visualizer-mouse",
+  keyVisualizerLocks: "key-visualizer-locks",
 } as const;
 
 export function errorMessage(error: unknown): string {
@@ -100,18 +99,9 @@ export const keyVisualizerApi = {
     invoke<KeyVisualizerConfig>("update_key_visualizer_config", { keyVisualizerConfig }),
   status: () => invoke<KeyVisualizerStatus>("get_key_visualizer_status"),
   retry: () => invoke<KeyVisualizerStatus>("retry_key_visualizer"),
-};
-
-export const presentationApi = {
-  config: () => invoke<PresentationConfig>("get_presentation_config"),
-  status: () => invoke<PresentationStatus>("get_presentation_status"),
-  update: (presentationConfig: PresentationConfig) =>
-    invoke<PresentationConfig>("update_presentation_config", { presentationConfig }),
-  setEnabled: (enabled: boolean) =>
-    invoke<PresentationStatus>("set_presentation_enabled", { enabled }),
-  retry: () => invoke<PresentationStatus>("retry_presentation"),
-  locate: () => invoke<void>("locate_presentation_mouse"),
-  ready: () => invoke<PresentationStatus>("presentation_ready"),
+  effectsStatus: () => invoke<KeyVisualizerEffectsStatus>("get_key_visualizer_effects_status"),
+  locate: () => invoke<void>("locate_key_visualizer_mouse"),
+  effectsReady: () => invoke<KeyVisualizerEffectsStatus>("key_visualizer_effects_ready"),
 };
 
 export const runtimeApi = {

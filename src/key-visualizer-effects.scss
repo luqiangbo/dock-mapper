@@ -8,12 +8,12 @@ body,
   overflow: hidden;
   pointer-events: none;
 }
-.presentation-surface {
+.key-visualizer-effects-surface {
   position: fixed;
   inset: 0;
   pointer-events: none;
 }
-.presentation-halo {
+.key-visualizer-effects-halo {
   position: absolute;
   width: 48px;
   height: 48px;
@@ -22,28 +22,28 @@ body,
   border: 1px solid #ffdc0080;
   transform: translate(-50%, -50%);
 }
-.presentation-ring {
+.key-visualizer-effects-ring {
   position: absolute;
   width: 32px;
   height: 32px;
   border: 3px solid #29b6ff;
   border-radius: 50%;
-  animation: presentation-pulse 600ms ease-out both;
+  animation: key-visualizer-effects-pulse 600ms ease-out both;
 }
-.presentation-ring.right {
+.key-visualizer-effects-ring.right {
   border-color: #ff6e91;
 }
-.presentation-ring.middle {
+.key-visualizer-effects-ring.middle {
   border-color: #bc8aff;
 }
-.presentation-ring.locate {
+.key-visualizer-effects-ring.locate {
   width: 80px;
   height: 80px;
   border-color: #ffdc00;
   border-width: 5px;
   animation-duration: 1000ms;
 }
-@keyframes presentation-pulse {
+@keyframes key-visualizer-effects-pulse {
   from {
     transform: translate(-50%, -50%) scale(0.5);
     opacity: 1;
@@ -53,7 +53,7 @@ body,
     opacity: 0;
   }
 }
-.presentation-error {
+.key-visualizer-effects-error {
   padding: 12px;
   background: #641a1a;
   color: white;

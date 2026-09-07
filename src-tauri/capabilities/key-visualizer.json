@@ -10,7 +10,7 @@
     "core:event:allow-unlisten",
     "allow-get-key-visualizer-config",
     "allow-get-key-visualizer-session",
-    "allow-get-presentation-status",
+    "allow-get-key-visualizer-effects-status",
     "allow-key-visualizer-ready"
   ]
 }

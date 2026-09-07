@@ -1,25 +1,288 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Alert, App as AntApp, Button, Card, Form, Input, Select, Space, Tabs, Tag, Typography } from "antd";
+import {
+  Alert,
+  App as AntApp,
+  Button,
+  Card,
+  Form,
+  Input,
+  Select,
+  Space,
+  Tabs,
+  Tag,
+  Typography,
+} from "antd";
 import type { ScreenshotConfig, ShortcutRuntimeStatus } from "../types";
 import styles from "./components.module.scss";
-import { shortcutFromKeyEvent } from "../utils/shortcut";
+import { duplicateShortcutFields, parseShortcut } from "../utils/shortcut";
 import ScreenshotHistory from "./ScreenshotHistory";
+import ShortcutSelect from "./ShortcutSelect";
 import { errorMessage, MAIN_EVENTS, screenshotSettingsApi } from "../api/commands";
 import { resetShortcutConfig, shortcutStatusDisplay } from "../utils/shortcutStatus";
 
 const { Text } = Typography;
-interface ScreenshotSettingsProps { activeTab: "history" | "settings"; onActiveTabChange: (tab: "history" | "settings") => void; }
-const shortcutFields: Array<[keyof ScreenshotConfig, string, string, ShortcutRuntimeStatus["actionId"]]> = [["quick_ocr_shortcut", "快速 OCR", "框选后松开鼠标即识别并复制文本", "quick_ocr"], ["shortcut", "区域截图", "唤起截图浮层并选择截图区域", "capture"], ["pin_shortcut", "最近截图贴图", "将最近一次确认的截图置顶到屏幕", "pin_recent"], ["history_shortcut", "打开截图历史", "显示主窗口并切换到截图历史", "open_history"], ["toggle_pin_shortcut", "显隐最近贴图", "隐藏或恢复最近创建的贴图", "toggle_latest_pin"]];
+interface ScreenshotSettingsProps {
+  activeTab: "history" | "settings";
+  onActiveTabChange: (tab: "history" | "settings") => void;
+}
+type ScreenshotShortcutField =
+  | "quick_ocr_shortcut"
+  | "shortcut"
+  | "pin_shortcut"
+  | "history_shortcut"
+  | "toggle_pin_shortcut";
+const shortcutFields: Array<
+  [ScreenshotShortcutField, string, string, ShortcutRuntimeStatus["actionId"]]
+> = [
+  ["quick_ocr_shortcut", "快速 OCR", "框选后松开鼠标即识别并复制文本", "quick_ocr"],
+  ["shortcut", "区域截图", "唤起截图浮层并选择截图区域", "capture"],
+  ["pin_shortcut", "最近截图贴图", "将最近一次确认的截图置顶到屏幕", "pin_recent"],
+  ["history_shortcut", "打开截图历史", "显示主窗口并切换到截图历史", "open_history"],
+  ["toggle_pin_shortcut", "显隐最近贴图", "隐藏或恢复最近创建的贴图", "toggle_latest_pin"],
+];
+const shortcutNames = shortcutFields.map(([name]) => name);
 
-export default function ScreenshotSettings({ activeTab, onActiveTabChange }: ScreenshotSettingsProps) {
-  const { notification } = AntApp.useApp(); const [form] = Form.useForm<ScreenshotConfig>(); const [saved, setSaved] = useState<ScreenshotConfig | null>(null); const [saving, setSaving] = useState(false); const [shortcutStatuses, setShortcutStatuses] = useState<ShortcutRuntimeStatus[]>([]);
-  const refreshStatuses = async () => { try { setShortcutStatuses(await screenshotSettingsApi.shortcutStatuses()); } catch { setShortcutStatuses([]); } };
-  useEffect(() => { void Promise.all([screenshotSettingsApi.get(), screenshotSettingsApi.shortcutStatuses()]).then(([config, statuses]) => { setSaved(config); form.setFieldsValue(config); form.resetFields(); setShortcutStatuses(statuses); }).catch((error) => notification.error({ message: "读取截图设置失败", description: errorMessage(error) })); let disposed = false; let off: (() => void) | undefined; void listen(MAIN_EVENTS.shortcutStatusChanged, () => void refreshStatuses()).then((value) => { if (disposed) value(); else off = value; }).catch((error) => notification.error({ message: "监听截图快捷键失败", description: errorMessage(error) })); return () => { disposed = true; off?.(); }; }, [form, notification]);
-  const save = async (next: ScreenshotConfig) => { setSaving(true); try { const config = await screenshotSettingsApi.update(next); setSaved(config); form.setFieldsValue(config); form.resetFields(); await refreshStatuses(); notification.success({ message: "截图设置已保存" }); } catch (error) { notification.error({ message: "保存截图设置失败", description: errorMessage(error) }); } finally { setSaving(false); } };
-  const resetShortcuts = async () => { if (!saved) return; setSaving(true); try { const result = await resetShortcutConfig(saved, screenshotSettingsApi.resetShortcuts); setSaved(result.config); form.setFieldsValue(result.config); form.resetFields(); await refreshStatuses(); if (result.error) throw result.error; notification.success({ message: "已恢复默认截图快捷键" }); } catch (error) { notification.error({ message: "恢复默认快捷键失败", description: errorMessage(error) }); } finally { setSaving(false); } };
-  const chooseDirectory = async () => { try { const directory = await screenshotSettingsApi.chooseSaveDirectory(); if (directory) form.setFieldValue("save_directory", directory); } catch (error) { notification.error({ message: "选择目录失败", description: errorMessage(error) }); } };
-  const status = (id: ShortcutRuntimeStatus["actionId"]) => { const display = shortcutStatusDisplay(shortcutStatuses.find((item) => item.actionId === id)); return <span className={styles.shortcutStatus}><Tag color={display.color}>{display.label}</Tag>{display.detail && <span className={styles.shortcutError}>{display.detail}</span>}</span>; };
-  const settings = <Form form={form} layout="vertical" className={styles.settingsForm} disabled={saving} onFinish={(values) => void save(values)}><Card className={styles.surfaceCard} title="截图"><div className={styles.settingsGroup}><div className={styles.settingRow}><div className={styles.settingCopy}><Text strong>立即截图</Text><span className={styles.description}>截取鼠标所在显示器，支持选区、标注、OCR、复制、保存和置顶。</span></div><Button type="primary" onClick={() => void screenshotSettingsApi.start().catch((error) => notification.error({ message: "启动截图失败", description: errorMessage(error) }))}>开始截图</Button></div><div className={`${styles.settingRow} ${styles.shortcutSection}`}><div className={styles.shortcutHeader}><div className={styles.settingCopy}><Text strong>全局快捷键</Text><span className={styles.description}>点击输入框后按下新的组合键，保存后统一注册。</span></div><Button onClick={() => void resetShortcuts()}>恢复默认</Button></div><div className={styles.shortcutList}>{shortcutFields.map(([name, label, detail, id]) => <div className={styles.shortcutItem} key={name}><div className={styles.shortcutCopy}><Text>{label}</Text><span className={styles.description}>{detail}</span></div><div className={styles.shortcutBinding}>{status(id)}<Form.Item noStyle name={name}><Input readOnly className={styles.shortcutInput} onKeyDown={(event) => { event.preventDefault(); const shortcut = shortcutFromKeyEvent(event.nativeEvent); if (shortcut) form.setFieldValue(name, shortcut); }} /></Form.Item></div></div>)}</div></div><Form.Item name="save_directory" label="默认保存目录"><Input readOnly addonAfter={<Button type="link" size="small" onClick={() => void chooseDirectory()}>选择目录</Button>} /></Form.Item><div className={styles.formFieldGrid}><Form.Item name="color_copy_format" label="取色复制格式"><Select options={["hex", "rgb", "hsl", "hsv", "css"].map((value) => ({ value, label: value.toUpperCase() }))} /></Form.Item><Form.Item name="capture_size_unit" label="截图尺寸单位"><Select options={[{ value: "px", label: "PX（导出像素）" }, { value: "dip", label: "DIP（逻辑尺寸）" }]} /></Form.Item></div><Form.Item name="filename_prefix" label="文件名前缀"><Input /></Form.Item><Space><Button type="primary" htmlType="submit" loading={saving}>保存截图设置</Button><Button disabled={saving} onClick={() => { if (saved) { form.setFieldsValue(saved); form.resetFields(); } }}>撤销修改</Button></Space></div></Card><Alert type="info" showIcon message="截图交互" description="区域选择后可使用形状、画笔、高亮、马赛克、文字、取色笔、二维码识别和像素标尺。" /></Form>;
-  return <div className={styles.page}><Tabs activeKey={activeTab} onChange={(key) => onActiveTabChange(key as "history" | "settings")} items={[{ key: "history", label: "截图历史", children: <ScreenshotHistory /> }, { key: "settings", label: "截图设置", children: settings }]} /></div>;
+export default function ScreenshotSettings({
+  activeTab,
+  onActiveTabChange,
+}: ScreenshotSettingsProps) {
+  const { notification } = AntApp.useApp();
+  const [form] = Form.useForm<ScreenshotConfig>();
+  const [saved, setSaved] = useState<ScreenshotConfig | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [shortcutStatuses, setShortcutStatuses] = useState<ShortcutRuntimeStatus[]>([]);
+  const refreshStatuses = async () => {
+    try {
+      setShortcutStatuses(await screenshotSettingsApi.shortcutStatuses());
+    } catch (error) {
+      setShortcutStatuses([]);
+      notification.error({
+        message: "读取快捷键状态失败",
+        description: errorMessage(error),
+      });
+    }
+  };
+  useEffect(() => {
+    void Promise.all([screenshotSettingsApi.get(), screenshotSettingsApi.shortcutStatuses()])
+      .then(([config, statuses]) => {
+        setSaved(config);
+        form.setFieldsValue(config);
+        form.resetFields();
+        setShortcutStatuses(statuses);
+      })
+      .catch((error) =>
+        notification.error({ message: "读取截图设置失败", description: errorMessage(error) }),
+      );
+    let disposed = false;
+    let off: (() => void) | undefined;
+    void listen(MAIN_EVENTS.shortcutStatusChanged, () => void refreshStatuses())
+      .then((value) => {
+        if (disposed) value();
+        else off = value;
+      })
+      .catch((error) =>
+        notification.error({ message: "监听截图快捷键失败", description: errorMessage(error) }),
+      );
+    return () => {
+      disposed = true;
+      off?.();
+    };
+  }, [form, notification]);
+  const save = async (next: ScreenshotConfig) => {
+    const invalid = shortcutNames.filter((name) => !parseShortcut(next[name]));
+    if (invalid.length > 0) {
+      form.setFields(
+        invalid.map((name) => ({ name, errors: ["请选择一个或两个修饰键，并指定受支持的主键"] })),
+      );
+      notification.error({ message: "快捷键格式无效", description: "请重新选择标记的快捷键。" });
+      return;
+    }
+    const duplicates = duplicateShortcutFields(next, shortcutNames);
+    if (duplicates.length > 0) {
+      form.setFields(
+        duplicates.map((name) => ({ name, errors: ["快捷键不能与其他截图操作重复"] })),
+      );
+      notification.error({ message: "快捷键重复", description: "请为标记的操作选择不同组合。" });
+      return;
+    }
+    setSaving(true);
+    try {
+      const config = await screenshotSettingsApi.update(next);
+      setSaved(config);
+      form.setFieldsValue(config);
+      form.resetFields();
+      await refreshStatuses();
+      notification.success({ message: "截图设置已保存" });
+    } catch (error) {
+      notification.error({ message: "保存截图设置失败", description: errorMessage(error) });
+    } finally {
+      setSaving(false);
+    }
+  };
+  const resetShortcuts = async () => {
+    if (!saved) return;
+    setSaving(true);
+    try {
+      const result = await resetShortcutConfig(saved, screenshotSettingsApi.resetShortcuts);
+      setSaved(result.config);
+      form.setFieldsValue(result.config);
+      form.resetFields();
+      await refreshStatuses();
+      if (result.error) throw result.error;
+      notification.success({ message: "已恢复默认截图快捷键" });
+    } catch (error) {
+      notification.error({ message: "恢复默认快捷键失败", description: errorMessage(error) });
+    } finally {
+      setSaving(false);
+    }
+  };
+  const chooseDirectory = async () => {
+    try {
+      const directory = await screenshotSettingsApi.chooseSaveDirectory();
+      if (directory) form.setFieldValue("save_directory", directory);
+    } catch (error) {
+      notification.error({ message: "选择目录失败", description: errorMessage(error) });
+    }
+  };
+  const status = (id: ShortcutRuntimeStatus["actionId"]) => {
+    const display = shortcutStatusDisplay(shortcutStatuses.find((item) => item.actionId === id));
+    return (
+      <span className={styles.shortcutStatus}>
+        <Tag color={display.color}>{display.label}</Tag>
+        {display.detail && <span className={styles.shortcutError}>{display.detail}</span>}
+      </span>
+    );
+  };
+  const settings = (
+    <Form
+      form={form}
+      layout="vertical"
+      className={styles.settingsForm}
+      disabled={saving}
+      onFinish={(values) => void save(values)}
+    >
+      <Card className={styles.surfaceCard} title="截图">
+        <div className={styles.settingsGroup}>
+          <div className={styles.settingRow}>
+            <div className={styles.settingCopy}>
+              <Text strong>立即截图</Text>
+              <span className={styles.description}>
+                截取鼠标所在显示器，支持选区、标注、OCR、复制、保存和置顶。
+              </span>
+            </div>
+            <Button
+              type="primary"
+              onClick={() =>
+                void screenshotSettingsApi.start().catch((error) =>
+                  notification.error({
+                    message: "启动截图失败",
+                    description: errorMessage(error),
+                  }),
+                )
+              }
+            >
+              开始截图
+            </Button>
+          </div>
+          <div className={`${styles.settingRow} ${styles.shortcutSection}`}>
+            <div className={styles.shortcutHeader}>
+              <div className={styles.settingCopy}>
+                <Text strong>全局快捷键</Text>
+                <span className={styles.description}>
+                  选择一个修饰键和主键，也可增加第二个修饰键；保存后统一注册。
+                </span>
+              </div>
+              <Button onClick={() => void resetShortcuts()}>恢复默认</Button>
+            </div>
+            <div className={styles.shortcutList}>
+              {shortcutFields.map(([name, label, detail, id]) => (
+                <div className={styles.shortcutItem} key={name}>
+                  <div className={styles.shortcutCopy}>
+                    <Text>{label}</Text>
+                    <span className={styles.description}>{detail}</span>
+                  </div>
+                  <div className={styles.shortcutBinding}>
+                    {status(id)}
+                    <Form.Item
+                      className={styles.shortcutFormItem}
+                      name={name}
+                      rules={[{ required: true, message: "请选择快捷键" }]}
+                    >
+                      <ShortcutSelect aria-label={label} />
+                    </Form.Item>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <Form.Item name="save_directory" label="默认保存目录">
+            <Input
+              readOnly
+              addonAfter={
+                <Button type="link" size="small" onClick={() => void chooseDirectory()}>
+                  选择目录
+                </Button>
+              }
+            />
+          </Form.Item>
+          <div className={styles.formFieldGrid}>
+            <Form.Item name="color_copy_format" label="取色复制格式">
+              <Select
+                options={["hex", "rgb", "hsl", "hsv", "css"].map((value) => ({
+                  value,
+                  label: value.toUpperCase(),
+                }))}
+              />
+            </Form.Item>
+            <Form.Item name="capture_size_unit" label="截图尺寸单位">
+              <Select
+                options={[
+                  { value: "px", label: "PX（导出像素）" },
+                  { value: "dip", label: "DIP（逻辑尺寸）" },
+                ]}
+              />
+            </Form.Item>
+          </div>
+          <Form.Item name="filename_prefix" label="文件名前缀">
+            <Input />
+          </Form.Item>
+          <Space>
+            <Button type="primary" htmlType="submit" loading={saving}>
+              保存截图设置
+            </Button>
+            <Button
+              disabled={saving}
+              onClick={() => {
+                if (saved) {
+                  form.setFieldsValue(saved);
+                  form.resetFields();
+                }
+              }}
+            >
+              撤销修改
+            </Button>
+          </Space>
+        </div>
+      </Card>
+      <Alert
+        type="info"
+        showIcon
+        message="截图交互"
+        description="区域选择后可使用形状、画笔、高亮、马赛克、文字、取色笔、二维码识别和像素标尺。"
+      />
+    </Form>
+  );
+  return (
+    <div className={styles.page}>
+      <Tabs
+        activeKey={activeTab}
+        onChange={(key) => onActiveTabChange(key as "history" | "settings")}
+        items={[
+          { key: "history", label: "截图历史", children: <ScreenshotHistory /> },
+          { key: "settings", label: "截图设置", children: settings },
+        ]}
+      />
+    </div>
+  );
 }

@@ -11,23 +11,14 @@
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
-    "targets": [
-      "nsis"
-    ],
-    "resources": [
-      "resources/ocr/*",
-      "resources/runtime/*"
-    ],
-    "icon": [
-      "icons/icon.ico"
-    ],
+    "targets": ["nsis"],
+    "resources": ["resources/ocr/*", "resources/runtime/*"],
+    "icon": ["icons/icon.ico"],
     "windows": {
       "nsis": {
         "installMode": "currentUser",
         "installerHooks": "./windows/installer-hooks.nsh",
-        "languages": [
-          "SimpChinese"
-        ]
+        "languages": ["SimpChinese"]
       }
     }
   },
@@ -36,7 +27,7 @@
       {
         "label": "main",
         "title": "DockMapper - 配置中心",
-        "width": 920,
+        "width": 1120,
         "height": 680,
         "minWidth": 640,
         "minHeight": 600,
@@ -46,9 +37,7 @@
         "transparent": true,
         "backgroundColor": "#00000000",
         "windowEffects": {
-          "effects": [
-            "mica"
-          ],
+          "effects": ["mica"],
           "state": "active"
         }
       },

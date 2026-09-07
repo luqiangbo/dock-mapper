@@ -174,6 +174,12 @@ fn handle_start_capture_with_mode(app: &AppHandle, mode: CaptureMode) {
     if state.capture_in_progress.swap(true, Ordering::SeqCst) {
         return;
     }
+    match crate::visualizer_effects::suspend_for_capture(app) {
+        Ok(token) => *state.visualizer_suspend_token.lock_or_recover() = token,
+        Err(error) => {
+            tracing::warn!(target: "dock_mapper::key_visualizer", %error, "截图前暂停按键展示失败")
+        }
+    }
     // A shortcut can arrive while the previous WebView is still painting
     // (most visible on the first Windows launch). Hide it before the native
     // capture so the screenshot tool never captures its own transparent surface together
@@ -211,9 +217,13 @@ fn handle_start_capture_with_mode(app: &AppHandle, mode: CaptureMode) {
                     );
                     if let Err(error) = open_overlay(&ui_app, &capture) {
                         show_capture_error(&ui_app, &error);
+                        resume_visualizer(&ui_app);
                     }
                 }
-                Err(error) => show_capture_error(&ui_app, &error),
+                Err(error) => {
+                    show_capture_error(&ui_app, &error);
+                    resume_visualizer(&ui_app);
+                }
             }
             ui_app
                 .state::<AppState>()
@@ -225,6 +235,7 @@ fn handle_start_capture_with_mode(app: &AppHandle, mode: CaptureMode) {
                 .capture_in_progress
                 .store(false, Ordering::SeqCst);
             tracing::error!(target: "dock_mapper::capture", %error, "Unable to display capture overlay");
+            resume_visualizer(&worker_app);
         }
     });
 }
@@ -244,6 +255,20 @@ pub(super) fn hide_overlay_for_commit(app: &AppHandle) {
 
 pub(super) fn finish_overlay_commit(app: &AppHandle) {
     *app.state::<AppState>().capture.lock_or_recover() = None;
+    resume_visualizer(app);
+}
+
+fn resume_visualizer(app: &AppHandle) {
+    let token = app
+        .state::<AppState>()
+        .visualizer_suspend_token
+        .lock_or_recover()
+        .take();
+    if let Some(token) = token {
+        if let Err(error) = crate::visualizer_effects::resume_after_capture(app, token) {
+            tracing::warn!(target: "dock_mapper::key_visualizer", %error, "截图后恢复按键展示失败");
+        }
+    }
 }
 
 pub(super) fn restore_overlay_after_commit_failure(app: &AppHandle) {
