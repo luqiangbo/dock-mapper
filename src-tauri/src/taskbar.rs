@@ -161,7 +161,13 @@ unsafe fn position_widget_dpi_aware(
             let target_top = taskbar_rect.top + (y_logical * scale_factor).round() as i32;
             let target_width = (width_logical * scale_factor).round() as i32;
             let target_height = (WIDGET_HEIGHT_LOGICAL * scale_factor).round() as i32;
-            if rect_matches_target(current, target_left, target_top, target_width, target_height) {
+            if rect_matches_target(
+                current,
+                target_left,
+                target_top,
+                target_width,
+                target_height,
+            ) {
                 return;
             }
         }
@@ -191,7 +197,10 @@ pub fn sync_dynamic_width(app: &tauri::AppHandle, width: f64) -> f64 {
 
     if let Some(widget) = app.get_webview_window("taskbar_widget") {
         let scale = widget.scale_factor().unwrap_or(1.0);
-        let current_width = widget.inner_size().map(|size| size.width as f64 / scale).ok();
+        let current_width = widget
+            .inner_size()
+            .map(|size| size.width as f64 / scale)
+            .ok();
         if current_width.is_none_or(|width| (width - clamped).abs() > 0.5) {
             let _ = widget.set_size(Size::Logical(LogicalSize::new(
                 clamped,
@@ -280,7 +289,12 @@ mod tests {
 
     #[test]
     fn matching_widget_geometry_does_not_need_another_native_move() {
-        let rect = RECT { left: 100, top: 4, right: 280, bottom: 44 };
+        let rect = RECT {
+            left: 100,
+            top: 4,
+            right: 280,
+            bottom: 44,
+        };
         assert!(rect_matches_target(rect, 100, 4, 180, 40));
         assert!(rect_matches_target(rect, 101, 5, 180, 40));
         assert!(!rect_matches_target(rect, 103, 4, 180, 40));

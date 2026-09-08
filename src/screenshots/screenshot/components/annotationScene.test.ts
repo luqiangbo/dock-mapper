@@ -19,7 +19,7 @@ const rectangle: RasterAnnotation = {
     color: "#fff",
     strokeWidth: 2,
     fillOpacity: 0,
-    arrowStyle: "filled",
+    arrowStyle: "straight",
     arrowHeadSize: 1,
     opacity: 1,
     mosaicBlock: 12,

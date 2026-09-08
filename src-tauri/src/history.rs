@@ -265,8 +265,7 @@ impl HistoryStore {
         let result = if path.exists() {
             replace_file(path, &temporary)
         } else {
-            fs::rename(&temporary, path)
-                .map_err(|error| format!("提交截图历史缩略图失败：{error}"))
+            fs::rename(&temporary, path).map_err(|error| format!("提交截图历史缩略图失败：{error}"))
         };
         if result.is_err() {
             let _ = fs::remove_file(&temporary);
@@ -314,13 +313,12 @@ fn png_dimensions(bytes: &[u8]) -> Result<(u32, u32), String> {
 fn create_thumbnail(bytes: &[u8]) -> Result<Vec<u8>, String> {
     let image = image::load_from_memory_with_format(bytes, ImageFormat::Png)
         .map_err(|error| format!("解码截图历史缩略图失败：{error}"))?;
-    let thumbnail = if image.width() <= THUMBNAIL_MAX_WIDTH
-        && image.height() <= THUMBNAIL_MAX_HEIGHT
-    {
-        image
-    } else {
-        image.thumbnail(THUMBNAIL_MAX_WIDTH, THUMBNAIL_MAX_HEIGHT)
-    };
+    let thumbnail =
+        if image.width() <= THUMBNAIL_MAX_WIDTH && image.height() <= THUMBNAIL_MAX_HEIGHT {
+            image
+        } else {
+            image.thumbnail(THUMBNAIL_MAX_WIDTH, THUMBNAIL_MAX_HEIGHT)
+        };
     let mut output = Cursor::new(Vec::new());
     thumbnail
         .write_to(&mut output, ImageFormat::Png)
@@ -432,7 +430,10 @@ mod tests {
         assert_eq!(store.list().unwrap().len(), 1);
         assert_eq!(store.count(), 1);
         assert_eq!(store.image(&created.id).unwrap(), image);
-        assert_eq!(png_dimensions(&store.thumbnail(&created.id).unwrap()).unwrap(), (2, 3));
+        assert_eq!(
+            png_dimensions(&store.thumbnail(&created.id).unwrap()).unwrap(),
+            (2, 3)
+        );
         let entry = root.join(&created.id);
         assert!(entry.join(THUMBNAIL_FILE).exists());
         assert!(!entry.join("source.png").exists());

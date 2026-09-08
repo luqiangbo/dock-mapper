@@ -1,17 +1,22 @@
 import type { ScreenshotConfig } from "../../../types";
 
 export type ArrowStyle =
-  | "filled"
-  | "double"
-  | "chevron"
+  | "loop"
+  | "sweep"
+  | "straight"
+  | "curve"
   | "block"
+  | "zigzag"
+  // Kept only for in-memory compatibility with an annotation being edited
+  // while the toolbar code hot-reloads. It is no longer exposed as a preset.
   | "label";
 export const ARROW_STYLE_OPTIONS: ReadonlyArray<{ value: ArrowStyle; label: string }> = [
-  { value: "filled", label: "实心箭头" },
-  { value: "chevron", label: "V 形箭头" },
-  { value: "double", label: "双向箭头" },
-  { value: "block", label: "块状箭头" },
-  { value: "label", label: "文字箭头" },
+  { value: "loop", label: "回旋" },
+  { value: "sweep", label: "扫尾" },
+  { value: "straight", label: "直线" },
+  { value: "curve", label: "弧线" },
+  { value: "block", label: "块状" },
+  { value: "zigzag", label: "折线" },
 ];
 export type TextFont = "sans" | "serif" | "mono";
 

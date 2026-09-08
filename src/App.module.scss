@@ -42,6 +42,18 @@ $compact-radius: 10px;
   }
 }
 
+.siderPanelCompact {
+  .brand {
+    justify-content: center;
+    margin-inline: 8px;
+  }
+
+  .nav {
+    width: 100% !important;
+    padding-inline: 4px !important;
+  }
+}
+
 .brandMark {
   display: grid;
   width: 34px;
@@ -209,8 +221,8 @@ $compact-radius: 10px;
   min-width: 0;
   overflow: auto;
   border-radius: 14px;
-  padding: 74px 0 10px;
-  scroll-padding-top: 74px;
+  padding: 76px clamp(8px, 1.2vw, 16px) 16px;
+  scroll-padding-top: 76px;
 }
 
 @container (max-width: 190px) {

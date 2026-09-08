@@ -1,6 +1,6 @@
 use super::{
-    handle_start_capture, start_quick_ocr_capture, open_screenshot_history, pin_recent_screenshot, toggle_latest_pin,
-    AppState,
+    handle_start_capture, open_screenshot_history, pin_recent_screenshot, start_quick_ocr_capture,
+    toggle_latest_pin, AppState,
 };
 use crate::config::ScreenshotConfig;
 use std::collections::{HashMap, HashSet};
@@ -116,17 +116,26 @@ fn dispatch(app: &AppHandle, action: ShortcutAction) {
 
 fn register_action(app: &AppHandle, action: ShortcutAction, shortcut: &str) -> Result<(), String> {
     let native_shortcut = tauri_shortcut(shortcut);
-    if app.global_shortcut().is_registered(native_shortcut.as_str()) {
+    if app
+        .global_shortcut()
+        .is_registered(native_shortcut.as_str())
+    {
         let error = format!("{}快捷键已被应用内其他功能使用", action.label());
-        app.state::<AppState>().shortcut_registry.lock().map_err(|_| "快捷键状态已损坏")?.errors.insert(action, error.clone());
+        app.state::<AppState>()
+            .shortcut_registry
+            .lock()
+            .map_err(|_| "快捷键状态已损坏")?
+            .errors
+            .insert(action, error.clone());
         return Err(error);
     }
-    if let Err(error) = app.global_shortcut()
-        .on_shortcut(native_shortcut.as_str(), move |app, _, event| {
-            if event.state() == ShortcutState::Pressed {
-                dispatch(app, action);
-            }
-        })
+    if let Err(error) =
+        app.global_shortcut()
+            .on_shortcut(native_shortcut.as_str(), move |app, _, event| {
+                if event.state() == ShortcutState::Pressed {
+                    dispatch(app, action);
+                }
+            })
     {
         let detail = error.to_string();
         tracing::warn!(target: "dock_mapper::shortcut", action = action.label(), shortcut, %detail, "注册全局快捷键失败");

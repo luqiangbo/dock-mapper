@@ -8,7 +8,20 @@ import {
 } from "@tauri-apps/plugin-autostart";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
-import { Alert, App as AntApp, Button, Card, ColorPicker, Form, Spin, Switch, Typography } from "antd";
+import {
+  Alert,
+  App as AntApp,
+  Button,
+  Card,
+  Col,
+  ColorPicker,
+  Form,
+  Grid,
+  Row,
+  Spin,
+  Switch,
+  Typography,
+} from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useTheme } from "../ThemeContext";
 import styles from "./components.module.scss";
@@ -18,6 +31,7 @@ const { Text } = Typography;
 const REPOSITORY_URL = "https://github.com/luqiangbo/dock-mapper";
 
 export default function GeneralSettings() {
+  const screens = Grid.useBreakpoint();
   const [form] = Form.useForm<{ autoStart: boolean; minimizeToTray: boolean; accentColor: string }>();
   const [autoStart, setAutoStart] = useState(false);
   const [autoStartLoading, setAutoStartLoading] = useState(true);
@@ -117,93 +131,109 @@ export default function GeneralSettings() {
   };
 
   return (
-    <div className={styles.page}>
+    <div className={`${styles.page} ${!screens.lg ? styles.responsiveCompact : ""}`}>
       <Form form={form} layout="vertical" className={styles.settingsForm}>
-      <Card className={styles.surfaceCard} title="通用">
-        <div className={styles.settingsGroup}>
-          <div className={styles.settingRow}>
-            <div className={styles.settingCopy}>
-              <Text strong>开机自动启动</Text>
-              <span className={styles.description}>登录 Windows 后自动运行</span>
-            </div>
-            {autoStartLoading ? (
-              <Spin size="small" />
-            ) : (
-              <Form.Item noStyle name="autoStart" valuePropName="checked"><Switch onChange={(value) => void changeAutostart(value)} /></Form.Item>
-            )}
-          </div>
-          <div className={styles.settingRow}>
-            <div className={styles.settingCopy}>
-              <Text strong>关闭时最小化到托盘</Text>
-              <span className={styles.description}>关闭主窗口时继续保持挂件与映射运行</span>
-            </div>
-            {minimizeLoading ? (
-              <Spin size="small" />
-            ) : (
-              <Form.Item noStyle name="minimizeToTray" valuePropName="checked"><Switch onChange={(value) => void changeMinimize(value)} /></Form.Item>
-            )}
-          </div>
-          <div className={styles.settingRow}>
-            <div className={styles.settingCopy}>
-              <Text strong>诊断信息</Text>
-              <span className={styles.description}>
-                导出脱敏配置和最近日志，不包含截图、OCR 文本或完整文件路径。
-              </span>
-            </div>
-            <Button loading={exportingDiagnostics} onClick={() => void exportDiagnostics()}>
-              导出诊断信息
-            </Button>
-          </div>
-        </div>
-      </Card>
+        <Row gutter={[screens.lg ? 12 : 8, 8]} align="stretch">
+          <Col xs={24} lg={12} className={styles.settingsGridColumn}>
+            <Card className={`${styles.surfaceCard} ${styles.settingsGridCard}`} title="通用">
+              <div className={styles.settingsGroup}>
+                <div className={styles.settingRow}>
+                  <div className={styles.settingCopy}>
+                    <Text strong>开机自动启动</Text>
+                    <span className={styles.description}>登录 Windows 后自动运行</span>
+                  </div>
+                  {autoStartLoading ? (
+                    <Spin size="small" />
+                  ) : (
+                    <Form.Item noStyle name="autoStart" valuePropName="checked">
+                      <Switch onChange={(value) => void changeAutostart(value)} />
+                    </Form.Item>
+                  )}
+                </div>
+                <div className={styles.settingRow}>
+                  <div className={styles.settingCopy}>
+                    <Text strong>关闭时最小化到托盘</Text>
+                    <span className={styles.description}>关闭主窗口时继续保持挂件与映射运行</span>
+                  </div>
+                  {minimizeLoading ? (
+                    <Spin size="small" />
+                  ) : (
+                    <Form.Item noStyle name="minimizeToTray" valuePropName="checked">
+                      <Switch onChange={(value) => void changeMinimize(value)} />
+                    </Form.Item>
+                  )}
+                </div>
+                <div className={styles.settingRow}>
+                  <div className={styles.settingCopy}>
+                    <Text strong>诊断信息</Text>
+                    <span className={styles.description}>
+                      导出脱敏配置和最近日志，不包含截图、OCR 文本或完整文件路径。
+                    </span>
+                  </div>
+                  <Button loading={exportingDiagnostics} onClick={() => void exportDiagnostics()}>
+                    导出诊断信息
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          </Col>
 
-      <Card className={styles.surfaceCard} title="主题">
-        <div className={styles.settingsGroup}>
-          <div className={styles.settingRow}>
-            <div className={styles.settingCopy}>
-              <Text strong>主题色</Text>
-              <span className={styles.description}>自定义按钮、选中状态和交互反馈的强调色</span>
-            </div>
-            <Form.Item noStyle name="accentColor"><ColorPicker
-              value={accentColor}
-              showText
-              onChangeComplete={(color) => setAccentColor(color.toHexString())}
-            /></Form.Item>
-          </div>
-        </div>
-      </Card>
+          <Col xs={24} lg={12} className={styles.settingsGridColumn}>
+            <Card className={`${styles.surfaceCard} ${styles.settingsGridCard}`} title="主题">
+              <div className={styles.settingsGroup}>
+                <div className={styles.settingRow}>
+                  <div className={styles.settingCopy}>
+                    <Text strong>主题色</Text>
+                    <span className={styles.description}>自定义按钮、选中状态和交互反馈的强调色</span>
+                  </div>
+                  <Form.Item noStyle name="accentColor">
+                    <ColorPicker
+                      value={accentColor}
+                      showText
+                      onChangeComplete={(color) => setAccentColor(color.toHexString())}
+                    />
+                  </Form.Item>
+                </div>
+              </div>
+            </Card>
+          </Col>
 
-      <Card className={styles.surfaceCard} title="更新与关于">
-        <div className={styles.settingsGroup}>
-          <div className={styles.settingRow}>
-            <div className={styles.settingCopy}>
-              <Text strong>DockMapper {version}</Text>
-              <span className={styles.description}>Tauri 2 + React · Windows 11 x64</span>
-            </div>
-            <Button onClick={() => void openUrl(REPOSITORY_URL)}>GitHub</Button>
-          </div>
-          <div className={styles.settingRow}>
-            <div className={styles.settingCopy}>
-              <Text strong>软件更新</Text>
-              <span className={styles.description}>从签名的 GitHub Release 检查更新</span>
-            </div>
-            <Button
-              icon={<ReloadOutlined />}
-              loading={checking}
-              onClick={() => void checkForUpdate()}
-            >
-              检查更新
-            </Button>
-          </div>
-        </div>
-      </Card>
+          <Col xs={24}>
+            <Card className={styles.surfaceCard} title="更新与关于">
+              <div className={styles.settingsGroup}>
+                <div className={styles.settingRow}>
+                  <div className={styles.settingCopy}>
+                    <Text strong>DockMapper {version}</Text>
+                    <span className={styles.description}>Tauri 2 + React · Windows 11 x64</span>
+                  </div>
+                  <Button onClick={() => void openUrl(REPOSITORY_URL)}>GitHub</Button>
+                </div>
+                <div className={styles.settingRow}>
+                  <div className={styles.settingCopy}>
+                    <Text strong>软件更新</Text>
+                    <span className={styles.description}>从签名的 GitHub Release 检查更新</span>
+                  </div>
+                  <Button
+                    icon={<ReloadOutlined />}
+                    loading={checking}
+                    onClick={() => void checkForUpdate()}
+                  >
+                    检查更新
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          </Col>
 
-      <Alert
-        type="info"
-        showIcon
-        message="管理员权限说明"
-        description="应用或恢复系统按键映射时会按需请求 Windows UAC；主应用始终保持普通用户权限。"
-      />
+          <Col xs={24}>
+            <Alert
+              type="info"
+              showIcon
+              message="管理员权限说明"
+              description="应用或恢复系统按键映射时会按需请求 Windows UAC；主应用始终保持普通用户权限。"
+            />
+          </Col>
+        </Row>
       </Form>
     </div>
   );

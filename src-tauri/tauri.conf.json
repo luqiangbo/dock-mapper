@@ -56,7 +56,7 @@
       {
         "label": "key_visualizer",
         "url": "/key-visualizer.html",
-        "width": 360,
+        "width": 720,
         "height": 250,
         "resizable": false,
         "decorations": false,

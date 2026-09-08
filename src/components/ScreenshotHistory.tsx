@@ -12,9 +12,11 @@ import {
   App as AntApp,
   Button,
   Empty,
+  Grid,
   Image,
+  InputNumber,
+  Masonry,
   Popconfirm,
-  Segmented,
   Select,
   Spin,
   Tooltip,
@@ -26,7 +28,7 @@ import {
   loadScreenshotHistoryView,
   saveScreenshotHistoryView,
   selectScreenshotHistory,
-  type HistoryDensity,
+  responsiveHistoryColumnCount,
   type HistoryFilter,
   type HistorySort,
 } from "./screenshotHistoryView";
@@ -149,6 +151,7 @@ function HistoryImage({ id }: { id: string }) {
 }
 
 export default function ScreenshotHistory() {
+  const screens = Grid.useBreakpoint();
   const { notification } = AntApp.useApp();
   const [entries, setEntries] = useState<ScreenshotHistorySummary[]>([]);
   const [view, setView] = useState(loadScreenshotHistoryView);
@@ -158,6 +161,24 @@ export default function ScreenshotHistory() {
   const refreshGenerationRef = useRef(0);
   const refreshTimerRef = useRef<number | null>(null);
   const visibleEntries = useMemo(() => selectScreenshotHistory(entries, view), [entries, view]);
+  const masonryItems = useMemo(
+    () => visibleEntries.map((entry) => ({ key: entry.id, data: entry })),
+    [visibleEntries],
+  );
+
+  const onColumnCountChange = (columns: number | null) => {
+    if (columns === null || !Number.isInteger(columns) || columns < 1 || columns > 10) return;
+    setView((current) => ({ ...current, columns }));
+  };
+  const sharedProps = {
+    mode: "spinner" as const,
+    min: 1,
+    max: 10,
+    defaultValue: 3,
+    onChange: onColumnCountChange,
+    style: { width: 150 },
+  };
+  const visibleColumnCount = responsiveHistoryColumnCount(view.columns, screens);
 
   useEffect(() => saveScreenshotHistoryView(view), [view]);
 
@@ -253,15 +274,12 @@ export default function ScreenshotHistory() {
             />
           </label>
           <label className={styles.historyControl}>
-            <span>大小</span>
-            <Segmented<HistoryDensity>
-              value={view.density}
-              onChange={(density) => setView((current) => ({ ...current, density }))}
-              options={[
-                { value: "compact", label: "紧凑" },
-                { value: "standard", label: "标准" },
-                { value: "large", label: "大图" },
-              ]}
+            <span>列数</span>
+            <InputNumber
+              {...sharedProps}
+              aria-label="截图展示列数"
+              value={view.columns}
+              precision={0}
             />
           </label>
           <Text type="secondary" className={styles.historyCount}>
@@ -287,18 +305,17 @@ export default function ScreenshotHistory() {
       ) : visibleEntries.length === 0 ? (
         <Empty description="没有符合当前筛选条件的截图" />
       ) : (
-        <div
-          className={`${styles.historyGrid} ${
-            view.density === "compact"
-              ? styles.historyGridCompact
-              : view.density === "large"
-                ? styles.historyGridLarge
-                : styles.historyGridStandard
-          }`}
-        >
-          {visibleEntries.map((entry) => (
-            <article className={styles.historyCard} key={entry.id}>
-              <div className={styles.historyPreview}>
+        <Masonry<ScreenshotHistorySummary>
+          className={styles.historyMasonry}
+          columns={visibleColumnCount}
+          gutter={[12, 12]}
+          items={masonryItems}
+          itemRender={({ data: entry }) => (
+            <article className={styles.historyCard} tabIndex={0}>
+              <div
+                className={styles.historyPreview}
+                style={{ aspectRatio: `${entry.width} / ${entry.height}` }}
+              >
                 <HistoryImage id={entry.id} />
               </div>
               <div className={styles.historyMeta}>
@@ -313,6 +330,7 @@ export default function ScreenshotHistory() {
                 <Tooltip title="复制">
                   <Button
                     type="text"
+                    size="small"
                     icon={<CopyOutlined />}
                     aria-label="复制截图历史"
                     loading={working?.id === entry.id && working.action === "copy"}
@@ -334,6 +352,7 @@ export default function ScreenshotHistory() {
                 <Tooltip title="贴图">
                   <Button
                     type="text"
+                    size="small"
                     icon={<PushpinOutlined />}
                     aria-label="贴出截图历史"
                     loading={working?.id === entry.id && working.action === "pin"}
@@ -355,6 +374,7 @@ export default function ScreenshotHistory() {
                 <Tooltip title={entry.favorite ? "取消收藏" : "收藏"}>
                   <Button
                     type="text"
+                    size="small"
                     icon={entry.favorite ? <StarFilled /> : <StarOutlined />}
                     className={entry.favorite ? styles.favoriteButton : undefined}
                     aria-label={entry.favorite ? "取消收藏截图历史" : "收藏截图历史"}
@@ -401,6 +421,7 @@ export default function ScreenshotHistory() {
                   <Tooltip title="删除">
                     <Button
                       type="text"
+                      size="small"
                       danger
                       icon={<DeleteOutlined />}
                       aria-label="删除截图历史"
@@ -415,8 +436,8 @@ export default function ScreenshotHistory() {
                 </Popconfirm>
               </div>
             </article>
-          ))}
-        </div>
+          )}
+        />
       )}
     </div>
   );

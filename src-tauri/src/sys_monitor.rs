@@ -48,7 +48,6 @@ impl SysMonitorControl {
         self.settings
             .send_modify(|settings| settings.shutdown = true);
     }
-
 }
 
 pub fn start_sys_monitor(app: AppHandle) {
@@ -85,13 +84,8 @@ pub fn start_sys_monitor(app: AppHandle) {
                 .sum::<u64>();
             let now = Instant::now();
             let elapsed = now.duration_since(previous_tick).as_secs_f64().max(0.001);
-            let (upload_speed, download_speed) = baseline.sample(
-                None,
-                network_available,
-                total_rx,
-                total_tx,
-                elapsed,
-            );
+            let (upload_speed, download_speed) =
+                baseline.sample(None, network_available, total_rx, total_tx, elapsed);
             previous_tick = now;
             let total_memory = sys.total_memory() as f32;
             let payload = SysStatusPayload {
@@ -130,14 +124,19 @@ fn battery_status() -> Option<BatteryStatus> {
     use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
     let mut raw = SYSTEM_POWER_STATUS::default();
     if unsafe { GetSystemPowerStatus(&mut raw) }.is_ok() && raw.BatteryLifePercent != u8::MAX {
-        Some(BatteryStatus { percentage: raw.BatteryLifePercent as f32, charging: raw.ACLineStatus == 1 })
+        Some(BatteryStatus {
+            percentage: raw.BatteryLifePercent as f32,
+            charging: raw.ACLineStatus == 1,
+        })
     } else {
         None
     }
 }
 
 #[cfg(not(target_os = "windows"))]
-fn battery_status() -> Option<BatteryStatus> { None }
+fn battery_status() -> Option<BatteryStatus> {
+    None
+}
 
 #[derive(Default)]
 struct NetworkBaseline {
@@ -185,9 +184,17 @@ impl NetworkBaseline {
 
 fn is_virtual_adapter(name: &str) -> bool {
     let value = name.to_ascii_lowercase();
-    ["loopback", "vethernet", "virtual", "vmware", "hyper-v", "wsl", "npcap"]
-        .iter()
-        .any(|marker| value.contains(marker))
+    [
+        "loopback",
+        "vethernet",
+        "virtual",
+        "vmware",
+        "hyper-v",
+        "wsl",
+        "npcap",
+    ]
+    .iter()
+    .any(|marker| value.contains(marker))
 }
 
 fn emit_if_visible(app: &AppHandle, label: &str, payload: SysStatusPayload) -> bool {
@@ -215,14 +222,25 @@ mod tests {
         assert!(control.settings.borrow().shutdown);
     }
 
-
     #[test]
     fn changing_or_restoring_an_interface_resets_the_speed_baseline() {
         let mut baseline = NetworkBaseline::default();
-        assert_eq!(baseline.sample(Some("Ethernet"), true, 100, 200, 1.0), (0.0, 0.0));
-        assert_eq!(baseline.sample(Some("Ethernet"), true, 140, 260, 2.0), (30.0, 20.0));
-        assert_eq!(baseline.sample(Some("Wi-Fi"), true, 500, 900, 1.0), (0.0, 0.0));
+        assert_eq!(
+            baseline.sample(Some("Ethernet"), true, 100, 200, 1.0),
+            (0.0, 0.0)
+        );
+        assert_eq!(
+            baseline.sample(Some("Ethernet"), true, 140, 260, 2.0),
+            (30.0, 20.0)
+        );
+        assert_eq!(
+            baseline.sample(Some("Wi-Fi"), true, 500, 900, 1.0),
+            (0.0, 0.0)
+        );
         assert_eq!(baseline.sample(Some("Wi-Fi"), false, 0, 0, 1.0), (0.0, 0.0));
-        assert_eq!(baseline.sample(Some("Wi-Fi"), true, 20, 30, 1.0), (0.0, 0.0));
+        assert_eq!(
+            baseline.sample(Some("Wi-Fi"), true, 20, 30, 1.0),
+            (0.0, 0.0)
+        );
     }
 }

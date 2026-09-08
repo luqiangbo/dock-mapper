@@ -18,7 +18,9 @@ use windows::Win32::{
 const WINDOW_LABEL: &str = "key_visualizer";
 const EVENT_INPUT: &str = "key-visualizer-input";
 const EVENT_CONFIG: &str = "key-visualizer-config-changed";
-const WINDOW_BASE_WIDTH: i32 = 360;
+// Keep enough horizontal room for the longest merged character display even
+// when the user selects the maximum supported font size.
+const WINDOW_BASE_WIDTH: i32 = 720;
 const WINDOW_BASE_HEIGHT: i32 = 250;
 
 #[derive(Debug, Clone, Serialize)]

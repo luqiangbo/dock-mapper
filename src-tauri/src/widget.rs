@@ -49,7 +49,11 @@ pub struct WidgetMetricConfig {
 
 impl Default for WidgetMetricConfig {
     fn default() -> Self {
-        Self { kind: WidgetMetricKind::Network, enabled: true, usage_scheme: UsageScheme::Capsule }
+        Self {
+            kind: WidgetMetricKind::Network,
+            enabled: true,
+            usage_scheme: UsageScheme::Capsule,
+        }
     }
 }
 
@@ -72,7 +76,11 @@ impl Default for WidgetConfig {
             memory_scheme: MemoryScheme::Capsule,
             metrics: vec![
                 WidgetMetricConfig::default(),
-                WidgetMetricConfig { kind: WidgetMetricKind::Memory, enabled: true, usage_scheme: MemoryScheme::Capsule },
+                WidgetMetricConfig {
+                    kind: WidgetMetricKind::Memory,
+                    enabled: true,
+                    usage_scheme: MemoryScheme::Capsule,
+                },
             ],
             refresh_interval_secs: 1,
             network_interface: None,
@@ -95,7 +103,10 @@ impl WidgetConfig {
             if metric.kind == WidgetMetricKind::DiskIoLegacy {
                 continue;
             }
-            if !normalized.iter().any(|item: &WidgetMetricConfig| item.kind == metric.kind) {
+            if !normalized
+                .iter()
+                .any(|item: &WidgetMetricConfig| item.kind == metric.kind)
+            {
                 normalized.push(metric);
             }
         }
@@ -128,7 +139,10 @@ impl WidgetConfig {
                 network.enabled = true;
             }
         }
-        if let Some(memory) = normalized.iter_mut().find(|item| item.kind == WidgetMetricKind::Memory) {
+        if let Some(memory) = normalized
+            .iter_mut()
+            .find(|item| item.kind == WidgetMetricKind::Memory)
+        {
             if had_metric_config {
                 // Per-metric styles are authoritative for current configs;
                 // retain the old field as a compatibility mirror.
@@ -256,7 +270,11 @@ mod tests {
 
     #[test]
     fn normalize_migrates_missing_metrics_to_network_and_memory() {
-        let mut config = WidgetConfig { metrics: Vec::new(), memory_scheme: MemoryScheme::Ring, ..WidgetConfig::default() };
+        let mut config = WidgetConfig {
+            metrics: Vec::new(),
+            memory_scheme: MemoryScheme::Ring,
+            ..WidgetConfig::default()
+        };
         config.normalize();
         assert_eq!(config.metrics.len(), 4);
         assert_eq!(config.metrics[1].kind, WidgetMetricKind::Memory);
@@ -267,8 +285,16 @@ mod tests {
     fn normalize_keeps_at_least_one_metric_enabled() {
         let mut config = WidgetConfig {
             metrics: vec![
-                WidgetMetricConfig { kind: WidgetMetricKind::Network, enabled: false, usage_scheme: MemoryScheme::Capsule },
-                WidgetMetricConfig { kind: WidgetMetricKind::Memory, enabled: false, usage_scheme: MemoryScheme::Ring },
+                WidgetMetricConfig {
+                    kind: WidgetMetricKind::Network,
+                    enabled: false,
+                    usage_scheme: MemoryScheme::Capsule,
+                },
+                WidgetMetricConfig {
+                    kind: WidgetMetricKind::Memory,
+                    enabled: false,
+                    usage_scheme: MemoryScheme::Ring,
+                },
             ],
             ..WidgetConfig::default()
         };

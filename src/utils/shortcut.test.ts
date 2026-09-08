@@ -8,6 +8,10 @@ describe("shortcut select values", () => {
     );
     expect(parseShortcut("Ctrl+S")).toEqual({ modifiers: ["Control"], key: "S" });
     expect(parseShortcut("Win+Esc")).toEqual({ modifiers: ["Super"], key: "Escape" });
+    expect(parseShortcut("CommandOrControl+Shift+Space")).toEqual({
+      modifiers: ["Control", "Shift"],
+      key: "Space",
+    });
   });
 
   it("rejects duplicate modifiers and unsupported legacy values", () => {

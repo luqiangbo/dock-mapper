@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Alert, App as AntApp, Button, Card, Spin, Typography } from "antd";
+import { Alert, App as AntApp, Button, Card, Col, Grid, Row, Spin, Typography } from "antd";
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
@@ -41,6 +41,8 @@ function MetricCard({ icon, label, value }: { icon: ReactNode; label: string; va
 }
 
 export default function Dashboard({ status, samples, onNavigate }: Props) {
+  const screens = Grid.useBreakpoint();
+  const gutter: [number, number] = [screens.lg ? 16 : 12, 12];
   const [mapStatus, setMapStatus] = useState<ScancodeMapStatus | null>(null);
   const [runtimeHealth, setRuntimeHealth] = useState<RuntimeHealth | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
@@ -89,25 +91,25 @@ export default function Dashboard({ status, samples, onNavigate }: Props) {
       <span className={styles.liveBadge}><i />{status ? "实时更新" : "等待采样"}</span>
     </section>
 
-    <div className={styles.dashboardMetrics}>
-      <MetricCard icon={<ArrowUpOutlined />} label={!status ? "实时上传" : status.network_available ? "实时上传" : "上传（网卡不可用）"} value={status?.network_available ? formatSpeed(status.upload_speed) : "—"} />
-      <MetricCard icon={<ArrowDownOutlined />} label={!status ? "实时下载" : status.network_available ? "实时下载" : "下载（网卡不可用）"} value={status?.network_available ? formatSpeed(status.download_speed) : "—"} />
-      <MetricCard icon={<DashboardOutlined />} label="CPU 占用" value={status?.cpu_usage == null ? "—" : `${status.cpu_usage.toFixed(0)}%`} />
-      <MetricCard icon={<DashboardOutlined />} label="内存占用" value={status == null ? "—" : `${status.memory_usage.toFixed(0)}%`} />
-      {status?.battery && <MetricCard icon={<DashboardOutlined />} label={status.battery.charging ? "电池（充电中）" : "电池"} value={`${status.battery.percentage.toFixed(0)}%`} />}
-    </div>
+    <Row gutter={gutter}>
+      <Col xs={24} sm={12} lg={6}><MetricCard icon={<ArrowUpOutlined />} label={!status ? "实时上传" : status.network_available ? "实时上传" : "上传（网卡不可用）"} value={status?.network_available ? formatSpeed(status.upload_speed) : "—"} /></Col>
+      <Col xs={24} sm={12} lg={6}><MetricCard icon={<ArrowDownOutlined />} label={!status ? "实时下载" : status.network_available ? "实时下载" : "下载（网卡不可用）"} value={status?.network_available ? formatSpeed(status.download_speed) : "—"} /></Col>
+      <Col xs={24} sm={12} lg={6}><MetricCard icon={<DashboardOutlined />} label="CPU 占用" value={status?.cpu_usage == null ? "—" : `${status.cpu_usage.toFixed(0)}%`} /></Col>
+      <Col xs={24} sm={12} lg={6}><MetricCard icon={<DashboardOutlined />} label="内存占用" value={status == null ? "—" : `${status.memory_usage.toFixed(0)}%`} /></Col>
+      {status?.battery && <Col xs={24} sm={12} lg={6}><MetricCard icon={<DashboardOutlined />} label={status.battery.charging ? "电池（充电中）" : "电池"} value={`${status.battery.percentage.toFixed(0)}%`} /></Col>}
+    </Row>
 
-    <div className={styles.dashboardCharts}>
-      <Card className={styles.surfaceCard} title="网络趋势 · 最近 5 分钟">
+    <Row gutter={gutter}>
+      <Col xs={24} lg={12}><Card className={styles.surfaceCard} title="网络趋势 · 最近 5 分钟">
         {samples.length < 2 ? <div className={styles.chartEmpty}><Spin size="small" /><Text type="secondary">正在等待更多网络采样…</Text></div> : <MetricTrendChart title="网络趋势" samples={samples} series={NETWORK_SERIES} />}
-      </Card>
-      <Card className={styles.surfaceCard} title="资源趋势 · 最近 5 分钟">
+      </Card></Col>
+      <Col xs={24} lg={12}><Card className={styles.surfaceCard} title="资源趋势 · 最近 5 分钟">
         {samples.length < 2 ? <div className={styles.chartEmpty}><Spin size="small" /><Text type="secondary">正在等待更多资源采样…</Text></div> : <MetricTrendChart title="资源趋势" samples={samples} series={RESOURCE_SERIES} percent />}
-      </Card>
-    </div>
+      </Card></Col>
+    </Row>
 
-    <div className={styles.dashboardModules}>
-      <Card className={styles.surfaceCard} title="功能状态">
+    <Row gutter={gutter}>
+      <Col xs={24} lg={12}><Card className={styles.surfaceCard} title="功能状态">
         <div className={styles.dashboardStatusList}>
           {mapError ? <Alert type="error" showIcon message="扫描码映射状态读取失败" description={mapError} action={<Button size="small" icon={<ReloadOutlined />} onClick={() => void refreshMapStatus()}>重试</Button>} /> : <div className={styles.dashboardStatusRow}><span><KeyOutlined />扫描码映射</span><b>{mappingLabel}</b></div>}
           {healthError ? <Alert type="error" showIcon message="运行统计读取失败" description={healthError} action={<Button size="small" icon={<ReloadOutlined />} onClick={() => void refreshRuntimeHealth()}>重试</Button>} /> : runtimeHealth ? <>
@@ -117,15 +119,15 @@ export default function Dashboard({ status, samples, onNavigate }: Props) {
             <div className={styles.dashboardStatusRow}><span><HistoryOutlined />截图历史</span><b>{runtimeHealth.historyCount} 项</b></div>
           </> : <Spin size="small" />}
         </div>
-      </Card>
-      <Card className={styles.surfaceCard} title="快捷操作">
+      </Card></Col>
+      <Col xs={24} lg={12}><Card className={styles.surfaceCard} title="快捷操作">
         <div className={styles.dashboardActions}>
           <Button type="primary" icon={<CameraOutlined />} loading={startingCapture} onClick={() => void startCapture()}>开始截图</Button>
           <Button icon={<HistoryOutlined />} onClick={() => onNavigate("screenshot", "history")}>截图历史</Button>
           <Button icon={<KeyOutlined />} onClick={() => onNavigate("keymapper")}>按键映射</Button>
           <Button icon={<MenuOutlined />} onClick={() => onNavigate("widget")}>挂件设置</Button>
         </div>
-      </Card>
-    </div>
+      </Card></Col>
+    </Row>
   </div>;
 }

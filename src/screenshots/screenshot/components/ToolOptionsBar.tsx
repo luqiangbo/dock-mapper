@@ -30,6 +30,14 @@ interface Props {
 }
 const WIDTHS = [2, 3, 4, 6, 8].map((value) => ({ value, label: `${value}px` }));
 const PRESETS = [{ label: "快捷色", colors: [...STROKE_COLORS] }];
+const ARROW_CRAYON_COLORS = [
+  "#ff2d2d",
+  "#ffad42",
+  "#6c63ff",
+  "#a90cc2",
+  "#178f28",
+  "#39bf20",
+] as const;
 const FORMATS: Array<{ value: ScreenshotConfig["color_copy_format"]; label: string }> = [
   "hex",
   "rgb",
@@ -56,6 +64,8 @@ function Color({
   change,
   popup,
   palette,
+  quickColors = STROKE_COLORS,
+  presetLabel = "快捷色",
 }: {
   label: string;
   value: string;
@@ -63,9 +73,11 @@ function Color({
   change: (value: string) => void;
   popup: (key: string, open: boolean) => void;
   palette?: ColorPaletteConfig;
+  quickColors?: readonly string[];
+  presetLabel?: string;
 }) {
   const presets = [
-    PRESETS[0],
+    { label: presetLabel, colors: [...quickColors] },
     ...(palette?.favorites.length
       ? [{ label: "收藏", colors: palette.favorites.slice(0, 5) }]
       : []),
@@ -118,17 +130,20 @@ function Choice({
 }
 
 function ArrowStylePreview({ style, label }: { style: ArrowStyle; label: string }): React.JSX.Element {
-  const doubleEnded = style === "double";
-  const chevron = style === "chevron";
+  const paths: Record<string, string> = {
+    loop: "M4 11C13 1 21 13 15 8C10 4 20 1 34 6M30 2l6 4-6 4",
+    sweep: "M3 12C15 13 20 2 36 6M31 2l6 4-6 4",
+    straight: "M3 11L36 4M31 1l6 3-4 6",
+    curve: "M3 4C15 15 28 12 37 4M31 3l6 1-2 6",
+    block: "M3 10L27 6l-1-4 12 3-9 8-1-4-24 5z",
+    zigzag: "M3 11l9-4-3-3 10 1-2-3 13 1-2-3 10 1-5 6",
+  };
+  const path = paths[style] ?? paths.straight;
   return (
     <span className="arrow-style-option">
       <svg viewBox="0 0 44 14" aria-hidden="true">
-        {style === "block" ? <path d="m3 5 28 0 0-4 10 6-10 6 0-4-28 0z" /> : <>
-          <path d={style === "label" ? "M4 7h12m12 0h7" : "M4 7h31"} />
-          {style === "label" ? <text x="22" y="9" textAnchor="middle">A</text> : null}
-          {chevron ? <path d="M35 3l5 4-5 4" /> : <path d="M40 7 34 3v8z" />}
-          {doubleEnded ? <path d="M4 7 10 3v8z" /> : null}
-        </>}
+        <path className="is-outline" d={path} opacity="0.42" transform="translate(.5 -.4)" />
+        <path className="is-outline" d={path} />
       </svg>
       <span>{label}</span>
     </span>
@@ -220,6 +235,8 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
       change={(strokeColor) => onChange({ strokeColor })}
       popup={popup}
       palette={palette}
+      quickColors={tool === "arrow" ? ARROW_CRAYON_COLORS : PRESETS[0].colors}
+      presetLabel={tool === "arrow" ? "蜡笔色" : "快捷色"}
     />
   );
   const width = (

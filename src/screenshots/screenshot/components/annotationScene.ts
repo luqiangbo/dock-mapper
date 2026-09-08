@@ -1,5 +1,5 @@
 import type { ArrowStyle, TextStyle } from "./annotationTypes";
-import { drawArrow } from "./arrowGeometry";
+import { calculateArrowGeometry, drawArrow } from "./arrowGeometry";
 
 export interface ScenePoint {
   x: number;
@@ -38,10 +38,23 @@ function annotationPadding(annotation: RasterAnnotation): number {
   const labelPadding = annotation.kind === "arrow" && annotation.style.arrowStyle === "label"
     ? (annotation.style.arrowLabelStyle?.fontSize ?? 0) / 2 + 6
     : 0;
-  return Math.max(4, annotation.style.strokeWidth / 2, labelPadding);
+  const texturePadding = annotation.kind === "arrow" ? annotation.style.strokeWidth * 1.5 : 0;
+  return Math.max(4, annotation.style.strokeWidth / 2, labelPadding, texturePadding);
 }
 
 export function annotationGeometryBounds(annotation: RasterAnnotation): SceneBounds {
+  const lastPoint = annotation.points[annotation.points.length - 1];
+  if (annotation.kind === "arrow" && annotation.points[0] && lastPoint) {
+    const geometry = calculateArrowGeometry({
+      start: annotation.points[0],
+      end: lastPoint,
+      lineWidth: annotation.style.strokeWidth,
+      canvasScale: 1,
+      headScale: annotation.style.arrowHeadSize,
+      style: annotation.style.arrowStyle,
+    });
+    if (geometry) return geometry.bounds;
+  }
   const xs = annotation.points.map((point) => point.x);
   const ys = annotation.points.map((point) => point.y);
   const minX = Math.min(...xs);
@@ -267,7 +280,7 @@ export function drawRasterAnnotation(
     }
     context.stroke();
   } else if (annotation.kind === "arrow") {
-    drawArrow(context, first, last, style.arrowStyle, style.arrowHeadSize, canvasScale, style.arrowLabel, style.arrowLabelStyle);
+    drawArrow(context, first, last, style.arrowStyle, style.arrowHeadSize, canvasScale, style.arrowLabel, style.arrowLabelStyle, annotation.id);
   }
   context.restore();
 }

@@ -515,7 +515,8 @@ where
     let shortcuts_changed = previous_shortcuts.shortcut != next_shortcuts.shortcut
         || previous_shortcuts.pin_shortcut != next_shortcuts.pin_shortcut
         || previous_shortcuts.history_shortcut != next_shortcuts.history_shortcut
-        || previous_shortcuts.toggle_pin_shortcut != next_shortcuts.toggle_pin_shortcut;
+        || previous_shortcuts.toggle_pin_shortcut != next_shortcuts.toggle_pin_shortcut
+        || previous_shortcuts.quick_ocr_shortcut != next_shortcuts.quick_ocr_shortcut;
     if shortcuts_changed {
         apply(previous_shortcuts, next_shortcuts)?;
     }
@@ -881,6 +882,30 @@ fn set_minimize_to_tray(state: State<'_, AppState>, enabled: bool) -> Result<(),
     Ok(())
 }
 
+const LEGACY_MAIN_WINDOW_WIDTH: f64 = 920.0;
+const CURRENT_MAIN_WINDOW_WIDTH: f64 = 1120.0;
+
+fn migrated_main_window_width(width: f64) -> Option<f64> {
+    ((width - LEGACY_MAIN_WINDOW_WIDTH).abs() <= 2.0).then_some(CURRENT_MAIN_WINDOW_WIDTH)
+}
+
+fn migrate_main_window_width(app: &tauri::App) -> Result<(), String> {
+    let Some(window) = app.get_webview_window("main") else {
+        return Ok(());
+    };
+    let scale = window.scale_factor().map_err(|error| error.to_string())?;
+    let size = window
+        .inner_size()
+        .map_err(|error| error.to_string())?
+        .to_logical::<f64>(scale);
+    let Some(width) = migrated_main_window_width(size.width) else {
+        return Ok(());
+    };
+    window
+        .set_size(tauri::LogicalSize::new(width, size.height))
+        .map_err(|error| format!("迁移主窗口宽度失败：{error}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if let Some(exit_code) = admin::helper_exit_code_from_args(std::env::args()) {
@@ -913,6 +938,9 @@ pub fn run() {
         .manage(visualizer_effects::VisualizerEffectsRuntime::default())
         .setup(|app| {
             app.manage(diagnostics::initialize(app.handle())?);
+            if let Err(error) = migrate_main_window_width(app) {
+                tracing::warn!(target: "dock_mapper::window", %error);
+            }
             #[cfg(desktop)]
             tray::setup(app)?;
 
@@ -1051,6 +1079,19 @@ pub fn run() {
 }
 
 #[cfg(test)]
+mod main_window_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_default_width_migrates_once_without_overriding_user_sizes() {
+        assert_eq!(migrated_main_window_width(920.0), Some(1120.0));
+        assert_eq!(migrated_main_window_width(921.5), Some(1120.0));
+        assert_eq!(migrated_main_window_width(1000.0), None);
+        assert_eq!(migrated_main_window_width(1120.0), None);
+    }
+}
+
+#[cfg(test)]
 mod transaction_tests {
     use super::*;
     use std::sync::Mutex;
@@ -1132,6 +1173,29 @@ mod transaction_tests {
         )
         .unwrap();
         assert!(registrations.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn shortcut_transaction_registers_quick_ocr_changes() {
+        let registrations = Mutex::new(0_u8);
+        let config = config::AppConfig::default();
+        let previous = config.screenshot_config.clone();
+        let next = config::ScreenshotConfig {
+            quick_ocr_shortcut: "Control+Shift+2".into(),
+            ..previous.clone()
+        };
+        commit_shortcut_change_with(
+            &previous,
+            &next,
+            &config,
+            |_, _| {
+                *registrations.lock().unwrap() += 1;
+                Ok(())
+            },
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(*registrations.lock().unwrap(), 1);
     }
 
     #[test]

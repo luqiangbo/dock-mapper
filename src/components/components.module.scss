@@ -6,10 +6,10 @@ $compact-radius: 10px;
 .page {
   display: flex;
   width: 100%;
-  max-width: 1180px;
-  margin: 0 auto 10px;
+  min-width: 0;
+  margin: 0;
   flex-direction: column;
-  gap: $compact-gap;
+  gap: clamp(8px, 1vw, 12px);
 }
 
 .overviewPanel {
@@ -43,19 +43,6 @@ $compact-radius: 10px;
     background: currentColor;
     box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 14%, transparent);
   }
-}
-
-.dashboardMetrics {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
-  gap: 12px;
-}
-
-.dashboardCharts,
-.dashboardModules {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
 }
 
 .trendChart {
@@ -128,7 +115,7 @@ $compact-radius: 10px;
   background: var(--glass-surface) !important;
 
   :global(.ant-card-body) {
-    padding: 16px 18px;
+    padding: clamp(12px, 1.5vw, 18px);
   }
 }
 
@@ -182,6 +169,7 @@ $compact-radius: 10px;
 }
 
 .toolbar {
+  flex-wrap: wrap;
   padding: 8px;
   @include glass.control($compact-radius);
 }
@@ -215,9 +203,19 @@ $compact-radius: 10px;
 
 .widgetPreviewHeader {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 16px;
+
+  > div:first-child {
+    min-width: 0;
+    flex: 1 1 280px;
+  }
+
+  :global(.ant-tag) {
+    margin: 0;
+  }
 }
 
 .widgetPreview {
@@ -290,22 +288,22 @@ $compact-radius: 10px;
   }
 }
 
-.widgetOptionGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
 .widgetOptionCard {
-  display: flex;
+  display: grid;
   min-width: 0;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 12px;
+  min-height: 66px;
+  grid-template-columns: minmax(0, 1fr) 140px;
+  align-items: center;
+  gap: 10px;
   padding: 14px;
   border: 1px solid var(--glass-border);
   border-radius: 12px;
   background: var(--glass-control);
+
+  :global(.ant-select) {
+    width: 140px;
+    min-width: 140px;
+  }
 }
 
 .adminNotice {
@@ -378,6 +376,19 @@ $compact-radius: 10px;
   flex-direction: column;
 }
 
+.widgetSettingsGroup {
+  gap: 12px;
+}
+
+.settingsGridColumn {
+  display: flex;
+}
+
+.settingsGridCard {
+  width: 100%;
+  height: 100%;
+}
+
 .settingRow {
   min-height: 46px;
   padding: 6px 0;
@@ -419,14 +430,25 @@ $compact-radius: 10px;
 }
 
 .shortcutBinding {
+  width: 100%;
   flex: 0 0 auto;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 
   :global(.ant-tag) {
     min-width: 54px;
     margin: 0;
     text-align: center;
   }
+}
+
+.autoSaveFooter {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .shortcutStatus {
@@ -541,10 +563,6 @@ $compact-radius: 10px;
   }
 }
 
-.visualizerPage {
-  max-width: 980px;
-}
-
 .visualizerForm {
   display: block;
 
@@ -603,12 +621,6 @@ $compact-radius: 10px;
   }
 }
 
-.visualizerOptionGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
 .visualizerOption {
   min-height: 52px;
   justify-content: space-between;
@@ -621,12 +633,6 @@ $compact-radius: 10px;
   > div:first-child {
     min-width: 0;
   }
-}
-
-.visualizerMetricGrid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
 }
 
 .visualizerMetric {
@@ -663,12 +669,6 @@ $compact-radius: 10px;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
-}
-
-.formFieldGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 16px;
 }
 
 .centerState {
@@ -708,6 +708,17 @@ $compact-radius: 10px;
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.actionRow {
+  flex-wrap: wrap;
+}
+
+.responsiveCompact {
+  .settingRow {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
 }
 
 .historyPanel {
@@ -759,40 +770,34 @@ $compact-radius: 10px;
   white-space: nowrap;
 }
 
-.historyGrid {
-  display: grid;
-  gap: 12px;
-}
-
-.historyGridCompact {
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
-
-  .historyPreview {
-    height: 108px;
-  }
-}
-
-.historyGridStandard {
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-
-  .historyPreview {
-    height: 150px;
-  }
-}
-
-.historyGridLarge {
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-
-  .historyPreview {
-    height: 220px;
-  }
+.historyMasonry {
+  width: 100%;
 }
 
 .historyCard {
+  position: relative;
   min-width: 0;
   overflow: hidden;
   border-radius: 14px;
+  outline: none;
   @include glass.surface(var(--glass-surface), 14px);
+
+  &:focus-visible {
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
+
+  &:hover .historyActions,
+  &:focus-within .historyActions {
+    pointer-events: auto;
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  &:hover .historyMeta,
+  &:focus-within .historyMeta {
+    opacity: 0.68;
+    transform: translateY(0);
+  }
 }
 
 .historyPreview {
@@ -829,13 +834,67 @@ $compact-radius: 10px;
 }
 
 .historyMeta {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 1;
+  display: flex;
   min-width: 0;
-  padding: 10px 12px 4px;
+  flex-direction: column;
+  padding: 6px 9px;
+  pointer-events: none;
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.3;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--glass-surface) 86%, transparent),
+    transparent
+  );
+  opacity: 0;
+  transform: translateY(-6px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+
+  :global(.ant-typography),
+  .description {
+    margin: 0;
+    color: inherit;
+    font-size: inherit;
+  }
 }
 
 .historyActions {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
   justify-content: flex-end;
-  padding: 4px 8px 8px;
+  padding: 5px 8px;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--glass-surface) 88%, transparent);
+  backdrop-filter: blur(10px);
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+@media (hover: none) {
+  .historyMeta {
+    opacity: 0.68;
+    transform: none;
+  }
+
+  .historyActions {
+    position: static;
+    pointer-events: auto;
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .favoriteButton {
@@ -852,10 +911,6 @@ $compact-radius: 10px;
     flex-direction: column;
   }
 
-  .dashboardCharts,
-  .dashboardModules {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 680px) {
@@ -877,10 +932,6 @@ $compact-radius: 10px;
     align-items: flex-start;
   }
 
-  .widgetOptionGrid {
-    grid-template-columns: 1fr;
-  }
-
   .shortcutItem {
     align-items: stretch;
     flex-direction: column;
@@ -897,19 +948,10 @@ $compact-radius: 10px;
     flex-direction: column;
   }
 
-  .formFieldGrid {
-    grid-template-columns: 1fr;
-  }
-
   .visualizerHeader,
   .visualizerFooter {
     align-items: flex-start;
     flex-direction: column;
-  }
-
-  .visualizerOptionGrid,
-  .visualizerMetricGrid {
-    grid-template-columns: 1fr;
   }
 
   .visualizerHeaderActions,

@@ -3,6 +3,7 @@ import type { ScreenshotHistorySummary } from "../screenshots/screenshot/api";
 import {
   DEFAULT_SCREENSHOT_HISTORY_VIEW,
   parseScreenshotHistoryView,
+  responsiveHistoryColumnCount,
   selectScreenshotHistory,
 } from "./screenshotHistoryView";
 
@@ -44,9 +45,24 @@ describe("screenshot history view", () => {
   it("validates every stored preference and falls back after corruption", () => {
     expect(
       parseScreenshotHistoryView(
-        JSON.stringify({ sort: "oldest", filter: "invalid", density: "large" }),
+        JSON.stringify({ sort: "oldest", filter: "invalid", columns: 7 }),
       ),
-    ).toEqual({ sort: "oldest", filter: "all", density: "large" });
+    ).toEqual({ sort: "oldest", filter: "all", columns: 7 });
+    expect(parseScreenshotHistoryView(JSON.stringify({ columns: 0 }))).toEqual(
+      DEFAULT_SCREENSHOT_HISTORY_VIEW,
+    );
     expect(parseScreenshotHistoryView("not-json")).toEqual(DEFAULT_SCREENSHOT_HISTORY_VIEW);
+  });
+
+  it("migrates the previous density preference to a matching column count", () => {
+    expect(parseScreenshotHistoryView(JSON.stringify({ density: "compact" })).columns).toBe(4);
+    expect(parseScreenshotHistoryView(JSON.stringify({ density: "standard" })).columns).toBe(3);
+    expect(parseScreenshotHistoryView(JSON.stringify({ density: "large" })).columns).toBe(2);
+  });
+
+  it("limits visible masonry columns without changing the user's desktop preference", () => {
+    expect(responsiveHistoryColumnCount(8, {})).toBe(1);
+    expect(responsiveHistoryColumnCount(8, { sm: true })).toBe(2);
+    expect(responsiveHistoryColumnCount(8, { sm: true, lg: true })).toBe(8);
   });
 });

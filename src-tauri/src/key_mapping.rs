@@ -114,9 +114,7 @@ pub(crate) fn required_scancode_backup(value: Option<&str>) -> Result<Option<Vec
 }
 
 #[tauri::command]
-pub fn get_scancode_map_status(
-    state: State<'_, AppState>,
-) -> Result<ScancodeMapStatus, String> {
+pub fn get_scancode_map_status(state: State<'_, AppState>) -> Result<ScancodeMapStatus, String> {
     let config = state
         .config
         .lock()

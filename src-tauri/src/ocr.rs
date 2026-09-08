@@ -272,9 +272,9 @@ fn recognize_with_engine(engine: &mut OcrEngine, png: Vec<u8>) -> Result<OcrText
 
 enum OcrJob {
     Recognize {
-    generation: u64,
-    png: Vec<u8>,
-    reply: oneshot::Sender<Result<OcrTextResult, String>>,
+        generation: u64,
+        png: Vec<u8>,
+        reply: oneshot::Sender<Result<OcrTextResult, String>>,
     },
     Prepare,
 }

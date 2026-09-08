@@ -477,7 +477,7 @@ function ScreenshotOverlay(): React.JSX.Element {
   const [aspectRatio, setAspectRatio] = useState<AspectRatio | null>(null);
   const [qrContents, setQrContents] = useState<string[] | null>(null);
   const [activeOcrBlock, setActiveOcrBlock] = useState<OcrTextBlock | null>(null);
-  const [arrowStyle, setArrowStyle] = useState<ArrowStyle>("filled");
+  const [arrowStyle, setArrowStyle] = useState<ArrowStyle>("straight");
   const [viewportSize, setViewportSize] = useState<ToolbarSize>(() => ({
     width: window.innerWidth,
     height: window.innerHeight,

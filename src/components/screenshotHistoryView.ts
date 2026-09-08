@@ -4,23 +4,26 @@ export const SCREENSHOT_HISTORY_VIEW_KEY = "dock-mapper:screenshot-history-view"
 
 export type HistorySort = "newest" | "oldest" | "favorite";
 export type HistoryFilter = "all" | "favorite";
-export type HistoryDensity = "compact" | "standard" | "large";
 
 export interface ScreenshotHistoryView {
   sort: HistorySort;
   filter: HistoryFilter;
-  density: HistoryDensity;
+  columns: number;
 }
 
 export const DEFAULT_SCREENSHOT_HISTORY_VIEW: ScreenshotHistoryView = {
   sort: "newest",
   filter: "all",
-  density: "standard",
+  columns: 3,
 };
 
 const SORT_VALUES: readonly HistorySort[] = ["newest", "oldest", "favorite"];
 const FILTER_VALUES: readonly HistoryFilter[] = ["all", "favorite"];
-const DENSITY_VALUES: readonly HistoryDensity[] = ["compact", "standard", "large"];
+const LEGACY_DENSITY_COLUMNS: Record<string, number> = {
+  compact: 4,
+  standard: 3,
+  large: 2,
+};
 
 function isAllowed<T extends string>(value: unknown, allowed: readonly T[]): value is T {
   return typeof value === "string" && allowed.includes(value as T);
@@ -37,9 +40,14 @@ export function parseScreenshotHistoryView(value: string | null): ScreenshotHist
       filter: isAllowed(parsed.filter, FILTER_VALUES)
         ? parsed.filter
         : DEFAULT_SCREENSHOT_HISTORY_VIEW.filter,
-      density: isAllowed(parsed.density, DENSITY_VALUES)
-        ? parsed.density
-        : DEFAULT_SCREENSHOT_HISTORY_VIEW.density,
+      columns:
+        typeof parsed.columns === "number" &&
+        Number.isInteger(parsed.columns) &&
+        parsed.columns >= 1 &&
+        parsed.columns <= 10
+          ? parsed.columns
+          : LEGACY_DENSITY_COLUMNS[String(parsed.density)] ??
+            DEFAULT_SCREENSHOT_HISTORY_VIEW.columns,
     };
   } catch {
     return { ...DEFAULT_SCREENSHOT_HISTORY_VIEW };
@@ -76,4 +84,13 @@ export function selectScreenshotHistory(
       ? left.createdAtMs - right.createdAtMs
       : right.createdAtMs - left.createdAtMs;
   });
+}
+
+export function responsiveHistoryColumnCount(
+  selected: number,
+  screens: { sm?: boolean; lg?: boolean },
+): number {
+  const columns = Math.min(10, Math.max(1, Math.round(selected)));
+  if (screens.lg) return columns;
+  return screens.sm ? Math.min(2, columns) : 1;
 }

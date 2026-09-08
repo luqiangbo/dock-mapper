@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Button, Layout, Menu, Splitter, Tooltip, Typography } from "antd";
+import { Button, Grid, Layout, Menu, Splitter, Tooltip, Typography } from "antd";
 import {
   DashboardOutlined,
   CameraOutlined,
@@ -60,6 +60,8 @@ const PAGES: PageItem[] = [
 ];
 
 export default function App() {
+  const screens = Grid.useBreakpoint();
+  const compactNavigation = !screens.md;
   const [activePage, setActivePage] = useState<PageKey>("dashboard");
   const [screenshotTab, setScreenshotTab] = useState<ScreenshotTabKey>("history");
   const [siderWidth, setSiderWidth] = useState(loadSidebarWidth);
@@ -140,25 +142,27 @@ export default function App() {
       className={styles.shell}
       orientation="horizontal"
       onResize={(sizes) => {
-        if (typeof sizes[0] === "number") setSiderWidth(sizes[0]);
+        if (!compactNavigation && typeof sizes[0] === "number") setSiderWidth(sizes[0]);
       }}
     >
       <Splitter.Panel
-        className={styles.siderPanel}
-        size={siderWidth}
-        min={SIDEBAR_MIN_WIDTH}
-        max={SIDEBAR_MAX_WIDTH}
+        className={`${styles.siderPanel} ${compactNavigation ? styles.siderPanelCompact : ""}`}
+        size={compactNavigation ? 64 : siderWidth}
+        min={compactNavigation ? 64 : SIDEBAR_MIN_WIDTH}
+        max={compactNavigation ? 64 : SIDEBAR_MAX_WIDTH}
+        resizable={!compactNavigation}
       >
         <aside className={styles.sider}>
           <div className={styles.brand}>
             <span className={styles.brandMark} aria-hidden="true">
               <img src={appIcon} alt="" />
             </span>
-            <Text strong>DockMapper</Text>
+            {!compactNavigation && <Text strong>DockMapper</Text>}
           </div>
 
           <Menu
             selectedKeys={[activePage]}
+            inlineCollapsed={compactNavigation}
             onClick={({ key }) => setActivePage(key as PageKey)}
             items={PAGES.map((item) => ({
               key: item.key,
@@ -179,14 +183,14 @@ export default function App() {
             </div>
             <div className={styles.dragRegion} data-tauri-drag-region />
             <div className={styles.headerActions}>
-              <Tooltip title="打开 GitHub">
+              {screens.md && <Tooltip title="打开 GitHub">
                 <Button
                   aria-label="打开 GitHub"
                   icon={<GithubOutlined />}
                   type="text"
                   onClick={() => void openUrl(REPOSITORY_URL)}
                 />
-              </Tooltip>
+              </Tooltip>}
               <Tooltip title={resolved === "dark" ? "切换浅色" : "切换深色"}>
                 <Button
                   aria-label="切换主题"

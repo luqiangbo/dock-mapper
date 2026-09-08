@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   appendKeyVisualizerEntry,
   clampKeyVisualizerOpacity,
+  KEY_VISUALIZER_CHARACTER_EMOJIS,
   keyVisualizerEntryOpacity,
   keyVisualizerToggleLabel,
-  privacyCharacterToken,
+  randomCharacterEmoji,
   removeExpiredKeyVisualizerEntries,
 } from "./keyVisualizerEntries";
 
@@ -17,19 +18,29 @@ const input = (label: string, repeat: number, timestamp_ms: number) => ({
 });
 
 describe("按键文本最近列表", () => {
-  it("连续字符合并为一条并随机混入星号", () => {
-    let entries = appendKeyVisualizerEntry([], input("a", 1, 100), () => 0.9);
-    entries = appendKeyVisualizerEntry(entries, input("B", 1, 200), () => 0.15);
+  it("连续字符合并为一条随机 Emoji 且不暴露真实内容", () => {
+    let entries = appendKeyVisualizerEntry([], input("a", 1, 100), () => 0);
+    entries = appendKeyVisualizerEntry(entries, input("B", 1, 200), () => 0.99);
     expect(entries).toHaveLength(1);
-    expect(entries[0].label).toBe("aB*");
+    expect(entries[0].label).toBe("😀🎈");
+    expect(entries[0].label).not.toMatch(/[aB]/);
     expect(entries[0].repeat).toBe(1);
   });
 
-  it("字符脱敏以低频替换或追加星号并保留可见字母的大小写", () => {
-    expect(privacyCharacterToken("a", () => 0)).toBe("*");
-    expect(privacyCharacterToken("a", () => 0.15)).toBe("a*");
-    expect(privacyCharacterToken("a", () => 0.9)).toBe("a");
-    expect(privacyCharacterToken("A", () => 0.9)).toBe("A");
+  it("随机数映射到 Emoji 列表且处理边界值", () => {
+    expect(randomCharacterEmoji(() => -1)).toBe(KEY_VISUALIZER_CHARACTER_EMOJIS[0]);
+    expect(randomCharacterEmoji(() => 0)).toBe("😀");
+    expect(randomCharacterEmoji(() => 1)).toBe("🎈");
+  });
+
+  it("Emoji 合并按完整字符截断，不产生代理对乱码", () => {
+    let entries = appendKeyVisualizerEntry([], input("secret", 1, 100), () => 0);
+    for (let index = 0; index < 20; index += 1) {
+      entries = appendKeyVisualizerEntry(entries, input(String(index), 1, 200 + index), () => 0);
+    }
+    expect(Array.from(entries[0].label)).toHaveLength(14);
+    expect(entries[0].label).toBe("😀".repeat(14));
+    expect(entries[0].label).not.toContain("secret");
   });
 
   it("非连续条目限制为最近五条", () => {

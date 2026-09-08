@@ -5,8 +5,11 @@ import {
   App as AntApp,
   Button,
   Card,
+  Col,
   Form,
+  Grid,
   InputNumber,
+  Row,
   Spin,
   Switch,
   Tag,
@@ -42,7 +45,7 @@ const CONTENT_FIELDS: Array<{
   {
     name: "show_characters",
     label: "字符键",
-    description: "连续合并并低频混入 *，字母区分大小写",
+    description: "连续合并为随机 Emoji，不显示真实输入内容",
   },
   { name: "show_other", label: "其他按键", description: "Enter、方向键和功能键" },
   { name: "clicks", label: "鼠标点击", description: "以不同颜色标记左、中、右键" },
@@ -78,6 +81,7 @@ function statusDisplay(status: KeyVisualizerStatus | null, enabled: boolean) {
 }
 
 export default function KeyVisualizerSettings() {
+  const screens = Grid.useBreakpoint();
   const { notification } = AntApp.useApp();
   const [form] = Form.useForm<KeyVisualizerConfig>();
   const [saved, setSaved] = useState<KeyVisualizerConfig | null>(null);
@@ -260,7 +264,7 @@ export default function KeyVisualizerSettings() {
   const visibleError = error ?? status?.error ?? null;
 
   return (
-    <div className={`${styles.page} ${styles.visualizerPage}`}>
+    <div className={styles.page}>
       {visibleError && (
         <Alert
           type="error"
@@ -295,9 +299,9 @@ export default function KeyVisualizerSettings() {
               <Text strong>展示内容</Text>
               <Text type="secondary">至少选择一种内容</Text>
             </div>
-            <div className={styles.visualizerOptionGrid}>
+            <Row gutter={[screens.lg ? 8 : 6, 8]}>
               {CONTENT_FIELDS.map((item) => (
-                <div className={styles.visualizerOption} key={item.name}>
+                <Col xs={24} lg={12} key={item.name}><div className={styles.visualizerOption}>
                   <div>
                     <Text strong>{item.label}</Text>
                     <span className={styles.description}>{item.description}</span>
@@ -305,9 +309,9 @@ export default function KeyVisualizerSettings() {
                   <Form.Item name={item.name} valuePropName="checked">
                     <Switch />
                   </Form.Item>
-                </div>
+                </div></Col>
               ))}
-            </div>
+            </Row>
           </section>
 
           <section className={styles.visualizerSection}>
@@ -315,8 +319,8 @@ export default function KeyVisualizerSettings() {
               <Text strong>显示样式</Text>
               <Text type="secondary">修改后自动同步到悬浮窗</Text>
             </div>
-            <div className={styles.visualizerMetricGrid}>
-              <label className={styles.visualizerMetric}>
+            <Row gutter={[8, 8]}>
+              <Col xs={24} sm={12} lg={8}><label className={styles.visualizerMetric}>
                 <span>字号</span>
                 <Form.Item
                   name="font_size"
@@ -324,8 +328,8 @@ export default function KeyVisualizerSettings() {
                 >
                   <InputNumber min={16} max={48} suffix="px" />
                 </Form.Item>
-              </label>
-              <label className={styles.visualizerMetric}>
+              </label></Col>
+              <Col xs={24} sm={12} lg={8}><label className={styles.visualizerMetric}>
                 <span>整体缩放</span>
                 <Form.Item
                   name="scale_percent"
@@ -333,8 +337,8 @@ export default function KeyVisualizerSettings() {
                 >
                   <InputNumber min={75} max={200} step={5} suffix="%" />
                 </Form.Item>
-              </label>
-              <label className={styles.visualizerMetric}>
+              </label></Col>
+              <Col xs={24} sm={12} lg={8}><label className={styles.visualizerMetric}>
                 <span>文本透明度</span>
                 <Form.Item
                   name="text_opacity"
@@ -342,8 +346,8 @@ export default function KeyVisualizerSettings() {
                 >
                   <InputNumber min={20} max={100} step={5} suffix="%" />
                 </Form.Item>
-              </label>
-            </div>
+              </label></Col>
+            </Row>
           </section>
 
           <div className={styles.visualizerFooter}>

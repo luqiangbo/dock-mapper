@@ -3,9 +3,7 @@ use windows::{
     core::BOOL,
     Win32::{
         Foundation::{HWND, LPARAM, RECT},
-        Graphics::Dwm::{
-            DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS,
-        },
+        Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS},
         UI::WindowsAndMessaging::{
             EnumWindows, GetWindowLongPtrW, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
             GWL_EXSTYLE, WS_EX_TOOLWINDOW,
@@ -153,7 +151,12 @@ mod tests {
     fn candidate_clips_negative_desktop_coordinates_and_converts_dpi() {
         let candidate = candidate_from_rect(
             "1".into(),
-            RECT { left: -2100, top: -20, right: -900, bottom: 700 },
+            RECT {
+                left: -2100,
+                top: -20,
+                right: -900,
+                bottom: 700,
+            },
             -1920,
             0,
             1920,
@@ -173,7 +176,12 @@ mod tests {
     fn candidate_rejects_tiny_or_off_monitor_rectangles() {
         assert!(candidate_from_rect(
             "tiny".into(),
-            RECT { left: 10, top: 10, right: 20, bottom: 20 },
+            RECT {
+                left: 10,
+                top: 10,
+                right: 20,
+                bottom: 20
+            },
             0,
             0,
             1920,
@@ -184,7 +192,12 @@ mod tests {
         .is_none());
         assert!(candidate_from_rect(
             "offscreen".into(),
-            RECT { left: 2000, top: 10, right: 2200, bottom: 300 },
+            RECT {
+                left: 2000,
+                top: 10,
+                right: 2200,
+                bottom: 300
+            },
             0,
             0,
             1920,

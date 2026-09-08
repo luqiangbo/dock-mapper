@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, App as AntApp, Button, Form, Modal, Select, Switch, Table, Tag, Typography } from "antd";
+import { Alert, App as AntApp, Button, Form, Grid, Modal, Select, Switch, Table, Tag, Typography } from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import type { KeyCode, KeyMapping, ScancodeMapStatus, SupportedKey } from "../types";
 import { errorMessage, keyMappingApi } from "../api/commands";
@@ -8,6 +8,7 @@ import styles from "./components.module.scss";
 const { Text } = Typography;
 
 export default function KeyMapper() {
+  const screens = Grid.useBreakpoint();
   const [mappings, setMappings] = useState<KeyMapping[]>([]);
   const [supportedKeys, setSupportedKeys] = useState<SupportedKey[]>([]);
   const [mapStatus, setMapStatus] = useState<ScancodeMapStatus | null>(null);
@@ -247,6 +248,8 @@ export default function KeyMapper() {
         columns={columns}
         dataSource={mappings}
         pagination={false}
+        size={screens.lg ? "middle" : "small"}
+        scroll={{ x: 620 }}
         loading={saving}
         locale={{ emptyText: <Text type="secondary">暂无映射规则</Text> }}
       />

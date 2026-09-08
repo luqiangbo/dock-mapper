@@ -80,8 +80,7 @@ where
     F: FnOnce(&str) -> Result<u32, String>,
 {
     let request_dir = app_data_dir.join(REQUEST_DIRECTORY);
-    fs::create_dir_all(&request_dir)
-        .map_err(|error| format!("创建管理员请求目录失败：{error}"))?;
+    fs::create_dir_all(&request_dir).map_err(|error| format!("创建管理员请求目录失败：{error}"))?;
     let id = next_request_id();
     let request_path = request_path(&request_dir, &id)?;
     let response_path = response_path(&request_dir, &id)?;
@@ -148,8 +147,7 @@ fn execute_action(
     match action {
         AdminAction::Apply { confirm_takeover } => {
             let desired = crate::scancode_mapper::encode(&config.key_mappings)?;
-            let status =
-                crate::key_mapping::scancode_map_status(&config, current.as_deref())?;
+            let status = crate::key_mapping::scancode_map_status(&config, current.as_deref())?;
             if status.state == crate::ScancodeMapState::SystemChanged && !confirm_takeover {
                 return Err("系统已存在其他工具写入的 Scancode Map；请确认备份后接管".into());
             }
@@ -349,7 +347,10 @@ mod tests {
         let root = temporary_root("path");
         assert!(request_path(&root, "../config").is_err());
         let id = next_request_id();
-        assert_eq!(request_path(&root, &id).unwrap().parent(), Some(root.as_path()));
+        assert_eq!(
+            request_path(&root, &id).unwrap().parent(),
+            Some(root.as_path())
+        );
     }
 
     #[test]

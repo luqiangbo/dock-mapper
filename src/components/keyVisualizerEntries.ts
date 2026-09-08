@@ -7,7 +7,26 @@ export interface KeyVisualizerEntry extends KeyVisualizerInput {
 export const KEY_VISUALIZER_LIFETIME_MS = 3_000;
 export const KEY_VISUALIZER_CHARACTER_MERGE_MS = 1_500;
 const KEY_VISUALIZER_FADE_MS = 500;
-const MAX_CHARACTER_DISPLAY_LENGTH = 28;
+const MAX_CHARACTER_DISPLAY_LENGTH = 14;
+
+export const KEY_VISUALIZER_CHARACTER_EMOJIS = [
+  "😀",
+  "😎",
+  "🥳",
+  "🤖",
+  "👻",
+  "🐱",
+  "🐶",
+  "🦊",
+  "🐼",
+  "🍉",
+  "🍕",
+  "🚀",
+  "🌈",
+  "⭐",
+  "🔥",
+  "🎈",
+] as const;
 
 export function clampKeyVisualizerOpacity(value: number): number {
   return Math.min(100, Math.max(20, Math.round(value)));
@@ -47,9 +66,9 @@ export function appendKeyVisualizerEntry(
         ...latest,
         ...input,
         id: latest.id,
-        label: `${latest.label}${privacyCharacterToken(input.label, random)}`.slice(
-          -MAX_CHARACTER_DISPLAY_LENGTH,
-        ),
+        label: Array.from(`${latest.label}${randomCharacterEmoji(random)}`)
+          .slice(-MAX_CHARACTER_DISPLAY_LENGTH)
+          .join(""),
         repeat: 1,
       },
       ...active.slice(1),
@@ -61,18 +80,24 @@ export function appendKeyVisualizerEntry(
   return [
     {
       ...input,
-      label:
-        input.category === "character" ? privacyCharacterToken(input.label, random) : input.label,
-      id: `${input.timestamp_ms}-${input.label}-${input.category}`,
+      label: input.category === "character" ? randomCharacterEmoji(random) : input.label,
+      id:
+        input.category === "character"
+          ? `${input.timestamp_ms}-${input.generation}-character`
+          : `${input.timestamp_ms}-${input.label}-${input.category}`,
     },
     ...active,
   ].slice(0, 5);
 }
 
-export function privacyCharacterToken(label: string, random: () => number = Math.random): string {
-  const sample = random();
-  if (sample < 0.12) return "*";
-  return sample < 0.2 ? `${label}*` : label;
+export function randomCharacterEmoji(random: () => number = Math.random): string {
+  const randomValue = random();
+  const sample = Number.isFinite(randomValue)
+    ? Math.min(1 - Number.EPSILON, Math.max(0, randomValue))
+    : 0;
+  return KEY_VISUALIZER_CHARACTER_EMOJIS[
+    Math.floor(sample * KEY_VISUALIZER_CHARACTER_EMOJIS.length)
+  ];
 }
 
 export function removeExpiredKeyVisualizerEntries(
