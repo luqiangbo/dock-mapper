@@ -1,5 +1,14 @@
-import type { ArrowStyle, TextStyle } from "./annotationTypes";
-import { calculateArrowGeometry, drawArrow } from "./arrowGeometry";
+import type {
+  ArrowEffect,
+  ArrowStyle,
+  FrameEffect,
+  FrameShape,
+  GradientStop,
+  TextStyle,
+} from "./annotationTypes";
+import { calculateArrowGeometry, drawArrow, hasVisibleArrowLength } from "./arrowGeometry";
+import { arrowEffectPadding } from "./arrowEffects";
+import { drawStyledFrame, shapeEffectPadding } from "./shapeEffects";
 
 export interface ScenePoint {
   x: number;
@@ -8,9 +17,12 @@ export interface ScenePoint {
 
 export interface RasterAnnotationStyle {
   color: string;
+  gradientStops?: GradientStop[];
   strokeWidth: number;
   fillOpacity: number;
   arrowStyle: ArrowStyle;
+  arrowEffect?: ArrowEffect;
+  shapeEffect?: FrameEffect;
   arrowHeadSize: number;
   opacity: number;
   mosaicBlock: number;
@@ -34,12 +46,34 @@ export interface SceneBounds {
   height: number;
 }
 
+export function isFrameAnnotationKind(kind: string | null): kind is FrameShape {
+  return kind === "rect" || kind === "ellipse";
+}
+
+export function convertFrameAnnotation(
+  annotation: RasterAnnotation,
+  kind: FrameShape,
+): RasterAnnotation {
+  return isFrameAnnotationKind(annotation.kind) && annotation.kind !== kind
+    ? { ...annotation, kind }
+    : annotation;
+}
+
 function annotationPadding(annotation: RasterAnnotation): number {
-  const labelPadding = annotation.kind === "arrow" && annotation.style.arrowStyle === "label"
-    ? (annotation.style.arrowLabelStyle?.fontSize ?? 0) / 2 + 6
-    : 0;
-  const texturePadding = annotation.kind === "arrow" ? annotation.style.strokeWidth * 1.5 : 0;
-  return Math.max(4, annotation.style.strokeWidth / 2, labelPadding, texturePadding);
+  const labelPadding =
+    annotation.kind === "arrow" && annotation.style.arrowStyle === "label"
+      ? (annotation.style.arrowLabelStyle?.fontSize ?? 0) / 2 + 6
+      : 0;
+  const texturePadding =
+    annotation.kind === "arrow"
+      ? arrowEffectPadding(annotation.style.arrowEffect, annotation.style.strokeWidth)
+      : annotation.kind === "rect" || annotation.kind === "ellipse"
+        ? shapeEffectPadding(annotation.style.shapeEffect ?? "classic", annotation.style.strokeWidth)
+        : 0;
+  // Arrow geometry already spans the full painted area, so only the brush
+  // bleed is added; every other kind is a centred stroke.
+  const strokePadding = annotation.kind === "arrow" ? 0 : annotation.style.strokeWidth / 2;
+  return Math.max(4, strokePadding, labelPadding, texturePadding);
 }
 
 export function annotationGeometryBounds(annotation: RasterAnnotation): SceneBounds {
@@ -49,8 +83,6 @@ export function annotationGeometryBounds(annotation: RasterAnnotation): SceneBou
       start: annotation.points[0],
       end: lastPoint,
       lineWidth: annotation.style.strokeWidth,
-      canvasScale: 1,
-      headScale: annotation.style.arrowHeadSize,
       style: annotation.style.arrowStyle,
     });
     if (geometry) return geometry.bounds;
@@ -75,6 +107,7 @@ export function cloneRasterAnnotations(items: RasterAnnotation[]): RasterAnnotat
     points: item.points.map((point) => ({ ...point })),
     style: {
       ...item.style,
+      gradientStops: item.style.gradientStops?.map((stop) => ({ ...stop })),
       arrowLabelStyle: item.style.arrowLabelStyle ? { ...item.style.arrowLabelStyle } : undefined,
     },
   }));
@@ -148,6 +181,57 @@ export function resizeAnnotation(
   nextBounds: SceneBounds,
 ): RasterAnnotation {
   const current = annotationGeometryBounds(annotation);
+  if (annotation.kind === "arrow" && annotation.style.arrowStyle !== "label") {
+    // Presets resize uniformly: the endpoints and the arrow width scale by the
+    // same factor, so drawing, the selection box and the cache stay in step.
+    // The brush bleed is not proportional, so the factor is fitted against the
+    // real bounds and only a factor that stays inside the target is used.
+    const previous = annotationBounds(annotation);
+    const scaled = (scale: number): RasterAnnotation => ({
+      ...annotation,
+      style: { ...annotation.style, strokeWidth: annotation.style.strokeWidth * scale },
+      points: annotation.points.map((point) => ({ x: point.x * scale, y: point.y * scale })),
+    });
+    // The painted bounds grow monotonically with the factor, so the largest
+    // factor that still fits is found by bracketing and bisection.
+    const fits = (scale: number): boolean => {
+      const candidate = annotationBounds(scaled(scale));
+      return (
+        candidate.width <= nextBounds.width + 1e-9 && candidate.height <= nextBounds.height + 1e-9
+      );
+    };
+    let low = 0.01;
+    let high = Math.max(
+      0.02,
+      Math.min(nextBounds.width / previous.width, nextBounds.height / previous.height),
+    );
+    for (let pass = 0; pass < 10 && fits(high); pass += 1) {
+      low = high;
+      high *= 2;
+    }
+    for (let pass = 0; pass < 18; pass += 1) {
+      const middle = (low + high) / 2;
+      if (fits(middle)) low = middle;
+      else high = middle;
+    }
+    const resized = scaled(low);
+    const bounds = annotationBounds(resized);
+    const x =
+      Math.abs(nextBounds.x - previous.x) > 0.01
+        ? nextBounds.x + nextBounds.width - bounds.width
+        : nextBounds.x;
+    const y =
+      Math.abs(nextBounds.y - previous.y) > 0.01
+        ? nextBounds.y + nextBounds.height - bounds.height
+        : nextBounds.y;
+    return {
+      ...resized,
+      points: resized.points.map((point) => ({
+        x: point.x + x - bounds.x,
+        y: point.y + y - bounds.y,
+      })),
+    };
+  }
   const padding = annotationPadding(annotation);
   const targetWidth = Math.max(1, nextBounds.width - padding * 2);
   const targetHeight = Math.max(1, nextBounds.height - padding * 2);
@@ -158,19 +242,34 @@ export function resizeAnnotation(
   const labelScale = Math.max(0.1, (Math.abs(scaleX) + Math.abs(scaleY)) / 2);
   return {
     ...annotation,
-    style: annotation.style.arrowLabelStyle ? {
-      ...annotation.style,
-      arrowLabelStyle: {
-        ...annotation.style.arrowLabelStyle,
-        fontSize: Math.max(8, Math.round(annotation.style.arrowLabelStyle.fontSize * labelScale)),
-        strokeWidth: annotation.style.arrowLabelStyle.strokeWidth * labelScale,
-      },
-    } : annotation.style,
+    style: annotation.style.arrowLabelStyle
+      ? {
+          ...annotation.style,
+          arrowLabelStyle: {
+            ...annotation.style.arrowLabelStyle,
+            fontSize: Math.max(
+              8,
+              Math.round(annotation.style.arrowLabelStyle.fontSize * labelScale),
+            ),
+            strokeWidth: annotation.style.arrowLabelStyle.strokeWidth * labelScale,
+          },
+        }
+      : annotation.style,
     points: annotation.points.map((point) => ({
       x: targetX + (point.x - current.x) * scaleX,
       y: targetY + (point.y - current.y) * scaleY,
     })),
   };
+}
+
+/** A drag that produces no readable shape must not create an object. */
+export function isPaintableAnnotation(annotation: RasterAnnotation): boolean {
+  const first = annotation.points[0];
+  const last = annotation.points[annotation.points.length - 1] ?? first;
+  if (!first || !last) return false;
+  if (annotation.kind === "arrow" && annotation.style.arrowStyle !== "label")
+    return hasVisibleArrowLength(first, last);
+  return true;
 }
 
 export function hitTestAnnotation(
@@ -257,32 +356,44 @@ export function drawRasterAnnotation(
     return;
   }
   context.save();
-  context.globalAlpha = 1;
-  context.strokeStyle = style.color;
-  context.fillStyle = style.color;
-  context.lineWidth = style.strokeWidth;
-  context.lineCap = "round";
-  context.lineJoin = "round";
-  if (annotation.kind === "rect") {
-    if (style.fillOpacity) {
-      context.globalAlpha = style.fillOpacity;
-      context.fillRect(first.x, first.y, last.x - first.x, last.y - first.y);
-      context.globalAlpha = 1;
+  try {
+    context.globalAlpha = 1;
+    context.strokeStyle = style.color;
+    context.fillStyle = style.color;
+    context.lineWidth = style.strokeWidth;
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    if (annotation.kind === "rect" || annotation.kind === "ellipse") {
+      drawStyledFrame(
+        context,
+        annotation.kind,
+        { x, y, width, height },
+        style.color,
+        style.strokeWidth,
+        style.fillOpacity,
+        style.shapeEffect ?? "classic",
+        canvasScale,
+        annotation.id,
+        style.gradientStops,
+      );
+    } else if (annotation.kind === "arrow") {
+      drawArrow(context, {
+        start: first,
+        end: last,
+        style: style.arrowStyle,
+        lineWidth: style.strokeWidth,
+        canvasScale,
+        color: style.color,
+        effect: style.arrowEffect,
+        gradientStops: style.gradientStops,
+        textureSeed: annotation.id,
+        label: style.arrowLabel,
+        labelStyle: style.arrowLabelStyle,
+      });
     }
-    context.strokeRect(first.x, first.y, last.x - first.x, last.y - first.y);
-  } else if (annotation.kind === "ellipse") {
-    context.beginPath();
-    context.ellipse(x + width / 2, y + height / 2, width / 2, height / 2, 0, 0, Math.PI * 2);
-    if (style.fillOpacity) {
-      context.globalAlpha = style.fillOpacity;
-      context.fill();
-      context.globalAlpha = 1;
-    }
-    context.stroke();
-  } else if (annotation.kind === "arrow") {
-    drawArrow(context, first, last, style.arrowStyle, style.arrowHeadSize, canvasScale, style.arrowLabel, style.arrowLabelStyle, annotation.id);
+  } finally {
+    context.restore();
   }
-  context.restore();
 }
 
 export function renderRasterScene(
@@ -292,12 +403,17 @@ export function renderRasterScene(
   canvasScale: number,
 ): void {
   context.save();
-  context.globalAlpha = 1;
-  context.globalCompositeOperation = "source-over";
-  context.clearRect(0, 0, context.canvas.width, context.canvas.height);
-  context.drawImage(base, 0, 0);
-  annotations.forEach((annotation) => drawRasterAnnotation(context, annotation, canvasScale, base));
-  context.restore();
+  try {
+    context.globalAlpha = 1;
+    context.globalCompositeOperation = "source-over";
+    context.clearRect(0, 0, context.canvas.width, context.canvas.height);
+    context.drawImage(base, 0, 0);
+    annotations.forEach((annotation) =>
+      drawRasterAnnotation(context, annotation, canvasScale, base),
+    );
+  } finally {
+    context.restore();
+  }
 }
 
 export function renderRasterOverlay(
@@ -307,9 +423,14 @@ export function renderRasterOverlay(
   canvasScale: number,
 ): void {
   context.save();
-  context.globalAlpha = 1;
-  context.globalCompositeOperation = "source-over";
-  context.clearRect(0, 0, context.canvas.width, context.canvas.height);
-  annotations.forEach((annotation) => drawRasterAnnotation(context, annotation, canvasScale, base));
-  context.restore();
+  try {
+    context.globalAlpha = 1;
+    context.globalCompositeOperation = "source-over";
+    context.clearRect(0, 0, context.canvas.width, context.canvas.height);
+    annotations.forEach((annotation) =>
+      drawRasterAnnotation(context, annotation, canvasScale, base),
+    );
+  } finally {
+    context.restore();
+  }
 }

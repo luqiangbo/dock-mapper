@@ -2,7 +2,6 @@ import { Divider, Dropdown, type MenuProps } from "antd";
 import {
   ArrowUpRight,
   Check,
-  Circle,
   Grid3X3,
   Highlighter,
   ListOrdered,
@@ -22,6 +21,7 @@ import {
 import { forwardRef } from "react";
 import { useI18n } from "../i18n";
 import TooltipButton from "./TooltipButton";
+import type { FrameShape } from "./annotationTypes";
 
 export type AnnotTool =
   | "rect"
@@ -47,6 +47,7 @@ export const STROKE_COLORS = [
 
 interface AnnotationToolbarProps {
   tool: AnnotTool;
+  shapeKind: FrameShape;
   canUndo: boolean;
   canRedo: boolean;
   compact: boolean;
@@ -71,6 +72,7 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
   function AnnotationToolbar(
     {
       tool,
+      shapeKind,
       canUndo,
       canRedo,
       compact,
@@ -95,6 +97,7 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
     const { t } = useI18n();
     const locked = Boolean(toolsDisabled);
     const toggle = (next: Exclude<AnnotTool, null>) => onToolChange(tool === next ? null : next);
+    const frameActive = tool === "rect" || tool === "ellipse";
     const iconProps = { size: 19, strokeWidth: 2.45, "aria-hidden": true };
     const overflowActions = { ocr: onOcr, qr: onQr, save: onSave, pin: onPin } as const;
     const overflowItems: MenuProps["items"] = [
@@ -135,20 +138,12 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
         <div className="wx-toolbar__row">
           <div className="wx-toolbar__group">
             <TooltipButton
-              label={t.toolbar.rectangle}
-              active={tool === "rect"}
+              label="框选标注"
+              active={frameActive}
               disabled={locked}
-              onClick={() => toggle("rect")}
+              onClick={() => onToolChange(frameActive ? null : shapeKind)}
             >
               <Square {...iconProps} />
-            </TooltipButton>
-            <TooltipButton
-              label={t.toolbar.ellipse}
-              active={tool === "ellipse"}
-              disabled={locked}
-              onClick={() => toggle("ellipse")}
-            >
-              <Circle {...iconProps} />
             </TooltipButton>
             <TooltipButton
               label={t.toolbar.arrow}

@@ -10,12 +10,27 @@ import {
 import type { ColorPaletteConfig, ScreenshotConfig } from "../../../types";
 import { STROKE_COLORS, type AnnotTool } from "./AnnotationToolbar";
 import {
-  ARROW_STYLE_OPTIONS,
+  DEFAULT_ARROW_EFFECT,
+  DEFAULT_FRAME_EFFECT,
+  FRAME_EFFECT_OPTIONS,
+  FRAME_SHAPE_OPTIONS,
+  normalizeArrowStyle,
+  normalizeArrowWidth,
+  type ArrowEffect,
   type ArrowStyle,
+  type FrameEffect,
+  type FrameShape,
+  type GradientStop,
   type TextStyle,
   type ToolSettings,
 } from "./annotationTypes";
+import {
+  ARROW_EFFECT_CHOICES,
+  ARROW_SHAPE_CHOICES,
+  ARROW_WIDTH_CHOICES,
+} from "./ArrowOptionThumbs";
 import { normalizeHexColor, selectNumber } from "./toolOptionValues";
+import { normalizeGradientStops } from "./annotationPaint";
 
 interface Props {
   tool: Exclude<AnnotTool, null>;
@@ -66,36 +81,53 @@ function Color({
   palette,
   quickColors = STROKE_COLORS,
   presetLabel = "快捷色",
+  gradientStops,
+  allowGradient = false,
 }: {
   label: string;
   value: string;
   name: string;
-  change: (value: string) => void;
+  change: (value: string, gradientStops?: GradientStop[] | null) => void;
   popup: (key: string, open: boolean) => void;
   palette?: ColorPaletteConfig;
   quickColors?: readonly string[];
   presetLabel?: string;
+  gradientStops?: GradientStop[] | null;
+  allowGradient?: boolean;
 }) {
   const presets = [
     { label: presetLabel, colors: [...quickColors] },
     ...(palette?.favorites.length
       ? [{ label: "收藏", colors: palette.favorites.slice(0, 5) }]
       : []),
-    ...(palette?.recent.length
-      ? [{ label: "最近吸取", colors: palette.recent.slice(0, 5) }]
-      : []),
+    ...(palette?.recent.length ? [{ label: "最近吸取", colors: palette.recent.slice(0, 5) }] : []),
   ];
   return (
     <Group label={label}>
       <ColorPicker
         size="small"
-        value={value}
+        mode={allowGradient ? ["single", "gradient"] : "single"}
+        value={
+          allowGradient && gradientStops?.length
+            ? gradientStops.map((stop) => ({ color: stop.color, percent: stop.offset * 100 }))
+            : value
+        }
         disabledAlpha
         disabledFormat
         presets={presets}
         placement="bottom"
         onOpenChange={(open) => popup(name, open)}
-        onChange={(color) => change(normalizeHexColor(color.toHexString()))}
+        onChange={(color) => {
+          if (allowGradient && color.isGradient()) {
+            const stops = normalizeGradientStops(
+              color.getColors().map((stop) => ({
+                offset: Math.max(0, Math.min(1, stop.percent / 100)),
+                color: normalizeHexColor(stop.color.toHexString()),
+              })),
+            );
+            change(stops?.[0]?.color ?? value, stops ?? null);
+          } else change(normalizeHexColor(color.toHexString()), null);
+        }}
       />
     </Group>
   );
@@ -107,6 +139,7 @@ function Choice({
   name,
   change,
   popup,
+  compactWidth,
 }: {
   label: string;
   value: string | number;
@@ -114,39 +147,21 @@ function Choice({
   name: string;
   change: (value: string | number) => void;
   popup: (key: string, open: boolean) => void;
+  compactWidth?: number;
 }) {
   return (
     <Group label={label}>
       <Select
         size="small"
+        aria-label={label}
         value={value}
         options={options}
+        style={compactWidth ? { width: compactWidth } : undefined}
         popupMatchSelectWidth={false}
         onOpenChange={(open) => popup(name, open)}
         onChange={change}
       />
     </Group>
-  );
-}
-
-function ArrowStylePreview({ style, label }: { style: ArrowStyle; label: string }): React.JSX.Element {
-  const paths: Record<string, string> = {
-    loop: "M4 11C13 1 21 13 15 8C10 4 20 1 34 6M30 2l6 4-6 4",
-    sweep: "M3 12C15 13 20 2 36 6M31 2l6 4-6 4",
-    straight: "M3 11L36 4M31 1l6 3-4 6",
-    curve: "M3 4C15 15 28 12 37 4M31 3l6 1-2 6",
-    block: "M3 10L27 6l-1-4 12 3-9 8-1-4-24 5z",
-    zigzag: "M3 11l9-4-3-3 10 1-2-3 13 1-2-3 10 1-5 6",
-  };
-  const path = paths[style] ?? paths.straight;
-  return (
-    <span className="arrow-style-option">
-      <svg viewBox="0 0 44 14" aria-hidden="true">
-        <path className="is-outline" d={path} opacity="0.42" transform="translate(.5 -.4)" />
-        <path className="is-outline" d={path} />
-      </svg>
-      <span>{label}</span>
-    </span>
   );
 }
 
@@ -232,11 +247,19 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
       label="颜色"
       value={settings.strokeColor}
       name={`${tool}-color`}
-      change={(strokeColor) => onChange({ strokeColor })}
+      change={(strokeColor, gradientStops) =>
+        onChange(
+          tool === "arrow" || tool === "rect" || tool === "ellipse"
+            ? { strokeColor, gradientStops }
+            : { strokeColor },
+        )
+      }
       popup={popup}
       palette={palette}
       quickColors={tool === "arrow" ? ARROW_CRAYON_COLORS : PRESETS[0].colors}
-      presetLabel={tool === "arrow" ? "蜡笔色" : "快捷色"}
+      presetLabel={tool === "arrow" ? "推荐色" : "快捷色"}
+      gradientStops={settings.gradientStops}
+      allowGradient={tool === "arrow" || tool === "rect" || tool === "ellipse"}
     />
   );
   const width = (
@@ -262,8 +285,26 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
     >
       {(tool === "rect" || tool === "ellipse") && (
         <>
+          <Choice
+            label="形状"
+            value={settings.shapeKind}
+            options={[...FRAME_SHAPE_OPTIONS]}
+            name="frame-shape"
+            compactWidth={72}
+            change={(value) => onChange({ shapeKind: value as FrameShape })}
+            popup={popup}
+          />
           {color}
           {width}
+          <Choice
+            label="效果"
+            value={settings.shapeEffect ?? DEFAULT_FRAME_EFFECT}
+            options={[...FRAME_EFFECT_OPTIONS]}
+            name="frame-effect"
+            compactWidth={96}
+            change={(value) => onChange({ shapeEffect: value as FrameEffect })}
+            popup={popup}
+          />
           <Choice
             label="填充"
             value={settings.fillOpacity}
@@ -277,28 +318,31 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
       {tool === "arrow" && (
         <>
           {color}
-          {width}
           <Choice
-            label="样式"
-            value={settings.arrowStyle}
-            options={ARROW_STYLE_OPTIONS.map((option) => ({
-              ...option,
-              label: <ArrowStylePreview style={option.value} label={option.label} />,
-            }))}
+            label="形状"
+            value={normalizeArrowStyle(settings.arrowStyle)}
+            options={ARROW_SHAPE_CHOICES}
             name="arrow-style"
+            compactWidth={116}
             change={(value) => onChange({ arrowStyle: value as ArrowStyle })}
             popup={popup}
           />
           <Choice
-            label="箭头"
-            value={settings.arrowHeadSize}
-            options={[
-              { value: 0.8, label: "小" },
-              { value: 1, label: "中" },
-              { value: 1.25, label: "大" },
-            ]}
-            name="arrow-size"
-            change={(value) => onChange({ arrowHeadSize: selectNumber(value) })}
+            label="效果"
+            value={settings.arrowEffect ?? DEFAULT_ARROW_EFFECT}
+            options={ARROW_EFFECT_CHOICES}
+            name="arrow-effect"
+            compactWidth={116}
+            change={(value) => onChange({ arrowEffect: value as ArrowEffect })}
+            popup={popup}
+          />
+          <Choice
+            label="粗细"
+            value={normalizeArrowWidth(settings.arrowWidth)}
+            options={ARROW_WIDTH_CHOICES}
+            name="arrow-width"
+            compactWidth={104}
+            change={(value) => onChange({ arrowWidth: selectNumber(value) })}
             popup={popup}
           />
         </>
@@ -433,7 +477,9 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             value={settings.pickerFormat}
             options={FORMATS}
             name="picker-format"
-            change={(value) => onChange({ pickerFormat: value as ScreenshotConfig["color_copy_format"] })}
+            change={(value) =>
+              onChange({ pickerFormat: value as ScreenshotConfig["color_copy_format"] })
+            }
             popup={popup}
           />
           <PaletteGroup

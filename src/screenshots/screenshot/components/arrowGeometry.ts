@@ -1,266 +1,216 @@
-import type { ArrowStyle, TextStyle } from "./annotationTypes";
+import {
+  normalizeArrowEffect,
+  type ArrowEffect,
+  type ArrowStyle,
+  type GradientStop,
+  type TextStyle,
+} from "./annotationTypes";
+import {
+  arrowDragLength,
+  calculateArrowGeometry,
+  hasVisibleArrowLength,
+  type ArrowGeometry,
+  type ArrowPoint,
+} from "./arrowShapes";
+import { arrowSeed } from "./crayonBrush";
+import { arrowEffectOpacity, arrowEffectPadding, paintArrowEffect } from "./arrowEffects";
+import { paintCacheKey } from "./annotationPaint";
 
-export interface ArrowPoint {
+export {
+  arrowContourPath,
+  arrowOutlinePreview,
+  calculateArrowGeometry,
+  hasVisibleArrowLength,
+  MIN_ARROW_LENGTH,
+} from "./arrowShapes";
+export type { ArrowGeometry, ArrowHeadGeometry, ArrowPoint } from "./arrowShapes";
+export { arrowSeed } from "./crayonBrush";
+
+interface CachedArrow {
+  key: string;
+  bitmap: HTMLCanvasElement;
   x: number;
   y: number;
+  resolution: number;
+}
+const cache = new Map<string | number, CachedArrow>();
+const geometryCache = new Map<string, ArrowGeometry>();
+const MAX_CACHED_ARROWS = 48;
+const MAX_CACHED_GEOMETRIES = 96;
+const MAX_BITMAP_PIXELS = 4_000_000;
+const MAX_TOTAL_BITMAP_PIXELS = 12_000_000;
+let bitmapPixels = 0;
+
+export function clearArrowRenderCache(): void {
+  cache.clear();
+  geometryCache.clear();
+  bitmapPixels = 0;
+}
+function forget(id: string | number): void {
+  const item = cache.get(id);
+  if (item) bitmapPixels -= item.bitmap.width * item.bitmap.height;
+  cache.delete(id);
 }
 
-export interface ArrowHeadGeometry {
-  tip: ArrowPoint;
-  baseCenter: ArrowPoint;
-  leftBase: ArrowPoint;
-  rightBase: ArrowPoint;
-  filled: boolean;
+/**
+ * Geometry is cached apart from the painted bitmap, so changing only the
+ * colour, gradient or effect repaints the material over the same shape.
+ */
+function horizontalGeometry(
+  length: number,
+  lineWidth: number,
+  style: ArrowStyle,
+): ArrowGeometry | null {
+  const key = `${length}|${lineWidth}|${style}`;
+  const cached = geometryCache.get(key);
+  if (cached) return cached;
+  const geometry = calculateArrowGeometry({
+    start: { x: 0, y: 0 },
+    end: { x: length, y: 0 },
+    lineWidth,
+    style,
+  });
+  if (!geometry) return null;
+  if (geometryCache.size >= MAX_CACHED_GEOMETRIES)
+    geometryCache.delete(geometryCache.keys().next().value!);
+  geometryCache.set(key, geometry);
+  return geometry;
 }
 
-export interface ArrowGeometry {
-  length: number;
-  headLength: number;
-  direction: ArrowPoint;
-  normal: ArrowPoint;
-  shaftStart: ArrowPoint;
-  shaftEnd: ArrowPoint;
-  shaftPoints: ArrowPoint[];
-  heads: ArrowHeadGeometry[];
-  bounds: { x: number; y: number; width: number; height: number };
-}
-
-interface ArrowGeometryInput {
+export interface ArrowPaintRequest {
   start: ArrowPoint;
   end: ArrowPoint;
-  lineWidth: number;
-  canvasScale: number;
-  headScale: number;
   style: ArrowStyle;
+  /** Physical-pixel arrow width; the toolbar converts logical widths once. */
+  lineWidth: number;
+  /** Device pixels per scene unit; drives texture detail, never proportions. */
+  canvasScale: number;
+  color: string;
+  effect?: ArrowEffect;
+  gradientStops?: GradientStop[];
+  /** Stable per-annotation seed, so textures survive redraws and undo. */
+  textureSeed?: string | number;
+  /** Legacy in-memory label arrows only. */
+  label?: string;
+  labelStyle?: TextStyle;
 }
 
-function pointAt(point: ArrowPoint, direction: ArrowPoint, distance: number): ArrowPoint {
-  return { x: point.x + direction.x * distance, y: point.y + direction.y * distance };
-}
-
-function localPoint(
-  start: ArrowPoint,
-  direction: ArrowPoint,
-  normal: ArrowPoint,
-  along: number,
-  across: number,
-): ArrowPoint {
-  return {
-    x: start.x + direction.x * along + normal.x * across,
-    y: start.y + direction.y * along + normal.y * across,
-  };
-}
-
-function createHead(
-  tip: ArrowPoint,
-  direction: ArrowPoint,
-  headLength: number,
-  headWidth: number,
-): ArrowHeadGeometry {
-  const normal = { x: -direction.y, y: direction.x };
-  const baseCenter = pointAt(tip, direction, -headLength);
-  return {
-    tip,
-    baseCenter,
-    leftBase: pointAt(baseCenter, normal, headWidth / 2),
-    rightBase: pointAt(baseCenter, normal, -headWidth / 2),
-    filled: false,
-  };
-}
-
-function curvedPoints(
-  start: ArrowPoint,
-  direction: ArrowPoint,
-  normal: ArrowPoint,
-  length: number,
-  style: ArrowStyle,
-): ArrowPoint[] {
-  if (style === "zigzag") {
-    return [
-      localPoint(start, direction, normal, 0, 0),
-      localPoint(start, direction, normal, length * 0.24, length * 0.17),
-      localPoint(start, direction, normal, length * 0.46, -length * 0.11),
-      localPoint(start, direction, normal, length * 0.7, length * 0.16),
-      localPoint(start, direction, normal, length, 0),
-    ];
-  }
-  const steps = Math.max(8, Math.min(36, Math.ceil(length / 8)));
-  return Array.from({ length: steps + 1 }, (_, index) => {
-    const t = index / steps;
-    let along = length * t;
-    let across = 0;
-    if (style === "curve") across = Math.sin(Math.PI * t) * length * 0.2;
-    if (style === "sweep") across = -Math.sin(Math.PI * t) * length * 0.3 * (0.45 + t);
-    if (style === "loop") {
-      along += Math.sin(t * Math.PI * 2) * Math.sin(Math.PI * t) * length * 0.18;
-      across = Math.sin(t * Math.PI * 2.15) * length * 0.24 * Math.sin(Math.PI * t);
-    }
-    return localPoint(start, direction, normal, along, across);
-  });
-}
-
-function geometryBounds(points: ArrowPoint[]): ArrowGeometry["bounds"] {
-  const xs = points.map((point) => point.x);
-  const ys = points.map((point) => point.y);
-  const x = Math.min(...xs);
-  const y = Math.min(...ys);
-  return {
-    x,
-    y,
-    width: Math.max(1, Math.max(...xs) - x),
-    height: Math.max(1, Math.max(...ys) - y),
-  };
-}
-
-export function calculateArrowGeometry(input: ArrowGeometryInput): ArrowGeometry | null {
-  const dx = input.end.x - input.start.x;
-  const dy = input.end.y - input.start.y;
-  const length = Math.hypot(dx, dy);
-  if (length < 1) return null;
-  const direction = { x: dx / length, y: dy / length };
-  const normal = { x: -direction.y, y: direction.x };
-  const canvasScale = Math.max(0.01, input.canvasScale);
-  const headScale = Math.max(0.01, input.headScale);
-  const desiredHeadLength = Math.max(input.lineWidth * 4.4, 13 * canvasScale) * headScale;
-  const headLength = Math.min(desiredHeadLength, length * 0.42);
-  const headWidth = headLength * (input.style === "block" ? 1.15 : 1);
-  const head = createHead(input.end, direction, headLength, headWidth);
-  const shaftStart = input.start;
-  const shaftEnd = pointAt(head.baseCenter, direction, Math.min(input.lineWidth, headLength * 0.12));
-  const shaftLength = Math.hypot(shaftEnd.x - shaftStart.x, shaftEnd.y - shaftStart.y);
-  const shaftPoints = curvedPoints(shaftStart, direction, normal, shaftLength, input.style);
-  const bounds = geometryBounds([...shaftPoints, head.tip, head.leftBase, head.rightBase]);
-  return { length, headLength, direction, normal, shaftStart, shaftEnd, shaftPoints, heads: [head], bounds };
-}
-
-export function arrowSeed(value: string | number): number {
-  const text = String(value);
-  let hash = 2166136261;
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
-
-function randomSource(seed: number): () => number {
-  let value = seed || 0x9e3779b9;
-  return () => {
-    value += 0x6d2b79f5;
-    let result = value;
-    result = Math.imul(result ^ (result >>> 15), result | 1);
-    result ^= result + Math.imul(result ^ (result >>> 7), result | 61);
-    return ((result ^ (result >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function roughen(points: ArrowPoint[], random: () => number, amount: number): ArrowPoint[] {
-  return points.map((point, index) => index === 0 || index === points.length - 1 ? point : {
-    x: point.x + (random() - 0.5) * amount,
-    y: point.y + (random() - 0.5) * amount,
-  });
-}
-
-function strokePath(context: CanvasRenderingContext2D, points: ArrowPoint[], close = false): void {
-  if (!points[0]) return;
-  context.beginPath();
-  context.moveTo(points[0].x, points[0].y);
-  points.slice(1).forEach((point) => context.lineTo(point.x, point.y));
-  if (close) context.closePath();
-  context.stroke();
-}
-
-function blockOutline(geometry: ArrowGeometry, lineWidth: number): ArrowPoint[] {
-  const half = Math.max(lineWidth * 1.6, geometry.headLength * 0.14);
-  const head = geometry.heads[0];
-  return [
-    pointAt(geometry.shaftStart, geometry.normal, half),
-    pointAt(head.baseCenter, geometry.normal, half),
-    head.leftBase,
-    head.tip,
-    head.rightBase,
-    pointAt(head.baseCenter, geometry.normal, -half),
-    pointAt(geometry.shaftStart, geometry.normal, -half),
-  ];
-}
-
-function drawCrayonPath(
+function paintLegacyLabel(
   context: CanvasRenderingContext2D,
-  points: ArrowPoint[],
-  seed: number,
-  canvasScale: number,
-  close = false,
+  request: ArrowPaintRequest,
+  length: number,
+  angle: number,
 ): void {
-  const originalWidth = context.lineWidth;
-  const passes = [
-    { alpha: 0.34, width: 1.25, jitter: 1.6 },
-    { alpha: 0.46, width: 0.86, jitter: 0.9 },
-    { alpha: 0.3, width: 0.56, jitter: 2.2 },
-  ];
-  passes.forEach((pass, index) => {
-    const random = randomSource(seed + index * 7919);
-    context.globalAlpha = pass.alpha;
-    context.lineWidth = Math.max(0.7 * canvasScale, originalWidth * pass.width);
-    strokePath(context, roughen(points, random, pass.jitter * canvasScale), close);
-  });
-  const random = randomSource(seed ^ 0xa5a5a5a5);
-  context.globalAlpha = 0.28;
-  context.fillStyle = context.strokeStyle;
-  points.forEach((point) => {
-    if (random() < 0.28) return;
-    const size = Math.max(0.7, originalWidth * (0.12 + random() * 0.14));
-    context.fillRect(
-      point.x + (random() - 0.5) * originalWidth * 1.8,
-      point.y + (random() - 0.5) * originalWidth * 1.8,
-      size,
-      size,
-    );
-  });
-  context.globalAlpha = 1;
-  context.lineWidth = originalWidth;
-}
-
-function fontValue(style: TextStyle): string {
-  const family = style.font === "serif" ? "Georgia, serif" : style.font === "mono" ? "Consolas, monospace" : '"Segoe UI", sans-serif';
-  return `${style.bold ? 700 : 400} ${style.fontSize}px ${family}`;
-}
-
-function drawLegacyLabel(context: CanvasRenderingContext2D, geometry: ArrowGeometry, label: string, style: TextStyle): void {
-  strokePath(context, geometry.shaftPoints);
-  context.font = fontValue(style);
+  const style = request.labelStyle;
+  if (!style) return;
+  context.strokeStyle = request.color;
+  context.lineWidth = Math.max(0.5, request.lineWidth);
+  context.beginPath();
+  context.moveTo(0, 0);
+  context.lineTo(length, 0);
+  context.stroke();
+  context.translate(length / 2, 0);
+  context.rotate(-angle);
+  const family =
+    style.font === "serif"
+      ? "Georgia, serif"
+      : style.font === "mono"
+        ? "Consolas, monospace"
+        : '"Segoe UI", sans-serif';
+  context.font = `${style.bold ? 700 : 400} ${style.fontSize}px ${family}`;
   context.textAlign = "center";
   context.textBaseline = "middle";
   context.fillStyle = style.color;
-  context.fillText(label, (geometry.shaftStart.x + geometry.shaftEnd.x) / 2, (geometry.shaftStart.y + geometry.shaftEnd.y) / 2);
+  context.fillText(request.label ?? "", 0, 0);
 }
 
-export function drawArrow(
-  context: CanvasRenderingContext2D,
-  start: ArrowPoint,
-  end: ArrowPoint,
-  style: ArrowStyle,
-  headScale: number,
-  canvasScale: number,
-  label = "",
-  labelStyle?: TextStyle,
-  textureSeed: string | number = 0,
-): void {
-  const geometry = calculateArrowGeometry({ start, end, lineWidth: context.lineWidth, canvasScale, headScale, style });
-  if (!geometry) return;
+export function drawArrow(context: CanvasRenderingContext2D, request: ArrowPaintRequest): void {
+  const { start, end } = request;
+  if (!hasVisibleArrowLength(start, end)) return;
+  const length = arrowDragLength(start, end);
+  const scale = Math.max(0.25, request.canvasScale);
+  const effect = normalizeArrowEffect(request.effect);
+  const textureSeed = request.textureSeed ?? 0;
+  const angle = Math.atan2(end.y - start.y, end.x - start.x);
   context.save();
-  context.lineCap = "round";
-  context.lineJoin = "round";
-  if (style === "label" && label && labelStyle) {
-    drawLegacyLabel(context, geometry, label, labelStyle);
-  } else {
-    const seed = arrowSeed(`${textureSeed}:${style}`);
-    if (style === "block") {
-      drawCrayonPath(context, blockOutline(geometry, context.lineWidth), seed, canvasScale, true);
-    } else {
-      drawCrayonPath(context, geometry.shaftPoints, seed, canvasScale);
-      const head = geometry.heads[0];
-      drawCrayonPath(context, [head.leftBase, head.tip, head.rightBase], seed ^ 0x45d9f3b, canvasScale);
+  try {
+    context.imageSmoothingEnabled = true;
+    context.translate(start.x, start.y);
+    context.rotate(angle);
+    if (request.style === "label" && request.label && request.labelStyle) {
+      paintLegacyLabel(context, request, length, angle);
+      return;
     }
+    const width = Math.max(1, request.lineWidth);
+    const key = JSON.stringify([
+      length,
+      width,
+      scale,
+      request.style,
+      request.color,
+      effect,
+      paintCacheKey(request.gradientStops),
+    ]);
+    let item = cache.get(textureSeed);
+    if (item?.key !== key) {
+      forget(textureSeed);
+      const geometry = horizontalGeometry(length, width, request.style);
+      if (!geometry) return;
+      const padding = arrowEffectPadding(effect, width) + scale * 2;
+      // Bound the working surface without changing the shape's proportions:
+      // both endpoints and the width shrink by the same factor.
+      const resolution = Math.min(
+        1,
+        Math.sqrt(
+          MAX_BITMAP_PIXELS /
+            ((geometry.bounds.width + padding * 2 + 10) *
+              (geometry.bounds.height + padding * 2 + 10)),
+        ),
+      );
+      const rendered =
+        resolution === 1
+          ? geometry
+          : horizontalGeometry(length * resolution, width * resolution, request.style);
+      if (!rendered) throw new Error("箭头尺寸无法渲染，请缩小箭头");
+      const localScale = scale * resolution;
+      const localPadding = arrowEffectPadding(effect, width * resolution) + localScale * 2;
+      const x = Math.floor(rendered.bounds.x - localPadding),
+        y = Math.floor(rendered.bounds.y - localPadding);
+      const bitmap = document.createElement("canvas");
+      bitmap.width = Math.ceil(rendered.bounds.width + localPadding * 2 + 2);
+      bitmap.height = Math.ceil(rendered.bounds.height + localPadding * 2 + 2);
+      const pixels = bitmap.width * bitmap.height;
+      while (
+        cache.size &&
+        (cache.size >= MAX_CACHED_ARROWS || bitmapPixels + pixels > MAX_TOTAL_BITMAP_PIXELS)
+      )
+        forget(cache.keys().next().value!);
+      const brush = bitmap.getContext("2d");
+      if (!brush) throw new Error("箭头渲染失败：无法创建笔刷画布，请重试");
+      brush.translate(-x, -y);
+      paintArrowEffect(brush, rendered, {
+        width: rendered.width,
+        scale: localScale,
+        seed: arrowSeed(`${textureSeed}:${request.style}`),
+        color: request.color,
+        effect,
+        gradientStops: request.gradientStops,
+      });
+      item = { key, bitmap, x: x / resolution, y: y / resolution, resolution };
+      cache.set(textureSeed, item);
+      bitmapPixels += pixels;
+    }
+    // One composite alpha for the whole arrow: overlapping brush marks inside
+    // the bitmap can never darken, and the alpha changes without a repaint.
+    context.globalAlpha *= arrowEffectOpacity(effect);
+    context.drawImage(
+      item.bitmap,
+      item.x,
+      item.y,
+      item.bitmap.width / item.resolution,
+      item.bitmap.height / item.resolution,
+    );
+  } finally {
+    context.restore();
   }
-  context.restore();
 }

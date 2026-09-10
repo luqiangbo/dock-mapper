@@ -13,6 +13,8 @@ import {
   type TextSize,
 } from "./textTypes";
 import ToolOptionsBar from "./ToolOptionsBar";
+import { clearArrowRenderCache } from "./arrowGeometry";
+import { clearShapeRenderCache } from "./shapeEffects";
 import { useOcr } from "../hooks/useOcr";
 import { RequestGeneration } from "../hooks/requestGeneration";
 import { useCaptureLifecycle, type Selection } from "../hooks/useCaptureLifecycle";
@@ -45,8 +47,16 @@ import {
 } from "./selectionSizeGeometry";
 import {
   DEFAULT_NUMBER_STYLE,
+  DEFAULT_ARROW_EFFECT,
+  DEFAULT_ARROW_WIDTH,
+  DEFAULT_FRAME_EFFECT,
   DEFAULT_TEXT_STYLE,
+  normalizeArrowWidth,
   type ArrowStyle,
+  type ArrowEffect,
+  type FrameEffect,
+  type FrameShape,
+  type GradientStop,
   type TextStyle,
   type ToolSettings,
 } from "./annotationTypes";
@@ -67,6 +77,9 @@ import { useCommittedImageAction } from "../hooks/useCommittedImageAction";
 import {
   annotationBounds,
   cloneRasterAnnotations,
+  convertFrameAnnotation,
+  isFrameAnnotationKind,
+  isPaintableAnnotation,
   renderRasterOverlay,
   renderRasterScene,
   resizeAnnotation,
@@ -100,9 +113,13 @@ interface PickerSample {
 
 interface RasterGestureSettings {
   strokeColor: string;
+  gradientStops?: GradientStop[];
   strokeWidth: number;
   fillOpacity: number;
+  shapeEffect: FrameEffect;
   arrowStyle: ArrowStyle;
+  arrowEffect: ArrowEffect;
+  arrowWidth: number;
   arrowHeadSize: number;
   penWidth: number;
   highlightWidth: number;
@@ -151,14 +168,23 @@ function rasterFromGesture(gesture: ActiveAnnotationGesture, scale: number): Ras
       : [{ ...gesture.start }, { ...last }],
     style: {
       color: gesture.settings.strokeColor,
+      gradientStops:
+        gesture.tool === "arrow" || gesture.tool === "rect" || gesture.tool === "ellipse"
+          ? gesture.settings.gradientStops?.map((stop) => ({ ...stop }))
+          : undefined,
+      // Logical toolbar widths become physical scene pixels exactly here.
       strokeWidth:
         gesture.tool === "pen"
           ? gesture.settings.penWidth * scale
           : gesture.tool === "highlight"
             ? gesture.settings.highlightWidth * scale
-            : gesture.settings.strokeWidth * scale,
+            : gesture.tool === "arrow"
+              ? gesture.settings.arrowWidth * scale
+              : gesture.settings.strokeWidth * scale,
       fillOpacity: gesture.settings.fillOpacity,
+      shapeEffect: gesture.settings.shapeEffect,
       arrowStyle: gesture.settings.arrowStyle,
+      arrowEffect: gesture.settings.arrowEffect,
       arrowHeadSize: gesture.settings.arrowHeadSize,
       opacity: gesture.tool === "highlight" ? gesture.settings.highlightOpacity : 1,
       mosaicBlock: Math.max(4, Math.round(gesture.settings.mosaicBlock * scale)),
@@ -456,8 +482,11 @@ function ScreenshotOverlay(): React.JSX.Element {
     resetScene,
   } = useEditorSceneState();
   const [strokeColor, setStrokeColor] = useState<string>(STROKE_COLORS[0]);
+  const [gradientStops, setGradientStops] = useState<GradientStop[] | undefined>();
   const [strokeWidth, setStrokeWidth] = useState(3);
   const [fillOpacity, setFillOpacity] = useState(0);
+  const [shapeKind, setShapeKind] = useState<FrameShape>("rect");
+  const [shapeEffect, setShapeEffect] = useState<FrameEffect>(DEFAULT_FRAME_EFFECT);
   const [arrowHeadSize, setArrowHeadSize] = useState(1);
   const [penWidth, setPenWidth] = useState(3);
   const [highlightWidth, setHighlightWidth] = useState(20);
@@ -478,6 +507,8 @@ function ScreenshotOverlay(): React.JSX.Element {
   const [qrContents, setQrContents] = useState<string[] | null>(null);
   const [activeOcrBlock, setActiveOcrBlock] = useState<OcrTextBlock | null>(null);
   const [arrowStyle, setArrowStyle] = useState<ArrowStyle>("straight");
+  const [arrowEffect, setArrowEffect] = useState<ArrowEffect>(DEFAULT_ARROW_EFFECT);
+  const [arrowWidth, setArrowWidth] = useState(DEFAULT_ARROW_WIDTH);
   const [viewportSize, setViewportSize] = useState<ToolbarSize>(() => ({
     width: window.innerWidth,
     height: window.innerHeight,
@@ -609,10 +640,20 @@ function ScreenshotOverlay(): React.JSX.Element {
 
   useEffect(() => {
     if (phase !== "editing") {
+      clearArrowRenderCache();
+      clearShapeRenderCache();
       setArrowLabelEditor(null);
       setArrowLabelDraft("");
     }
   }, [phase]);
+
+  useEffect(
+    () => () => {
+      clearArrowRenderCache();
+      clearShapeRenderCache();
+    },
+    [],
+  );
 
   useEffect(() => {
     const gesture = annotationGestureRef.current;
@@ -799,6 +840,12 @@ function ScreenshotOverlay(): React.JSX.Element {
 
   useEffect(() => {
     if (phase === "capturing") {
+      setShapeKind("rect");
+      setShapeEffect(DEFAULT_FRAME_EFFECT);
+      setArrowStyle("straight");
+      setArrowEffect(DEFAULT_ARROW_EFFECT);
+      setArrowWidth(DEFAULT_ARROW_WIDTH);
+      setGradientStops(undefined);
       setAspectPreset("free");
       setAspectRatio(null);
     }
@@ -1355,13 +1402,17 @@ function ScreenshotOverlay(): React.JSX.Element {
     const context = canvas?.getContext("2d");
     if (!canvas || !base || !context) return;
     const scale = canvas.width / Math.max(1, selection?.width ?? canvas.width);
-    renderRasterOverlay(
-      context,
-      base,
-      rasterPreview ? [...rasterAnnotations, rasterPreview] : rasterAnnotations,
-      scale,
-    );
-  }, [phase, rasterAnnotations, rasterPreview, selection?.width]);
+    try {
+      renderRasterOverlay(
+        context,
+        base,
+        rasterPreview ? [...rasterAnnotations, rasterPreview] : rasterAnnotations,
+        scale,
+      );
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "标注效果渲染失败，请重试");
+    }
+  }, [phase, rasterAnnotations, rasterPreview, selection?.width, setError]);
 
   const createRecropBaseline = useCallback((): SelectionRecropBaseline | null => {
     const image = fullImageRef.current;
@@ -1412,12 +1463,16 @@ function ScreenshotOverlay(): React.JSX.Element {
         points: annotation.points.map((point) => mapCropPoint(point, baseline.baseCrop, crop)),
       }));
       setRasterAnnotations(translatedRaster);
-      renderRasterOverlay(
-        ctx,
-        base,
-        translatedRaster,
-        crop.outputWidth / Math.max(1, next.width),
-      );
+      try {
+        renderRasterOverlay(
+          ctx,
+          base,
+          translatedRaster,
+          crop.outputWidth / Math.max(1, next.width),
+        );
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "标注效果渲染失败，请重试");
+      }
 
       setTextObjects(
         baseline.baseTextObjects.map((item) => {
@@ -2122,9 +2177,13 @@ function ScreenshotOverlay(): React.JSX.Element {
         id: `annotation-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         settings: {
           strokeColor,
+          gradientStops: gradientStops?.map((stop) => ({ ...stop })),
           strokeWidth,
           fillOpacity,
+          shapeEffect,
           arrowStyle,
+          arrowEffect,
+          arrowWidth,
           arrowHeadSize,
           penWidth,
           highlightWidth,
@@ -2144,9 +2203,13 @@ function ScreenshotOverlay(): React.JSX.Element {
       shotReady,
       selection,
       strokeColor,
+      gradientStops,
       strokeWidth,
       fillOpacity,
+      shapeEffect,
       arrowStyle,
+      arrowEffect,
+      arrowWidth,
       arrowHeadSize,
       textStyle,
       numberStyle,
@@ -2223,7 +2286,8 @@ function ScreenshotOverlay(): React.JSX.Element {
       const scale = canvas ? canvas.width / Math.max(1, selection?.width ?? canvas.width) : 1;
       const preview = rasterFromGesture(gesture, scale);
       setRasterPreview(null);
-      if (resolveAnnotationGesture(gesture, false).commit && preview) {
+      // A drag too short to produce a shape leaves the canvas untouched.
+      if (resolveAnnotationGesture(gesture, false).commit && isPaintableAnnotation(preview)) {
         pushCurrentObjects();
         setRasterAnnotations([...gesture.baseline, preview]);
         setSelectedRasterId(preview.id);
@@ -2369,9 +2433,14 @@ function ScreenshotOverlay(): React.JSX.Element {
   const toolsLocked = busy || !shotReady;
   const toolSettings: ToolSettings = {
     strokeColor,
+    gradientStops,
     strokeWidth,
     fillOpacity,
+    shapeKind,
+    shapeEffect,
     arrowStyle,
+    arrowEffect,
+    arrowWidth,
     arrowHeadSize,
     penWidth,
     highlightWidth,
@@ -2397,13 +2466,31 @@ function ScreenshotOverlay(): React.JSX.Element {
       : 1;
     const rasterStylePatch: Partial<RasterAnnotation["style"]> = {};
     if (changes.strokeColor !== undefined) rasterStylePatch.color = changes.strokeColor;
+    if (
+      Object.prototype.hasOwnProperty.call(changes, "gradientStops") &&
+      selectedRaster &&
+      (selectedRaster.kind === "arrow" || isFrameAnnotationKind(selectedRaster.kind))
+    )
+      rasterStylePatch.gradientStops = changes.gradientStops?.map((stop) => ({ ...stop })) ?? undefined;
     if (changes.fillOpacity !== undefined) rasterStylePatch.fillOpacity = changes.fillOpacity;
-    if (changes.arrowStyle !== undefined) rasterStylePatch.arrowStyle = changes.arrowStyle;
-    if (changes.arrowHeadSize !== undefined) rasterStylePatch.arrowHeadSize = changes.arrowHeadSize;
+    if (changes.shapeEffect !== undefined && selectedRaster && isFrameAnnotationKind(selectedRaster.kind))
+      rasterStylePatch.shapeEffect = changes.shapeEffect;
+    if (changes.arrowStyle !== undefined && selectedRaster?.kind === "arrow")
+      rasterStylePatch.arrowStyle = changes.arrowStyle;
+    if (changes.arrowEffect !== undefined && selectedRaster?.kind === "arrow")
+      rasterStylePatch.arrowEffect = changes.arrowEffect;
+    if (changes.arrowHeadSize !== undefined && selectedRaster?.kind === "arrow")
+      rasterStylePatch.arrowHeadSize = changes.arrowHeadSize;
+    // Arrows carry their width in strokeWidth, but only the arrow control may
+    // change it, so the frame line width never reshapes a selected arrow.
+    if (changes.arrowWidth !== undefined && selectedRaster?.kind === "arrow")
+      rasterStylePatch.strokeWidth = changes.arrowWidth * annotationScale;
     if (
       changes.strokeWidth !== undefined &&
-      selectedRaster?.kind !== "pen" &&
-      selectedRaster?.kind !== "highlight"
+      selectedRaster &&
+      selectedRaster.kind !== "pen" &&
+      selectedRaster.kind !== "highlight" &&
+      selectedRaster.kind !== "arrow"
     )
       rasterStylePatch.strokeWidth = changes.strokeWidth * annotationScale;
     if (changes.penWidth !== undefined && selectedRaster?.kind === "pen")
@@ -2425,11 +2512,17 @@ function ScreenshotOverlay(): React.JSX.Element {
         strokeWidth: changes.textStyle.strokeWidth * annotationScale,
       };
     }
+    const changesFrameKind = Boolean(
+      selectedRaster &&
+        isFrameAnnotationKind(selectedRaster.kind) &&
+        changes.shapeKind !== undefined &&
+        selectedRaster.kind !== changes.shapeKind,
+    );
     const changesRaster = Boolean(
       selectedRaster &&
-      (Object.keys(rasterStylePatch) as Array<keyof RasterAnnotation["style"]>).some(
+      ((Object.keys(rasterStylePatch) as Array<keyof RasterAnnotation["style"]>).some(
         (key) => rasterStylePatch[key] !== selectedRaster.style[key],
-      ),
+      ) || changesFrameKind),
     );
     const changesSelectedObject = Boolean(
       (changes.textStyle !== undefined &&
@@ -2445,9 +2538,18 @@ function ScreenshotOverlay(): React.JSX.Element {
     const immediateObjectMutation = changesSelectedObject && !objectMutationRef.current.active;
     if (immediateObjectMutation) beginObjectMutation();
     if (changes.strokeColor !== undefined) setStrokeColor(changes.strokeColor);
+    if (Object.prototype.hasOwnProperty.call(changes, "gradientStops"))
+      setGradientStops(changes.gradientStops?.map((stop) => ({ ...stop })) ?? undefined);
     if (changes.strokeWidth !== undefined) setStrokeWidth(changes.strokeWidth);
     if (changes.fillOpacity !== undefined) setFillOpacity(changes.fillOpacity);
+    if (changes.shapeKind !== undefined) {
+      setShapeKind(changes.shapeKind);
+      if (isFrameAnnotationKind(tool)) setTool(changes.shapeKind);
+    }
+    if (changes.shapeEffect !== undefined) setShapeEffect(changes.shapeEffect);
     if (changes.arrowStyle !== undefined) setArrowStyle(changes.arrowStyle);
+    if (changes.arrowEffect !== undefined) setArrowEffect(changes.arrowEffect);
+    if (changes.arrowWidth !== undefined) setArrowWidth(changes.arrowWidth);
     if (changes.arrowHeadSize !== undefined) setArrowHeadSize(changes.arrowHeadSize);
     if (changes.penWidth !== undefined) setPenWidth(changes.penWidth);
     if (changes.highlightWidth !== undefined) setHighlightWidth(changes.highlightWidth);
@@ -2458,7 +2560,12 @@ function ScreenshotOverlay(): React.JSX.Element {
       setRasterAnnotations((previous) =>
         previous.map((item) =>
           item.id === selectedRaster.id
-            ? { ...item, style: { ...item.style, ...rasterStylePatch } }
+            ? {
+                ...(changesFrameKind
+                  ? convertFrameAnnotation(item, changes.shapeKind!)
+                  : item),
+                style: { ...item.style, ...rasterStylePatch },
+              }
             : item,
         ),
       );
@@ -2574,7 +2681,9 @@ function ScreenshotOverlay(): React.JSX.Element {
             const scaleX = canvas ? canvas.width / Math.max(1, selection.width) : 1;
             const scaleY = canvas ? canvas.height / Math.max(1, displayHeight) : scaleX;
             const bounds = annotationBounds(annotation);
-            const interactive = tool === annotation.kind;
+            const interactive =
+              tool === annotation.kind ||
+              (isFrameAnnotationKind(tool) && isFrameAnnotationKind(annotation.kind));
             const selected = interactive && selectedRasterId === annotation.id;
             return (
               <div
@@ -2595,10 +2704,23 @@ function ScreenshotOverlay(): React.JSX.Element {
                   setSelectedTextId(null);
                   setSelectedNumberId(null);
                   setStrokeColor(annotation.style.color);
-                  setStrokeWidth(Math.max(1, Math.round(annotation.style.strokeWidth / scaleX)));
+                  setGradientStops(annotation.style.gradientStops?.map((stop) => ({ ...stop })));
+                  // Arrows keep their width in the dedicated arrow control, so
+                  // the frame line width must not inherit an arrow's value.
+                  if (annotation.kind !== "arrow")
+                    setStrokeWidth(Math.max(1, Math.round(annotation.style.strokeWidth / scaleX)));
                   setFillOpacity(annotation.style.fillOpacity);
-                  setArrowStyle(annotation.style.arrowStyle);
-                  setArrowHeadSize(annotation.style.arrowHeadSize);
+                  if (isFrameAnnotationKind(annotation.kind)) {
+                    setShapeKind(annotation.kind);
+                    setShapeEffect(annotation.style.shapeEffect ?? DEFAULT_FRAME_EFFECT);
+                    setTool(annotation.kind);
+                  }
+                  if (annotation.kind === "arrow") {
+                    setArrowStyle(annotation.style.arrowStyle);
+                    setArrowEffect(annotation.style.arrowEffect ?? DEFAULT_ARROW_EFFECT);
+                    setArrowWidth(normalizeArrowWidth(annotation.style.strokeWidth / scaleX));
+                    setArrowHeadSize(annotation.style.arrowHeadSize);
+                  }
                   if (annotation.style.arrowLabelStyle) {
                     setTextStyle({
                       ...annotation.style.arrowLabelStyle,
@@ -3100,6 +3222,7 @@ function ScreenshotOverlay(): React.JSX.Element {
           <AnnotationToolbar
             ref={primaryToolbarRef}
             tool={tool}
+            shapeKind={shapeKind}
             canUndo={canUndo}
             canRedo={canRedo}
             compact={compactToolbar}
@@ -3124,10 +3247,16 @@ function ScreenshotOverlay(): React.JSX.Element {
               setToolbarPopupOpen(false);
               setSecondaryToolbarSize(EMPTY_TOOLBAR_SIZE);
               setTool(next);
+              if (isFrameAnnotationKind(next)) setShapeKind(next);
               const selectedRaster = objectStateRef.current.rasterAnnotations.find(
                 (item) => item.id === selectedRasterId,
               );
-              if (!selectedRaster || next !== selectedRaster.kind) setSelectedRasterId(null);
+              if (
+                !selectedRaster ||
+                (next !== selectedRaster.kind &&
+                  !(isFrameAnnotationKind(next) && isFrameAnnotationKind(selectedRaster.kind)))
+              )
+                setSelectedRasterId(null);
               if (next !== "text") setSelectedTextId(null);
               if (next !== "picker") setPickerSample(null);
               if (next !== "number") setSelectedNumberId(null);
