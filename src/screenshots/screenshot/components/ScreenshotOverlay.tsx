@@ -13,8 +13,10 @@ import {
   type TextSize,
 } from "./textTypes";
 import ToolOptionsBar from "./ToolOptionsBar";
-import { clearArrowRenderCache } from "./arrowGeometry";
+import { arrowSeed, clearArrowRenderCache } from "./arrowGeometry";
 import { clearShapeRenderCache } from "./shapeEffects";
+import { clearP5StrokeCache } from "./p5StrokeRenderer";
+import { P5_BRUSH_FALLBACK_EVENT } from "./p5BrushService";
 import { useOcr } from "../hooks/useOcr";
 import { RequestGeneration } from "../hooks/requestGeneration";
 import { useCaptureLifecycle, type Selection } from "../hooks/useCaptureLifecycle";
@@ -47,19 +49,23 @@ import {
 } from "./selectionSizeGeometry";
 import {
   DEFAULT_NUMBER_STYLE,
-  DEFAULT_ARROW_EFFECT,
-  DEFAULT_ARROW_WIDTH,
   DEFAULT_FRAME_EFFECT,
   DEFAULT_TEXT_STYLE,
-  normalizeArrowWidth,
+  normalizeArrowStyle,
   type ArrowStyle,
-  type ArrowEffect,
   type FrameEffect,
   type FrameShape,
   type GradientStop,
   type TextStyle,
   type ToolSettings,
 } from "./annotationTypes";
+import {
+  DEFAULT_ARROW_BRUSH_ID,
+  createArrowBrushStylePatch,
+  normalizeArrowBrushId,
+  type ArrowBrushId,
+} from "./arrowBrushPresets";
+import { createArrowAssemblyVariation } from "./arrowAssembly";
 import { calculateToolbarLayout, shouldCompactToolbar, type ToolbarSize } from "./toolbarLayout";
 import {
   appendGesturePoint,
@@ -118,8 +124,7 @@ interface RasterGestureSettings {
   fillOpacity: number;
   shapeEffect: FrameEffect;
   arrowStyle: ArrowStyle;
-  arrowEffect: ArrowEffect;
-  arrowWidth: number;
+  arrowBrushId: ArrowBrushId;
   arrowHeadSize: number;
   penWidth: number;
   highlightWidth: number;
@@ -160,6 +165,15 @@ interface SelectionRecropBaseline {
 function rasterFromGesture(gesture: ActiveAnnotationGesture, scale: number): RasterAnnotation {
   const isFreehand = gesture.tool === "pen" || gesture.tool === "highlight";
   const last = gesture.points[gesture.points.length - 1] ?? gesture.start;
+  const arrowBrushStyle = createArrowBrushStylePatch(gesture.settings.arrowBrushId, scale);
+  const arrowAssembly =
+    gesture.tool === "arrow"
+      ? createArrowAssemblyVariation(
+          normalizeArrowStyle(gesture.settings.arrowStyle),
+          gesture.settings.arrowBrushId,
+          arrowSeed(gesture.id),
+        )
+      : undefined;
   return {
     id: gesture.id,
     kind: gesture.tool,
@@ -179,12 +193,13 @@ function rasterFromGesture(gesture: ActiveAnnotationGesture, scale: number): Ras
           : gesture.tool === "highlight"
             ? gesture.settings.highlightWidth * scale
             : gesture.tool === "arrow"
-              ? gesture.settings.arrowWidth * scale
+              ? arrowBrushStyle.strokeWidth
               : gesture.settings.strokeWidth * scale,
       fillOpacity: gesture.settings.fillOpacity,
       shapeEffect: gesture.settings.shapeEffect,
       arrowStyle: gesture.settings.arrowStyle,
-      arrowEffect: gesture.settings.arrowEffect,
+      arrowBrushId: gesture.settings.arrowBrushId,
+      arrowAssembly,
       arrowHeadSize: gesture.settings.arrowHeadSize,
       opacity: gesture.tool === "highlight" ? gesture.settings.highlightOpacity : 1,
       mosaicBlock: Math.max(4, Math.round(gesture.settings.mosaicBlock * scale)),
@@ -507,8 +522,7 @@ function ScreenshotOverlay(): React.JSX.Element {
   const [qrContents, setQrContents] = useState<string[] | null>(null);
   const [activeOcrBlock, setActiveOcrBlock] = useState<OcrTextBlock | null>(null);
   const [arrowStyle, setArrowStyle] = useState<ArrowStyle>("straight");
-  const [arrowEffect, setArrowEffect] = useState<ArrowEffect>(DEFAULT_ARROW_EFFECT);
-  const [arrowWidth, setArrowWidth] = useState(DEFAULT_ARROW_WIDTH);
+  const [arrowBrushId, setArrowBrushId] = useState<ArrowBrushId>(DEFAULT_ARROW_BRUSH_ID);
   const [viewportSize, setViewportSize] = useState<ToolbarSize>(() => ({
     width: window.innerWidth,
     height: window.innerHeight,
@@ -523,6 +537,15 @@ function ScreenshotOverlay(): React.JSX.Element {
     isNew: boolean;
   } | null>(null);
   const [arrowLabelDraft, setArrowLabelDraft] = useState("");
+
+  useLayoutEffect(() => {
+    const onBrushFallback = (event: Event): void => {
+      const detail = (event as CustomEvent<string>).detail;
+      setError(detail || "自然笔刷渲染失败，已切换基础画笔");
+    };
+    window.addEventListener(P5_BRUSH_FALLBACK_EVENT, onBrushFallback);
+    return () => window.removeEventListener(P5_BRUSH_FALLBACK_EVENT, onBrushFallback);
+  }, [setError]);
 
   useEffect(
     () => () => {
@@ -642,6 +665,7 @@ function ScreenshotOverlay(): React.JSX.Element {
     if (phase !== "editing") {
       clearArrowRenderCache();
       clearShapeRenderCache();
+      clearP5StrokeCache();
       setArrowLabelEditor(null);
       setArrowLabelDraft("");
     }
@@ -651,6 +675,7 @@ function ScreenshotOverlay(): React.JSX.Element {
     () => () => {
       clearArrowRenderCache();
       clearShapeRenderCache();
+      clearP5StrokeCache();
     },
     [],
   );
@@ -843,8 +868,7 @@ function ScreenshotOverlay(): React.JSX.Element {
       setShapeKind("rect");
       setShapeEffect(DEFAULT_FRAME_EFFECT);
       setArrowStyle("straight");
-      setArrowEffect(DEFAULT_ARROW_EFFECT);
-      setArrowWidth(DEFAULT_ARROW_WIDTH);
+      setArrowBrushId(DEFAULT_ARROW_BRUSH_ID);
       setGradientStops(undefined);
       setAspectPreset("free");
       setAspectRatio(null);
@@ -2182,8 +2206,7 @@ function ScreenshotOverlay(): React.JSX.Element {
           fillOpacity,
           shapeEffect,
           arrowStyle,
-          arrowEffect,
-          arrowWidth,
+          arrowBrushId,
           arrowHeadSize,
           penWidth,
           highlightWidth,
@@ -2208,8 +2231,7 @@ function ScreenshotOverlay(): React.JSX.Element {
       fillOpacity,
       shapeEffect,
       arrowStyle,
-      arrowEffect,
-      arrowWidth,
+      arrowBrushId,
       arrowHeadSize,
       textStyle,
       numberStyle,
@@ -2439,8 +2461,7 @@ function ScreenshotOverlay(): React.JSX.Element {
     shapeKind,
     shapeEffect,
     arrowStyle,
-    arrowEffect,
-    arrowWidth,
+    arrowBrushId,
     arrowHeadSize,
     penWidth,
     highlightWidth,
@@ -2477,14 +2498,14 @@ function ScreenshotOverlay(): React.JSX.Element {
       rasterStylePatch.shapeEffect = changes.shapeEffect;
     if (changes.arrowStyle !== undefined && selectedRaster?.kind === "arrow")
       rasterStylePatch.arrowStyle = changes.arrowStyle;
-    if (changes.arrowEffect !== undefined && selectedRaster?.kind === "arrow")
-      rasterStylePatch.arrowEffect = changes.arrowEffect;
+    if (changes.arrowBrushId !== undefined && selectedRaster?.kind === "arrow") {
+      Object.assign(
+        rasterStylePatch,
+        createArrowBrushStylePatch(changes.arrowBrushId, annotationScale),
+      );
+    }
     if (changes.arrowHeadSize !== undefined && selectedRaster?.kind === "arrow")
       rasterStylePatch.arrowHeadSize = changes.arrowHeadSize;
-    // Arrows carry their width in strokeWidth, but only the arrow control may
-    // change it, so the frame line width never reshapes a selected arrow.
-    if (changes.arrowWidth !== undefined && selectedRaster?.kind === "arrow")
-      rasterStylePatch.strokeWidth = changes.arrowWidth * annotationScale;
     if (
       changes.strokeWidth !== undefined &&
       selectedRaster &&
@@ -2548,8 +2569,7 @@ function ScreenshotOverlay(): React.JSX.Element {
     }
     if (changes.shapeEffect !== undefined) setShapeEffect(changes.shapeEffect);
     if (changes.arrowStyle !== undefined) setArrowStyle(changes.arrowStyle);
-    if (changes.arrowEffect !== undefined) setArrowEffect(changes.arrowEffect);
-    if (changes.arrowWidth !== undefined) setArrowWidth(changes.arrowWidth);
+    if (changes.arrowBrushId !== undefined) setArrowBrushId(changes.arrowBrushId);
     if (changes.arrowHeadSize !== undefined) setArrowHeadSize(changes.arrowHeadSize);
     if (changes.penWidth !== undefined) setPenWidth(changes.penWidth);
     if (changes.highlightWidth !== undefined) setHighlightWidth(changes.highlightWidth);
@@ -2705,8 +2725,8 @@ function ScreenshotOverlay(): React.JSX.Element {
                   setSelectedNumberId(null);
                   setStrokeColor(annotation.style.color);
                   setGradientStops(annotation.style.gradientStops?.map((stop) => ({ ...stop })));
-                  // Arrows keep their width in the dedicated arrow control, so
-                  // the frame line width must not inherit an arrow's value.
+                  // Arrow size comes from its brush preset, so frame width must
+                  // not inherit a selected arrow's physical width.
                   if (annotation.kind !== "arrow")
                     setStrokeWidth(Math.max(1, Math.round(annotation.style.strokeWidth / scaleX)));
                   setFillOpacity(annotation.style.fillOpacity);
@@ -2717,8 +2737,12 @@ function ScreenshotOverlay(): React.JSX.Element {
                   }
                   if (annotation.kind === "arrow") {
                     setArrowStyle(annotation.style.arrowStyle);
-                    setArrowEffect(annotation.style.arrowEffect ?? DEFAULT_ARROW_EFFECT);
-                    setArrowWidth(normalizeArrowWidth(annotation.style.strokeWidth / scaleX));
+                    setArrowBrushId(
+                      normalizeArrowBrushId(
+                        annotation.style.arrowBrushId,
+                        annotation.style.arrowEffect,
+                      ),
+                    );
                     setArrowHeadSize(annotation.style.arrowHeadSize);
                   }
                   if (annotation.style.arrowLabelStyle) {

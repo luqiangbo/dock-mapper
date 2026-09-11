@@ -1,5 +1,4 @@
 import type {
-  ArrowEffect,
   ArrowStyle,
   FrameEffect,
   FrameShape,
@@ -7,8 +6,11 @@ import type {
   TextStyle,
 } from "./annotationTypes";
 import { calculateArrowGeometry, drawArrow, hasVisibleArrowLength } from "./arrowGeometry";
-import { arrowEffectPadding } from "./arrowEffects";
+import { arrowBrushPadding } from "./arrowBrushRenderer";
+import { normalizeArrowBrushId, type ArrowBrushId } from "./arrowBrushPresets";
 import { drawStyledFrame, shapeEffectPadding } from "./shapeEffects";
+import type { ArrowAssemblyVariation } from "./arrowAssembly";
+import { drawP5Stroke } from "./p5StrokeRenderer";
 
 export interface ScenePoint {
   x: number;
@@ -21,7 +23,10 @@ export interface RasterAnnotationStyle {
   strokeWidth: number;
   fillOpacity: number;
   arrowStyle: ArrowStyle;
-  arrowEffect?: ArrowEffect;
+  arrowBrushId?: ArrowBrushId;
+  arrowAssembly?: ArrowAssemblyVariation;
+  /** Legacy hot-reload/undo compatibility; new annotations only write arrowBrushId. */
+  arrowEffect?: string;
   shapeEffect?: FrameEffect;
   arrowHeadSize: number;
   opacity: number;
@@ -66,14 +71,19 @@ function annotationPadding(annotation: RasterAnnotation): number {
       : 0;
   const texturePadding =
     annotation.kind === "arrow"
-      ? arrowEffectPadding(annotation.style.arrowEffect, annotation.style.strokeWidth)
+      ? arrowBrushPadding(
+          normalizeArrowBrushId(annotation.style.arrowBrushId, annotation.style.arrowEffect),
+          annotation.style.strokeWidth,
+        )
       : annotation.kind === "rect" || annotation.kind === "ellipse"
         ? shapeEffectPadding(annotation.style.shapeEffect ?? "classic", annotation.style.strokeWidth)
         : 0;
   // Arrow geometry already spans the full painted area, so only the brush
   // bleed is added; every other kind is a centred stroke.
   const strokePadding = annotation.kind === "arrow" ? 0 : annotation.style.strokeWidth / 2;
-  return Math.max(4, strokePadding, labelPadding, texturePadding);
+  return annotation.kind === "arrow"
+    ? Math.max(labelPadding, texturePadding)
+    : Math.max(4, strokePadding, labelPadding, texturePadding);
 }
 
 export function annotationGeometryBounds(annotation: RasterAnnotation): SceneBounds {
@@ -84,6 +94,7 @@ export function annotationGeometryBounds(annotation: RasterAnnotation): SceneBou
       end: lastPoint,
       lineWidth: annotation.style.strokeWidth,
       style: annotation.style.arrowStyle,
+      assembly: annotation.style.arrowAssembly,
     });
     if (geometry) return geometry.bounds;
   }
@@ -109,6 +120,11 @@ export function cloneRasterAnnotations(items: RasterAnnotation[]): RasterAnnotat
       ...item.style,
       gradientStops: item.style.gradientStops?.map((stop) => ({ ...stop })),
       arrowLabelStyle: item.style.arrowLabelStyle ? { ...item.style.arrowLabelStyle } : undefined,
+      arrowAssembly: item.style.arrowAssembly
+        ? {
+            ...item.style.arrowAssembly,
+          }
+        : undefined,
     },
   }));
 }
@@ -286,29 +302,6 @@ export function hitTestAnnotation(
   );
 }
 
-function drawPolyline(
-  context: CanvasRenderingContext2D,
-  points: ScenePoint[],
-  color: string,
-  width: number,
-  opacity: number,
-): void {
-  if (points.length === 0) return;
-  context.save();
-  context.globalAlpha = opacity;
-  context.strokeStyle = color;
-  context.lineWidth = width;
-  context.lineCap = "round";
-  context.lineJoin = "round";
-  context.beginPath();
-  points.forEach((point, index) =>
-    index === 0 ? context.moveTo(point.x, point.y) : context.lineTo(point.x, point.y),
-  );
-  if (points.length === 1) context.lineTo(points[0].x + 0.01, points[0].y + 0.01);
-  context.stroke();
-  context.restore();
-}
-
 function drawMosaic(
   context: CanvasRenderingContext2D,
   base: HTMLCanvasElement,
@@ -344,7 +337,15 @@ export function drawRasterAnnotation(
   if (!first || !last) return;
   const style = annotation.style;
   if (annotation.kind === "pen" || annotation.kind === "highlight") {
-    drawPolyline(context, annotation.points, style.color, style.strokeWidth, style.opacity);
+    drawP5Stroke(
+      context,
+      annotation.id,
+      annotation.kind,
+      annotation.points,
+      style.color,
+      style.strokeWidth,
+      style.opacity,
+    );
     return;
   }
   const x = Math.min(first.x, last.x);
@@ -384,9 +385,10 @@ export function drawRasterAnnotation(
         lineWidth: style.strokeWidth,
         canvasScale,
         color: style.color,
-        effect: style.arrowEffect,
+        brushId: normalizeArrowBrushId(style.arrowBrushId, style.arrowEffect),
         gradientStops: style.gradientStops,
         textureSeed: annotation.id,
+        assembly: style.arrowAssembly,
         label: style.arrowLabel,
         labelStyle: style.arrowLabelStyle,
       });

@@ -13,7 +13,7 @@
 html,
 body,
 #root {
-  width: max-content;
+  width: 100%;
   height: 100%;
   overflow: hidden;
   background: transparent;
@@ -22,7 +22,7 @@ body,
 
 .widget-container {
   display: flex;
-  width: max-content;
+  width: 100%;
   height: 100%;
   align-items: center;
   gap: 6px;
@@ -41,6 +41,48 @@ body,
   -webkit-app-region: no-drag;
 }
 
+.widget-metric {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.widget-container.is-compact {
+  gap: 3px;
+  padding-right: 2px;
+  padding-left: 2px;
+  font-size: 10px;
+}
+
+.widget-measurements {
+  position: fixed;
+  left: -10000px;
+  top: -10000px;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.widget-measure-row {
+  width: max-content;
+}
+
+.widget-overflow {
+  display: inline-grid;
+  width: 12px;
+  flex: 0 0 12px;
+  place-items: center;
+  color: rgb(255 255 255 / 72%);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.widget-empty {
+  display: inline-grid;
+  min-width: 40px;
+  place-items: center;
+  color: rgb(255 255 255 / 68%);
+}
+
 .net-speed {
   display: flex;
   flex-direction: column;
@@ -53,6 +95,11 @@ body,
   grid-template-columns: 12px 6ch 4.5ch;
   align-items: center;
   font-size: 11px;
+}
+
+.is-compact .speed-row {
+  grid-template-columns: 10px 5.2ch 3.8ch;
+  font-size: 10px;
 }
 
 .speed-value,
@@ -73,6 +120,10 @@ body,
   padding-left: 3px;
 }
 
+.is-compact .speed-unit {
+  padding-left: 2px;
+}
+
 .speed-arrow {
   display: inline-block;
   width: 11px;
@@ -81,6 +132,12 @@ body,
   font-weight: 700;
   text-align: center;
   line-height: 1;
+}
+
+.is-compact .speed-arrow {
+  width: 9px;
+  height: 10px;
+  font-size: 10px;
 }
 
 .up-arrow {
@@ -102,6 +159,11 @@ body,
   width: 48px;
 }
 
+.is-compact .capsule-indicator {
+  width: 42px;
+  gap: 2px;
+}
+
 .metric-icon {
   display: grid;
   width: 13px;
@@ -113,6 +175,17 @@ body,
     width: 13px;
     height: 13px;
     stroke-width: 2.2;
+  }
+}
+
+.is-compact .metric-icon {
+  width: 11px;
+  height: 11px;
+  flex-basis: 11px;
+
+  svg {
+    width: 11px;
+    height: 11px;
   }
 }
 
@@ -128,6 +201,11 @@ body,
   width: 32px;
   height: 32px;
   place-items: center;
+}
+
+.is-compact .ring-indicator {
+  width: 30px;
+  height: 30px;
 }
 
 .ring-track {
@@ -159,6 +237,14 @@ body,
   display: inline-block;
   width: 4ch;
   text-align: right;
+}
+
+.is-compact .gauge-blocks {
+  gap: 1px;
+}
+
+.is-compact .gauge-block {
+  width: 2px;
 }
 
 @media (forced-colors: active) {

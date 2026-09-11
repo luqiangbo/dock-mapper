@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { decorativePalette, decorativeVariant } from "./framePalette";
-import { FRAME_EFFECT_OPTIONS, ARROW_EFFECT_OPTIONS } from "./annotationTypes";
+import { FRAME_EFFECT_OPTIONS } from "./annotationTypes";
+import { ARROW_BRUSH_PRESETS } from "./arrowBrushPresets";
 
 describe("frame palettes", () => {
   it("keeps frame effects independent from the arrow presets", () => {
     const frames = FRAME_EFFECT_OPTIONS.map(({ value }) => value);
-    const arrows = ARROW_EFFECT_OPTIONS.map(({ value }) => value);
+    const arrows = ARROW_BRUSH_PRESETS.map(({ id }) => id);
     expect(frames).toContain("watercolor");
-    expect(arrows).not.toContain("watercolor");
+    expect(frames).toContain("decorative");
+    expect(arrows).not.toContain("decorative");
     expect(arrows).toContain("marker");
     expect(frames).not.toContain("marker");
   });

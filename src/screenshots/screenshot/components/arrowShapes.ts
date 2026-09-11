@@ -1,4 +1,5 @@
 import { normalizeArrowStyle, type ArrowPreset, type ArrowStyle } from "./annotationTypes";
+import type { ArrowAssemblyVariation } from "./arrowAssembly";
 
 export interface ArrowPoint {
   x: number;
@@ -28,7 +29,7 @@ export interface ArrowGeometry {
   shaftEnd: ArrowPoint;
   shaftPoints: ArrowPoint[];
   heads: ArrowHeadGeometry[];
-  /** One closed silhouette shared by every material, selection box and export. */
+  /** Conservative silhouette used for selection and cache bounds. */
   contours: ArrowPoint[][];
   strokes: ArrowStroke[];
   bounds: { x: number; y: number; width: number; height: number };
@@ -39,6 +40,7 @@ export interface ArrowGeometryInput {
   /** Physical pixels; the toolbar converts logical widths exactly once. */
   lineWidth: number;
   style: ArrowStyle;
+  assembly?: ArrowAssemblyVariation;
 }
 
 /** Below this drag distance an arrow has no readable shape, so none is created. */
@@ -81,10 +83,8 @@ function rail(points: ArrowPoint[], half: number, side: number): ArrowPoint[] {
 }
 
 /**
- * Every preset is one closed area: the body rails and the head share a single
- * perimeter, so no seam, overlap or interior gap can appear.  All dimensions
- * are proportional to the drag length and the requested width, which keeps the
- * shape identical at any DPI or cache resolution.
+ * Builds conservative bounds and endpoint/head geometry for the straight-part
+ * assembler. All dimensions remain proportional to drag length and width.
  */
 export function calculateArrowGeometry(input: ArrowGeometryInput): ArrowGeometry | null {
   const { start, end } = input;
@@ -96,13 +96,17 @@ export function calculateArrowGeometry(input: ArrowGeometryInput): ArrowGeometry
   )
     return null;
   const style = normalizeArrowStyle(input.style);
-  // The stair needs longer straight runs than the other presets before it can
-  // carry the full width without folding over itself on a short drag.
-  const width = Math.min(input.lineWidth, length * (style === "zigzag" ? 0.065 : 0.16));
+  const width = Math.min(input.lineWidth, length * 0.16);
   const half = width / 2;
-  const headLength = Math.min(width * 2.8, length * 0.25);
+  const variation = input.assembly;
+  const headLength = Math.min(
+    Math.min(width * 2.8, length * 0.25) * (variation?.headLengthScale ?? 1),
+    length * 0.28,
+  );
   const neck = length - headLength;
-  const headHalf = width * 1.25;
+  const leftHeadHalf = width * 1.25 * (variation?.leftHeadScale ?? 1);
+  const rightHeadHalf = width * 1.25 * (variation?.rightHeadScale ?? 1);
+  const headBaseY = 0;
   const direction = unit(start, end);
   const normal = { x: -direction.y, y: direction.x };
   const world = (p: ArrowPoint) => ({
@@ -112,44 +116,28 @@ export function calculateArrowGeometry(input: ArrowGeometryInput): ArrowGeometry
   let spine: ArrowPoint[];
   let upper: ArrowPoint[];
   let lower: ArrowPoint[];
-  if (style === "lightning") {
-    // A tapered Z ribbon, deliberately different from the equal-width stair.
-    // Both rails are offset from an x-monotone spine, so they never cross.
-    spine = [
-      { x: 0, y: 0 },
-      { x: neck * 0.34, y: length * 0.1 },
-      { x: neck * 0.62, y: -length * 0.1 },
-      { x: neck, y: 0 },
-    ];
-    const widths = [width * 0.1, width * 0.85, width * 0.32, half];
-    upper = spine.map((p, i) => ({ x: p.x, y: p.y - widths[i] }));
-    lower = spine.map((p, i) => ({ x: p.x, y: p.y + widths[i] }));
-  } else {
-    spine =
-      style === "zigzag"
-        ? [
-            { x: 0, y: 0 },
-            { x: neck * 0.2, y: -neck * 0.2 },
-            { x: neck * 0.4, y: 0 },
-            { x: neck * 0.6, y: -neck * 0.2 },
-            { x: neck * 0.8, y: 0 },
-            { x: neck, y: 0 },
-          ]
-        : [{ x: style === "double" ? headLength : 0, y: 0 }, { x: neck, y: 0 }];
-    upper = rail(spine, half, -1);
-    lower = rail(spine, half, 1);
-  }
+  spine = [
+    { x: style === "double" ? headLength : 0, y: 0 },
+    { x: neck, y: 0 },
+  ];
+  upper = rail(spine, half, -1);
+  lower = rail(spine, half, 1);
   const contour = [
     ...upper,
-    { x: neck, y: -headHalf },
+    { x: neck, y: headBaseY - leftHeadHalf },
     { x: length, y: 0 },
-    { x: neck, y: headHalf },
+    { x: neck, y: headBaseY + rightHeadHalf },
     ...lower.reverse(),
   ];
   if (style === "double") {
     // The tail head mirrors the leading head across the arrow midpoint.
-    contour.push({ x: headLength, y: headHalf }, { x: 0, y: 0 }, { x: headLength, y: -headHalf });
-  } else if (style === "straight") {
+    const tailY = spine[0].y;
+    contour.push(
+      { x: headLength, y: tailY + leftHeadHalf },
+      { x: 0, y: 0 },
+      { x: headLength, y: tailY - rightHeadHalf },
+    );
+  } else {
     // Small tail corner arcs, retaining the nominal start point at x = 0.
     const radius = width * 0.18;
     contour[0] = { x: radius, y: -half };
@@ -170,18 +158,18 @@ export function calculateArrowGeometry(input: ArrowGeometryInput): ArrowGeometry
   const heads: ArrowHeadGeometry[] = [
     {
       tip: { ...end },
-      baseCenter: world({ x: neck, y: 0 }),
-      leftBase: world({ x: neck, y: -headHalf }),
-      rightBase: world({ x: neck, y: headHalf }),
+      baseCenter: world({ x: neck, y: headBaseY }),
+      leftBase: world({ x: neck, y: headBaseY - leftHeadHalf }),
+      rightBase: world({ x: neck, y: headBaseY + rightHeadHalf }),
       filled: true,
     },
   ];
   if (style === "double")
     heads.push({
       tip: { ...start },
-      baseCenter: world({ x: headLength, y: 0 }),
-      leftBase: world({ x: headLength, y: -headHalf }),
-      rightBase: world({ x: headLength, y: headHalf }),
+      baseCenter: world(spine[0]),
+      leftBase: world({ x: headLength, y: spine[0].y + leftHeadHalf }),
+      rightBase: world({ x: headLength, y: spine[0].y - rightHeadHalf }),
       filled: true,
     });
   const xs = points.map((p) => p.x),
@@ -195,15 +183,19 @@ export function calculateArrowGeometry(input: ArrowGeometryInput): ArrowGeometry
     normal,
     shaftStart: { ...start },
     shaftEnd: { ...end },
-    shaftPoints: [{ ...start }, ...spine.map(world), { ...end }],
+    shaftPoints: [
+      ...(style === "double" ? [{ ...start }] : []),
+      ...spine.map(world),
+      { ...end },
+    ],
     heads,
     contours: [points],
     strokes: [{ points, closed: true, taper: false }],
     bounds: {
-      x: Math.min(...xs),
-      y: Math.min(...ys),
-      width: Math.max(...xs) - Math.min(...xs),
-      height: Math.max(...ys) - Math.min(...ys),
+      x: Math.min(...xs) - half,
+      y: Math.min(...ys) - half,
+      width: Math.max(...xs) - Math.min(...xs) + width,
+      height: Math.max(...ys) - Math.min(...ys) + width,
     },
   };
 }

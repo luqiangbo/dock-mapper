@@ -673,25 +673,6 @@ body,
   opacity: 0.72;
 }
 
-.arrow-option {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  line-height: 1;
-}
-
-.arrow-option__text {
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.arrow-thumb {
-  width: 30px;
-  height: 14px;
-  flex: 0 0 30px;
-  overflow: visible;
-}
-
 .palette-strip {
   display: inline-flex;
   min-width: 18px;

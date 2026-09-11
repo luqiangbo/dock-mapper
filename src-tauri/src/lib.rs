@@ -332,7 +332,7 @@ pub struct AppState {
     pub images: image_store::ImageStore,
     pub history: Arc<history::HistoryStore>,
     pub(crate) config_path: PathBuf,
-    widget_width: Mutex<f64>,
+    widget_layout: Mutex<taskbar::WidgetLayoutRequest>,
     pub(crate) mutation_lock: Mutex<()>,
     admin_operation_in_progress: AtomicBool,
 }
@@ -954,7 +954,7 @@ pub fn run() {
                 images: image_store::ImageStore::default(),
                 history,
                 config_path,
-                widget_width: Mutex::new(widget::DEFAULT_WIDTH),
+                widget_layout: Mutex::new(taskbar::WidgetLayoutRequest::default()),
                 mutation_lock: Mutex::new(()),
                 admin_operation_in_progress: AtomicBool::new(false),
             };

@@ -10,13 +10,10 @@ import {
 import type { ColorPaletteConfig, ScreenshotConfig } from "../../../types";
 import { STROKE_COLORS, type AnnotTool } from "./AnnotationToolbar";
 import {
-  DEFAULT_ARROW_EFFECT,
   DEFAULT_FRAME_EFFECT,
   FRAME_EFFECT_OPTIONS,
   FRAME_SHAPE_OPTIONS,
   normalizeArrowStyle,
-  normalizeArrowWidth,
-  type ArrowEffect,
   type ArrowStyle,
   type FrameEffect,
   type FrameShape,
@@ -24,11 +21,8 @@ import {
   type TextStyle,
   type ToolSettings,
 } from "./annotationTypes";
-import {
-  ARROW_EFFECT_CHOICES,
-  ARROW_SHAPE_CHOICES,
-  ARROW_WIDTH_CHOICES,
-} from "./ArrowOptionThumbs";
+import { ARROW_SHAPE_CHOICES } from "./ArrowOptionThumbs";
+import ArrowBrushPicker from "./ArrowBrushPicker";
 import { normalizeHexColor, selectNumber } from "./toolOptionValues";
 import { normalizeGradientStops } from "./annotationPaint";
 
@@ -242,6 +236,10 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
     },
     [onPopupOpenChange],
   );
+  const arrowBrushPopup = useCallback(
+    (open: boolean) => popup("arrow-brush", open),
+    [popup],
+  );
   const color = (
     <Color
       label="颜色"
@@ -327,24 +325,13 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             change={(value) => onChange({ arrowStyle: value as ArrowStyle })}
             popup={popup}
           />
-          <Choice
-            label="效果"
-            value={settings.arrowEffect ?? DEFAULT_ARROW_EFFECT}
-            options={ARROW_EFFECT_CHOICES}
-            name="arrow-effect"
-            compactWidth={116}
-            change={(value) => onChange({ arrowEffect: value as ArrowEffect })}
-            popup={popup}
-          />
-          <Choice
-            label="粗细"
-            value={normalizeArrowWidth(settings.arrowWidth)}
-            options={ARROW_WIDTH_CHOICES}
-            name="arrow-width"
-            compactWidth={104}
-            change={(value) => onChange({ arrowWidth: selectNumber(value) })}
-            popup={popup}
-          />
+          <Group label="笔刷">
+            <ArrowBrushPicker
+              value={settings.arrowBrushId}
+              onChange={(arrowBrushId) => onChange({ arrowBrushId })}
+              onOpenChange={arrowBrushPopup}
+            />
+          </Group>
         </>
       )}
       {tool === "pen" && (

@@ -1,10 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ARROW_STYLE_OPTIONS,
-  ARROW_WIDTHS,
-  DEFAULT_ARROW_WIDTH,
   normalizeArrowStyle,
-  normalizeArrowWidth,
   type ArrowStyle,
 } from "./annotationTypes";
 import {
@@ -64,13 +61,12 @@ afterEach(() => {
 });
 
 describe("arrow shape geometry", () => {
-  it("offers the four area presets and folds legacy values into them", () => {
-    expect(SHAPES).toEqual(["straight", "zigzag", "double", "lightning"]);
+  it("offers three text-selectable shapes and folds legacy values into them", () => {
+    expect(SHAPES).toEqual(["straight", "segmented", "double"]);
+    expect(normalizeArrowStyle("zigzag")).toBe("straight");
     expect(normalizeArrowStyle("loop")).toBe("straight");
+    expect(normalizeArrowStyle("lightning")).toBe("straight");
     expect(normalizeArrowStyle("label")).toBe("straight");
-    expect(normalizeArrowWidth(13)).toBe(12);
-    expect(normalizeArrowWidth(40)).toBe(18);
-    expect(normalizeArrowWidth(Number.NaN)).toBe(DEFAULT_ARROW_WIDTH);
   });
 
   it.each(SHAPES)("closes %s into a single fillable outline", (style) => {
@@ -113,25 +109,13 @@ describe("arrow shape geometry", () => {
     expect(geometry("straight").heads).toHaveLength(1);
   });
 
-  it("tapers the lightning bolt where the stair keeps an equal width", () => {
-    const bolt = geometry("lightning");
-    const stair = geometry("zigzag");
-    const spread = (points: ArrowPoint[]) =>
-      Math.max(...points.map((point) => point.y)) - Math.min(...points.map((point) => point.y));
-    // Both presets fold well beyond their own width.
-    expect(spread(bolt.shaftPoints)).toBeGreaterThan(bolt.width * 2);
-    expect(spread(stair.shaftPoints)).toBeGreaterThan(stair.width * 2);
-    const tailEdge = (points: ArrowPoint[]) => {
-      const tail = points[points.length - 2];
-      return Math.hypot(points[0].x - tail.x, points[0].y - tail.y);
-    };
-    expect(tailEdge(stair.contours[0])).toBeCloseTo(stair.width);
-    expect(tailEdge(bolt.contours[0])).toBeLessThan(bolt.width * 0.5);
+  it("renders a legacy lightning annotation as the straight compatibility shape", () => {
+    expect(geometry("lightning")).toEqual(geometry("straight"));
   });
 
-  it("grows the painted area with the selected width", () => {
-    const [thin, medium, thick] = ARROW_WIDTHS.map((width) => geometry("straight", width, 400));
-    expect([thin.width, medium.width, thick.width]).toEqual([...ARROW_WIDTHS]);
+  it("grows the painted area with the physical object width", () => {
+    const [thin, medium, thick] = [8, 12, 18].map((width) => geometry("straight", width, 400));
+    expect([thin.width, medium.width, thick.width]).toEqual([8, 12, 18]);
     expect(medium.bounds.height).toBeGreaterThan(thin.bounds.height);
     expect(thick.bounds.height).toBeGreaterThan(medium.bounds.height);
   });
@@ -193,7 +177,7 @@ describe("arrow shape geometry", () => {
   });
 
   it("recreates the same texture while giving distinct annotations different grains", () => {
-    const strokes = geometry("zigzag").strokes;
+    const strokes = geometry("segmented").strokes;
     const first = createCrayonGrains(strokes, 12, 1, arrowSeed("same"));
     expect(createCrayonGrains(strokes, 12, 1, arrowSeed("same"))).toEqual(first);
     expect(createCrayonGrains(strokes, 12, 1, arrowSeed("different"))).not.toEqual(first);

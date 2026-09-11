@@ -2,8 +2,6 @@ use crate::{persist, sys_monitor, taskbar, AppState};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-pub const DEFAULT_WIDTH: f64 = 180.0;
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryScheme {
@@ -158,13 +156,15 @@ impl WidgetConfig {
 }
 
 #[tauri::command]
-pub fn refresh_widget_position(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    let width = *state
-        .widget_width
+pub fn refresh_widget_position(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<taskbar::WidgetLayoutBudget, String> {
+    let request = *state
+        .widget_layout
         .lock()
-        .map_err(|_| "挂件宽度状态已损坏".to_string())?;
-    taskbar::refresh_widget_position(&app, width);
-    Ok(())
+        .map_err(|_| "挂件布局状态已损坏".to_string())?;
+    Ok(taskbar::refresh_widget_position(&app, request))
 }
 
 #[tauri::command]
@@ -206,12 +206,12 @@ pub fn update_widget_config(
     if let Some(control) = app.try_state::<sys_monitor::SysMonitorControl>() {
         control.set_interval(config.refresh_interval_secs);
     }
-    let width = state
-        .widget_width
+    let request = state
+        .widget_layout
         .lock()
         .map(|value| *value)
-        .unwrap_or(DEFAULT_WIDTH);
-    taskbar::refresh_widget_position(&app, width);
+        .unwrap_or_default();
+    taskbar::refresh_widget_position(&app, request);
     app.emit("widget-config-changed", &config)
         .map_err(|error| error.to_string())?;
     Ok(config)
@@ -221,14 +221,18 @@ pub fn update_widget_config(
 pub fn sync_widget_dynamic_width(
     app: AppHandle,
     state: State<'_, AppState>,
-    width: f64,
-) -> Result<(), String> {
-    let width = taskbar::sync_dynamic_width(&app, width);
+    preferred_width: f64,
+    minimum_width: f64,
+) -> Result<taskbar::WidgetLayoutBudget, String> {
+    let request = taskbar::WidgetLayoutRequest {
+        preferred_width,
+        minimum_width,
+    };
     *state
-        .widget_width
+        .widget_layout
         .lock()
-        .map_err(|_| "挂件宽度状态已损坏".to_string())? = width;
-    Ok(())
+        .map_err(|_| "挂件布局状态已损坏".to_string())? = request;
+    Ok(taskbar::sync_dynamic_width(&app, request))
 }
 
 pub fn setup_window(app: &tauri::App) -> Result<(), String> {
@@ -243,13 +247,13 @@ pub fn setup_window(app: &tauri::App) -> Result<(), String> {
             event,
             tauri::WindowEvent::ScaleFactorChanged { .. } | tauri::WindowEvent::Focused(true)
         ) {
-            let width = widget_app
+            let request = widget_app
                 .state::<AppState>()
-                .widget_width
+                .widget_layout
                 .lock()
                 .map(|value| *value)
-                .unwrap_or(DEFAULT_WIDTH);
-            taskbar::refresh_widget_position(&widget_app, width);
+                .unwrap_or_default();
+            taskbar::refresh_widget_position(&widget_app, request);
         }
     });
     Ok(())

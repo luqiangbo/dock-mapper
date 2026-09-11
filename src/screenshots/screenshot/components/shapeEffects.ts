@@ -2,6 +2,7 @@ import type { FrameEffect, FrameShape, GradientStop } from "./annotationTypes";
 import { arrowSeed } from "./crayonBrush";
 import { decorativePalette, decorativeVariant } from "./framePalette";
 import { createCanvasPaint, paintCacheKey } from "./annotationPaint";
+import { paintP5Frame } from "./p5FrameRenderer";
 
 export interface FrameBounds {
   x: number;
@@ -390,6 +391,7 @@ export function drawStyledFrame(
 ): void {
   const padding = shapeEffectPadding(effect, width);
   const cacheKey = [
+    "p5-rough-v1",
     id,
     kind,
     bounds.width,
@@ -408,17 +410,34 @@ export function drawStyledFrame(
     canvas.height = Math.max(1, Math.ceil(bounds.height + padding * 2));
     const brush = canvas.getContext("2d");
     if (!brush) throw new Error("框选效果渲染失败：无法创建画布，请重试");
-    paint(
-      brush,
-      kind,
-      { x: padding, y: padding, width: bounds.width, height: bounds.height },
-      color,
-      width,
-      fillOpacity,
-      effect,
-      arrowSeed(`${id}:${kind}`),
-      gradientStops,
-    );
+    const localBounds = { x: padding, y: padding, width: bounds.width, height: bounds.height };
+    const seed = arrowSeed(`${id}:${kind}`);
+    if (
+      !paintP5Frame(
+        brush,
+        kind,
+        localBounds,
+        color,
+        width,
+        fillOpacity,
+        effect,
+        seed,
+        gradientStops,
+      )
+    ) {
+      brush.clearRect(0, 0, canvas.width, canvas.height);
+      paint(
+        brush,
+        kind,
+        localBounds,
+        color,
+        width,
+        fillOpacity,
+        effect,
+        seed,
+        gradientStops,
+      );
+    }
     renderCache.set(cacheKey, canvas);
     if (renderCache.size > CACHE_LIMIT) renderCache.delete(renderCache.keys().next().value!);
   }
