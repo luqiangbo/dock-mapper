@@ -12,6 +12,7 @@ interface Options {
   copyPickerHex: () => void;
   exitPicker: () => void;
   clearSelection: () => void;
+  returnToSelect: () => void;
   deleteSelection: () => void;
   cancel: () => void;
   undo: () => void;
@@ -42,6 +43,7 @@ export function useOverlayKeyboard(options: Options): void {
           options.hasSelectedRaster
         )
           options.clearSelection();
+        else if (options.tool && options.tool !== "select") options.returnToSelect();
         else options.cancel();
         return;
       }

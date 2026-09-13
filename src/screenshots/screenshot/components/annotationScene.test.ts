@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FRAME_EFFECT_OPTIONS, ARROW_STYLE_OPTIONS } from "./annotationTypes";
+import { ARROW_STYLE_OPTIONS, LINE_STYLE_OPTIONS } from "./annotationTypes";
 import {
   annotationBounds,
   cloneRasterAnnotations,
@@ -22,6 +22,7 @@ const rectangle: RasterAnnotation = {
   style: {
     color: "#fff",
     strokeWidth: 2,
+    outline: { enabled: true, color: "#fff", width: 1 },
     fillOpacity: 0,
     arrowStyle: "straight",
     arrowHeadSize: 1,
@@ -126,6 +127,25 @@ describe("retained annotation scene", () => {
     expect(thick.width).toBeGreaterThanOrEqual(thin.width);
   });
 
+  it("includes the visible outline in annotation bounds", () => {
+    const withoutOutline = annotationBounds({
+      ...rectangle,
+      style: {
+        ...rectangle.style,
+        outline: { ...rectangle.style.outline, enabled: false },
+      },
+    });
+    const withOutline = annotationBounds({
+      ...rectangle,
+      style: {
+        ...rectangle.style,
+        outline: { enabled: true, color: "#ffffff", width: 4 },
+      },
+    });
+    expect(withOutline.width).toBeGreaterThan(withoutOutline.width);
+    expect(withOutline.height).toBeGreaterThan(withoutOutline.height);
+  });
+
   it("creates nothing from a drag without a usable arrow length", () => {
     const dragged = (x: number, y: number): RasterAnnotation => ({
       ...rectangle,
@@ -188,10 +208,10 @@ describe("retained annotation scene", () => {
     expect(oldBounds).toEqual(explicitBounds);
   });
 
-  it.each(FRAME_EFFECT_OPTIONS.map(({ value }) => value))(
-    "includes %s frame material outside the geometry in selection bounds",
-    (shapeEffect) => {
-      const styled = { ...rectangle, style: { ...rectangle.style, shapeEffect } };
+  it.each(LINE_STYLE_OPTIONS.map(({ value }) => value))(
+    "includes %s frame stroke outside the geometry in selection bounds",
+    (lineStyle) => {
+      const styled: RasterAnnotation = { ...rectangle, style: { ...rectangle.style, lineStyle } };
       const bounds = annotationBounds(styled);
       expect(bounds.x).toBeLessThan(rectangle.points[0].x);
       expect(bounds.y).toBeLessThan(rectangle.points[0].y);
@@ -225,6 +245,12 @@ describe("retained annotation scene", () => {
     const cloned = cloneRasterAnnotations([original])[0];
     cloned.style.gradientStops![0].color = "#00ff00";
     expect(original.style.gradientStops![0].color).toBe("#ff0000");
+  });
+
+  it("clones outlines so undo snapshots do not share their color", () => {
+    const cloned = cloneRasterAnnotations([rectangle])[0];
+    cloned.style.outline.color = "#000000";
+    expect(rectangle.style.outline.color).toBe("#fff");
   });
 
   it("includes a long horizontal arrow label in selection and hit testing", () => {

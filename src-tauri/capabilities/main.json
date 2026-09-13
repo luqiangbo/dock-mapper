@@ -36,6 +36,7 @@
     "allow-pin-screenshot-history",
     "allow-get-runtime-health",
     "allow-start-screenshot",
+    "allow-start-quick-ocr",
     "allow-get-screenshot-config",
     "allow-update-screenshot-config",
     "allow-get-screenshot-shortcut-statuses",

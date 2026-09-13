@@ -5,31 +5,28 @@ const initial: EditorSceneState = {
   tool: null,
   textEditor: null,
   textDraft: "",
-  textObjects: [],
-  numberObjects: [],
-  rasterAnnotations: [],
+  elements: [],
   rasterPreview: null,
-  selectedRasterId: null,
-  selectedTextId: null,
-  selectedNumberId: null,
+  selectedIds: [],
+  primarySelectedId: null,
 };
 
 describe("editor scene reducer", () => {
   it("keeps related annotation mutations in one state transition", () => {
     const next = editorSceneReducer(initial, {
-      type: "textObjects",
-      value: (previous) => [...previous, { id: "text-1" } as never],
+      type: "elements",
+      value: (previous) => [...previous, { type: "text", id: "text-1", value: { id: "text-1" } as never }],
     });
-    expect(next.textObjects).toHaveLength(1);
-    expect(next.rasterAnnotations).toEqual([]);
+    expect(next.elements).toHaveLength(1);
   });
 
   it("resets transient selections and scene data together", () => {
-    const withSelection = {
+    const withSelection: EditorSceneState = {
       ...initial,
-      selectedRasterId: "annotation-1",
+      selectedIds: ["annotation-1"],
+      primarySelectedId: "annotation-1",
       textDraft: "draft",
-      rasterAnnotations: [{ id: "annotation-1" } as never],
+      elements: [{ type: "raster", id: "annotation-1", value: { id: "annotation-1" } as never }],
     };
     expect(editorSceneReducer(withSelection, { type: "reset" })).toEqual(initial);
   });

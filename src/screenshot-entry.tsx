@@ -2,17 +2,13 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { ConfigProvider, theme as antdTheme } from "antd";
 import ScreenshotOverlay from "./screenshots/screenshot/components/ScreenshotOverlay";
-import PinImage from "./screenshots/screenshot/components/PinImage";
 import { I18nContext, getMessages } from "./screenshots/screenshot/i18n";
 import "./screenshots/screenshot/api";
 import "./screenshots/screenshot/assets/main.css";
 
-const view = new URLSearchParams(window.location.search).get("view");
 const root = ReactDOM.createRoot(document.getElementById("root")!);
 
 function ScreenshotWindow() {
-  const content = view === "pin" ? <PinImage /> : <ScreenshotOverlay />;
-
   return (
     <ConfigProvider
       getPopupContainer={() => document.getElementById("root") ?? document.body}
@@ -31,7 +27,7 @@ function ScreenshotWindow() {
       }}
     >
       <I18nContext.Provider value={{ language: "zh", t: getMessages("zh") }}>
-        {content}
+        <ScreenshotOverlay />
       </I18nContext.Provider>
     </ConfigProvider>
   );

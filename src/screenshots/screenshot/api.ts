@@ -1,62 +1,37 @@
-import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { ScreenshotConfig } from "../../types";
+import type {
+  AnnotationOutlineConfig,
+  ScreenshotAnnotationStyles,
+  ScreenshotConfig,
+} from "../../types";
+import { invokeCommand } from "../../api/ipc";
+import type {
+  CaptureSelectionTrace,
+  FullScreenshot,
+  OcrResult,
+  QrDecodeResult,
+  ScreenshotHistorySummary,
+} from "../../api/screenshotTypes";
 
-export interface FullScreenshot {
-  url: string;
-  generation: number;
-  displayWidth: number;
-  displayHeight: number;
-  imageWidth: number;
-  imageHeight: number;
-  overlayLabel: string;
-  windowCandidates: WindowCandidate[];
-  mode: "screenshot" | "quick_ocr";
-}
-
-export interface WindowCandidate {
-  id: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  zIndex: number;
-}
-
-export interface OcrResult {
-  text: string;
-  engine: "onnx";
-  blocks: OcrTextBlock[];
-}
-
-export interface OcrTextBlock {
-  text: string;
-  confidence: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-export interface QrDecodeResult {
-  contents: string[];
-}
-
-export interface ScreenshotHistorySummary {
-  id: string;
-  createdAtMs: number;
-  width: number;
-  height: number;
-  favorite: boolean;
-  totalBytes: number;
-}
+export type {
+  FullScreenshot,
+  OcrResult,
+  OcrTextBlock,
+  QrDecodeResult,
+  ScreenshotHistorySummary,
+  WindowCandidate,
+} from "../../api/screenshotTypes";
 
 export interface Api {
   closeOverlay: () => void;
   showCaptureOverlay: (generation?: number) => Promise<boolean>;
   overlayReady: (label: string) => Promise<void>;
   getFullScreenshot: (label: string) => Promise<FullScreenshot>;
-  reportCaptureRendered: (generation: number, label: string) => Promise<boolean>;
+  reportCaptureRendered: (
+    generation: number,
+    label: string,
+    trace?: CaptureSelectionTrace,
+  ) => Promise<boolean>;
   onCaptureReady: (callback: (label: string) => void) => () => void;
   checkScreenPermission: () => Promise<{ granted: boolean; status: string }>;
   uploadImage: (png: Uint8Array) => Promise<string>;
@@ -70,6 +45,13 @@ export interface Api {
   openUrl: (url: string) => Promise<boolean>;
   getScreenshotConfig: () => Promise<ScreenshotConfig>;
   updateScreenshotConfig: (config: ScreenshotConfig) => Promise<ScreenshotConfig>;
+  updateScreenshotAnnotationColor: (color: string) => Promise<string>;
+  updateScreenshotAnnotationOutline: (
+    outline: AnnotationOutlineConfig,
+  ) => Promise<AnnotationOutlineConfig>;
+  updateScreenshotAnnotationStyles: (
+    styles: ScreenshotAnnotationStyles,
+  ) => Promise<ScreenshotAnnotationStyles>;
   createScreenshotHistory: (resultImageId: string) => Promise<ScreenshotHistorySummary>;
 }
 
@@ -87,28 +69,34 @@ function subscribe<T>(event: string, callback: (payload: T) => void): () => void
 }
 
 export const api: Api = {
-  closeOverlay: () => void invoke("close_overlay"),
-  showCaptureOverlay: (generation) => invoke("show_capture_overlay", { generation }),
-  overlayReady: (label) => invoke("overlay_ready", { label }),
-  getFullScreenshot: (label) => invoke("get_full_screenshot", { label }),
-  reportCaptureRendered: (generation, label) =>
-    invoke("report_capture_rendered", { generation, label }),
+  closeOverlay: () => void invokeCommand("close_overlay"),
+  showCaptureOverlay: (generation) => invokeCommand("show_capture_overlay", { generation }),
+  overlayReady: (label) => invokeCommand("overlay_ready", { label }),
+  getFullScreenshot: (label) => invokeCommand("get_full_screenshot", { label }),
+  reportCaptureRendered: (generation, label, trace) =>
+    invokeCommand("report_capture_rendered", { generation, label, trace }),
   onCaptureReady: (callback) => subscribe("capture-ready", callback),
-  checkScreenPermission: () => invoke("check_screen_permission"),
-  uploadImage: (png) => invoke("upload_image", png),
-  releaseImage: (imageId) => invoke("release_image", { imageId }),
-  copyImage: (imageId) => invoke("copy_image", { imageId }),
-  copyText: (value) => invoke("copy_text", { value }),
-  saveImage: (imageId) => invoke("save_image", { imageId }),
-  pinImage: (imageId) => invoke("pin_image", { imageId }),
-  recognizeSelection: (imageId) => invoke("recognize_selection", { imageId }),
-  decodeQrSelection: (imageId) => invoke("decode_qr_selection", { imageId }),
-  openUrl: (url) => invoke("open_url", { url }),
-  getScreenshotConfig: () => invoke("get_screenshot_config"),
+  checkScreenPermission: () => invokeCommand("check_screen_permission"),
+  uploadImage: (png) => invokeCommand("upload_image", png),
+  releaseImage: (imageId) => invokeCommand("release_image", { imageId }),
+  copyImage: (imageId) => invokeCommand("copy_image", { imageId }),
+  copyText: (value) => invokeCommand("copy_text", { value }),
+  saveImage: (imageId) => invokeCommand("save_image", { imageId }),
+  pinImage: (imageId) => invokeCommand("pin_image", { imageId }),
+  recognizeSelection: (imageId) => invokeCommand("recognize_selection", { imageId }),
+  decodeQrSelection: (imageId) => invokeCommand("decode_qr_selection", { imageId }),
+  openUrl: (url) => invokeCommand("open_url", { url }),
+  getScreenshotConfig: () => invokeCommand("get_screenshot_config"),
   updateScreenshotConfig: (config) =>
-    invoke("update_screenshot_config", { screenshotConfig: config }),
+    invokeCommand("update_screenshot_config", { screenshotConfig: config }),
+  updateScreenshotAnnotationColor: (color) =>
+    invokeCommand("update_screenshot_annotation_color", { color }),
+  updateScreenshotAnnotationOutline: (outline) =>
+    invokeCommand("update_screenshot_annotation_outline", { outline }),
+  updateScreenshotAnnotationStyles: (styles) =>
+    invokeCommand("update_screenshot_annotation_styles", { styles }),
   createScreenshotHistory: (resultImageId) =>
-    invoke("create_screenshot_history", { resultImageId }),
+    invokeCommand("create_screenshot_history", { resultImageId }),
 };
 
 declare global {

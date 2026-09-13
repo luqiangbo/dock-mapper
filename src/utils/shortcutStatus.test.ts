@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ScreenshotConfig } from "../types";
+import { DEFAULT_ANNOTATION_STYLES } from "../screenshots/screenshot/components/annotationStyleDefaults";
 import { resetShortcutConfig, shortcutStatusDisplay } from "./shortcutStatus";
 
 const config: ScreenshotConfig = {
@@ -11,6 +12,9 @@ const config: ScreenshotConfig = {
   save_directory: null,
   filename_prefix: "DockMapper",
   color_copy_format: "hex",
+  annotation_color: "#e03131",
+  annotation_outline: { enabled: true, color: "#ffffff", width: 1 },
+  annotation_styles: DEFAULT_ANNOTATION_STYLES,
   capture_size_unit: "px",
 };
 

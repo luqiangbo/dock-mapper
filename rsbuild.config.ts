@@ -8,6 +8,7 @@ export default defineConfig({
     entry: {
       index: "./src/main-entry.tsx",
       screenshot: "./src/screenshot-entry.tsx",
+      pin: "./src/pin-entry.tsx",
       widget: "./src/widget-entry.tsx",
       "key-visualizer-effects": "./src/key-visualizer-effects-entry.tsx",
       "key-visualizer": "./src/key-visualizer-entry.tsx",
@@ -22,7 +23,9 @@ export default defineConfig({
       if (entryName === "key-visualizer") {
         return "./key-visualizer.html";
       }
-      return entryName === "screenshot" ? "./screenshot.html" : "./index.html";
+      if (entryName === "screenshot") return "./screenshot.html";
+      if (entryName === "pin") return "./pin.html";
+      return "./index.html";
     },
   },
   server: {

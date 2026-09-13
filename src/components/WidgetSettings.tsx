@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   Alert,
@@ -27,6 +27,7 @@ import type {
 import { formatSpeedParts } from "../utils/format";
 import styles from "./components.module.scss";
 import { errorMessage, MAIN_EVENTS, widgetApi } from "../api/commands";
+import { useQueuedAutosave } from "../hooks/useQueuedAutosave";
 
 const { Text } = Typography;
 const AUTO_SAVE_DELAY_MS = 400;
@@ -81,14 +82,22 @@ function WidgetPreview({ config, status }: { config: WidgetConfig; status: SysSt
         if (metric.kind === "network") {
           return (
             <div className={styles.previewNetwork} key={metric.kind}>
-              <span>↑</span><b>{upload.value}</b><small>{upload.unit}</small>
-              <span>↓</span><b>{download.value}</b><small>{download.unit}</small>
+              <span>↑</span>
+              <b>{upload.value}</b>
+              <small>{upload.unit}</small>
+              <span>↓</span>
+              <b>{download.value}</b>
+              <small>{download.unit}</small>
             </div>
           );
         }
         const value = metricValue(metric.kind, status);
         if (metric.usage_scheme === "ring") {
-          return <div className={styles.previewRing} key={metric.kind}>{value.toFixed(0)}</div>;
+          return (
+            <div className={styles.previewRing} key={metric.kind}>
+              {value.toFixed(0)}
+            </div>
+          );
         }
         if (metric.usage_scheme === "gauge") {
           return (
@@ -104,7 +113,8 @@ function WidgetPreview({ config, status }: { config: WidgetConfig; status: SysSt
         }
         return (
           <div className={styles.previewCompact} key={metric.kind}>
-            {metricIcon(metric.kind)}<b>{value.toFixed(0)}%</b>
+            {metricIcon(metric.kind)}
+            <b>{value.toFixed(0)}%</b>
           </div>
         );
       })}
@@ -122,35 +132,46 @@ export default function WidgetSettings() {
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const saveRevision = useRef(0);
-  const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const { notification } = AntApp.useApp();
+  const {
+    schedule: queueSave,
+    invalidate: invalidateSave,
+    isCurrent: isSaveCurrent,
+  } = useQueuedAutosave({
+    delayMs: AUTO_SAVE_DELAY_MS,
+    save: widgetApi.update,
+    onSavingChange: setSaving,
+    onSuccess: (next, { latest }) => {
+      setSavedConfig(next);
+      if (!latest) return;
+      setConfig(next);
+      form.setFieldsValue(next);
+      setSaveError(null);
+    },
+    onError: (error, { latest }) => {
+      if (latest) setSaveError(errorMessage(error));
+    },
+  });
 
   const load = useCallback(async () => {
-    const revision = ++saveRevision.current;
-    if (saveTimer.current) clearTimeout(saveTimer.current);
+    const revision = invalidateSave();
     setLoading(true);
     setLoadError(null);
     try {
       const next = await widgetApi.config();
-      if (revision !== saveRevision.current) return;
+      if (!isSaveCurrent(revision)) return;
       setConfig(next);
       setSavedConfig(next);
       form.setFieldsValue(next);
     } catch (error) {
-      if (revision === saveRevision.current) setLoadError(errorMessage(error));
+      if (isSaveCurrent(revision)) setLoadError(errorMessage(error));
     } finally {
-      if (revision === saveRevision.current) setLoading(false);
+      if (isSaveCurrent(revision)) setLoading(false);
     }
-  }, [form]);
+  }, [form, invalidateSave, isSaveCurrent]);
 
   useEffect(() => {
     void load();
-    return () => {
-      saveRevision.current += 1;
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-    };
   }, [load]);
 
   useEffect(() => {
@@ -180,36 +201,20 @@ export default function WidgetSettings() {
 
   const scheduleSave = useCallback(
     (next: WidgetConfig, delay = AUTO_SAVE_DELAY_MS) => {
-      const revision = ++saveRevision.current;
-      if (saveTimer.current) clearTimeout(saveTimer.current);
       setConfig(next);
       form.setFieldsValue(next);
       setSaveError(null);
-      saveTimer.current = setTimeout(() => {
-        saveQueue.current = saveQueue.current.then(async () => {
-          if (revision !== saveRevision.current) return;
-          setSaving(true);
-          try {
-            const saved = await widgetApi.update(next);
-            setSavedConfig(saved);
-            if (revision === saveRevision.current) {
-              setConfig(saved);
-              form.setFieldsValue(saved);
-              setSaveError(null);
-            }
-          } catch (error) {
-            if (revision === saveRevision.current) setSaveError(errorMessage(error));
-          } finally {
-            if (revision === saveRevision.current) setSaving(false);
-          }
-        });
-      }, delay);
+      queueSave(next, delay);
     },
-    [form],
+    [form, queueSave],
   );
 
   if (loading) {
-    return <div className={`${styles.page} ${styles.centerState}`}><Spin tip="读取挂件设置…" /></div>;
+    return (
+      <div className={`${styles.page} ${styles.centerState}`}>
+        <Spin tip="读取挂件设置…" />
+      </div>
+    );
   }
 
   if (!config || !savedConfig) {
@@ -301,7 +306,11 @@ export default function WidgetSettings() {
       width: 148,
       render: (_: unknown, metric: WidgetMetricRow) => (
         <div className={styles.actionRow}>
-          <Button size="small" disabled={metric.visibleIndex === 0} onClick={() => moveMetric(metric.index, -1)}>
+          <Button
+            size="small"
+            disabled={metric.visibleIndex === 0}
+            onClick={() => moveMetric(metric.index, -1)}
+          >
             上移
           </Button>
           <Button
@@ -330,9 +339,13 @@ export default function WidgetSettings() {
           <div className={styles.widgetPreviewHeader}>
             <div>
               <Text strong>实时预览</Text>
-              <span className={styles.description}>固定宽度槽位会阻止实时数值带动任务栏整体位移。</span>
+              <span className={styles.description}>
+                固定宽度槽位会阻止实时数值带动任务栏整体位移。
+              </span>
             </div>
-            <Tag color={saveError ? "error" : saving ? "processing" : dirty ? "warning" : "success"}>
+            <Tag
+              color={saveError ? "error" : saving ? "processing" : dirty ? "warning" : "success"}
+            >
               {saveLabel.replace("…", "")}
             </Tag>
           </div>
@@ -358,7 +371,9 @@ export default function WidgetSettings() {
                 <Form.Item noStyle name="refresh_interval_secs">
                   <Select
                     options={[1, 2, 3, 5].map((value) => ({ value, label: `${value} 秒` }))}
-                    onChange={(refresh_interval_secs) => scheduleSave({ ...config, refresh_interval_secs })}
+                    onChange={(refresh_interval_secs) =>
+                      scheduleSave({ ...config, refresh_interval_secs })
+                    }
                   />
                 </Form.Item>
               </div>
@@ -390,7 +405,11 @@ export default function WidgetSettings() {
               showIcon
               message="挂件设置未保存"
               description={saveError}
-              action={<Button size="small" onClick={() => scheduleSave(config, 0)}>重试保存</Button>}
+              action={
+                <Button size="small" onClick={() => scheduleSave(config, 0)}>
+                  重试保存
+                </Button>
+              }
             />
           )}
           <div className={styles.autoSaveFooter}>
@@ -398,8 +417,7 @@ export default function WidgetSettings() {
             <Button
               disabled={!dirty || saving}
               onClick={() => {
-                saveRevision.current += 1;
-                if (saveTimer.current) clearTimeout(saveTimer.current);
+                invalidateSave();
                 setConfig(savedConfig);
                 form.setFieldsValue(savedConfig);
                 setSaveError(null);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   Alert,
@@ -23,11 +23,11 @@ import ShortcutSelect from "./ShortcutSelect";
 import { errorMessage, MAIN_EVENTS, screenshotSettingsApi } from "../api/commands";
 import { resetShortcutConfig, shortcutStatusDisplay } from "../utils/shortcutStatus";
 import {
-  isLatestSaveRevision,
   SCREENSHOT_SHORTCUT_FIELDS,
   validateScreenshotShortcutDraft,
   type ScreenshotShortcutField,
 } from "./screenshotSettingsSave";
+import { useQueuedAutosave } from "../hooks/useQueuedAutosave";
 
 const { Text } = Typography;
 interface ScreenshotSettingsProps {
@@ -58,9 +58,6 @@ export default function ScreenshotSettings({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [shortcutStatuses, setShortcutStatuses] = useState<ShortcutRuntimeStatus[]>([]);
   const values = Form.useWatch([], form);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const saveRevision = useRef(0);
-  const saveQueue = useRef<Promise<void>>(Promise.resolve());
 
   const refreshStatuses = useCallback(async () => {
     try {
@@ -74,7 +71,28 @@ export default function ScreenshotSettings({
     }
   }, [notification]);
 
+  const {
+    schedule: queueSave,
+    invalidate: invalidateSave,
+    isCurrent: isSaveCurrent,
+  } = useQueuedAutosave({
+    delayMs: 0,
+    save: screenshotSettingsApi.update,
+    onSavingChange: setSaving,
+    onSuccess: async (config, { latest }) => {
+      setSaved(config);
+      if (!latest) return;
+      form.setFieldsValue(config);
+      setSaveError(null);
+      await refreshStatuses();
+    },
+    onError: (error, { latest }) => {
+      if (latest) setSaveError(errorMessage(error));
+    },
+  });
+
   const load = useCallback(async () => {
+    const revision = invalidateSave();
     setLoading(true);
     setSaveError(null);
     try {
@@ -82,15 +100,16 @@ export default function ScreenshotSettings({
         screenshotSettingsApi.get(),
         screenshotSettingsApi.shortcutStatuses(),
       ]);
+      if (!isSaveCurrent(revision)) return;
       setSaved(config);
       form.setFieldsValue(config);
       setShortcutStatuses(statuses);
     } catch (error) {
-      setSaveError(errorMessage(error));
+      if (isSaveCurrent(revision)) setSaveError(errorMessage(error));
     } finally {
-      setLoading(false);
+      if (isSaveCurrent(revision)) setLoading(false);
     }
-  }, [form]);
+  }, [form, invalidateSave, isSaveCurrent]);
 
   useEffect(() => {
     void load();
@@ -109,8 +128,6 @@ export default function ScreenshotSettings({
       );
     return () => {
       disposed = true;
-      saveRevision.current += 1;
-      if (saveTimer.current) clearTimeout(saveTimer.current);
       off?.();
     };
   }, [notification, refreshStatuses]);
@@ -120,55 +137,42 @@ export default function ScreenshotSettings({
     [saved, values],
   );
 
-  const validateShortcuts = useCallback((next: ScreenshotConfig): boolean => {
-    form.setFields(shortcutNames.map((name) => ({ name, errors: [] })));
-    const { invalid, duplicates } = validateScreenshotShortcutDraft(next);
-    if (invalid.length > 0) {
-      form.setFields(
-        invalid.map((name) => ({ name, errors: ["请选择一个或两个修饰键，并指定受支持的主键"] })),
-      );
-      setSaveError("快捷键格式无效，请重新选择标记的快捷键");
-      return false;
-    }
-    if (duplicates.length > 0) {
-      form.setFields(
-        duplicates.map((name) => ({ name, errors: ["快捷键不能与其他截图操作重复"] })),
-      );
-      setSaveError("快捷键重复，请为标记的操作选择不同组合");
-      return false;
-    }
-    return true;
-  }, [form]);
+  const validateShortcuts = useCallback(
+    (next: ScreenshotConfig): boolean => {
+      form.setFields(shortcutNames.map((name) => ({ name, errors: [] })));
+      const { invalid, duplicates } = validateScreenshotShortcutDraft(next);
+      if (invalid.length > 0) {
+        form.setFields(
+          invalid.map((name) => ({ name, errors: ["请选择一个或两个修饰键，并指定受支持的主键"] })),
+        );
+        setSaveError("快捷键格式无效，请重新选择标记的快捷键");
+        return false;
+      }
+      if (duplicates.length > 0) {
+        form.setFields(
+          duplicates.map((name) => ({ name, errors: ["快捷键不能与其他截图操作重复"] })),
+        );
+        setSaveError("快捷键重复，请为标记的操作选择不同组合");
+        return false;
+      }
+      return true;
+    },
+    [form],
+  );
 
-  const scheduleSave = useCallback((next: ScreenshotConfig, delay = 0) => {
-    const revision = ++saveRevision.current;
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    setSaveError(null);
-    if (!validateShortcuts(next)) return;
-    saveTimer.current = setTimeout(() => {
-      saveQueue.current = saveQueue.current.then(async () => {
-        if (!isLatestSaveRevision(revision, saveRevision.current)) return;
-        setSaving(true);
-        try {
-          const config = await screenshotSettingsApi.update(next);
-          setSaved(config);
-          if (!isLatestSaveRevision(revision, saveRevision.current)) return;
-          form.setFieldsValue(config);
-          setSaveError(null);
-          await refreshStatuses();
-        } catch (error) {
-          if (isLatestSaveRevision(revision, saveRevision.current)) setSaveError(errorMessage(error));
-        } finally {
-          setSaving(false);
-        }
-      });
-    }, delay);
-  }, [form, refreshStatuses, validateShortcuts]);
+  const scheduleSave = useCallback(
+    (next: ScreenshotConfig, delay = 0) => {
+      invalidateSave();
+      setSaveError(null);
+      if (!validateShortcuts(next)) return;
+      queueSave(next, delay);
+    },
+    [invalidateSave, queueSave, validateShortcuts],
+  );
 
   const resetShortcuts = async () => {
     if (!saved) return;
-    saveRevision.current += 1;
-    if (saveTimer.current) clearTimeout(saveTimer.current);
+    invalidateSave();
     setSaving(true);
     setSaveError(null);
     try {
@@ -207,17 +211,23 @@ export default function ScreenshotSettings({
     );
   };
   const settings = loading ? (
-    <div className={styles.centerState}><Spin tip="读取截图设置…" /></div>
+    <div className={styles.centerState}>
+      <Spin tip="读取截图设置…" />
+    </div>
   ) : !saved ? (
-    <Alert type="error" showIcon message="截图设置读取失败" description={saveError} action={<Button onClick={() => void load()}>重试</Button>} />
+    <Alert
+      type="error"
+      showIcon
+      message="截图设置读取失败"
+      description={saveError}
+      action={<Button onClick={() => void load()}>重试</Button>}
+    />
   ) : (
     <Form
       form={form}
       layout="vertical"
       className={styles.settingsForm}
-      onValuesChange={(changed, next) =>
-        scheduleSave(next, "filename_prefix" in changed ? 400 : 0)
-      }
+      onValuesChange={(changed, next) => scheduleSave(next, "filename_prefix" in changed ? 400 : 0)}
     >
       <Card className={styles.surfaceCard} title="截图">
         <div className={styles.settingsGroup}>
@@ -244,31 +254,41 @@ export default function ScreenshotSettings({
           </div>
           <div className={`${styles.settingRow} ${styles.shortcutSection}`}>
             <Row className={styles.shortcutHeader} gutter={[12, 8]} align="middle">
-              <Col flex="auto"><div className={styles.settingCopy}>
-                <Text strong>全局快捷键</Text>
-                <span className={styles.description}>
-                  选择一个修饰键和主键，也可增加第二个修饰键；修改后自动注册。
-                </span>
-              </div></Col>
-              <Col><Button loading={saving} onClick={() => void resetShortcuts()}>恢复默认</Button></Col>
+              <Col flex="auto">
+                <div className={styles.settingCopy}>
+                  <Text strong>全局快捷键</Text>
+                  <span className={styles.description}>
+                    选择一个修饰键和主键，也可增加第二个修饰键；修改后自动注册。
+                  </span>
+                </div>
+              </Col>
+              <Col>
+                <Button loading={saving} onClick={() => void resetShortcuts()}>
+                  恢复默认
+                </Button>
+              </Col>
             </Row>
             <div className={styles.shortcutList}>
               {shortcutFields.map(([name, label, detail, id]) => (
                 <Row className={styles.shortcutItem} key={name} gutter={[12, 8]} align="middle">
-                  <Col xs={24} lg={7}><div className={styles.shortcutCopy}>
-                    <Text>{label}</Text>
-                    <span className={styles.description}>{detail}</span>
-                  </div></Col>
-                  <Col xs={24} lg={17}><div className={styles.shortcutBinding}>
-                    {status(id)}
-                    <Form.Item
-                      className={styles.shortcutFormItem}
-                      name={name}
-                      rules={[{ required: true, message: "请选择快捷键" }]}
-                    >
-                      <ShortcutSelect aria-label={label} />
-                    </Form.Item>
-                  </div></Col>
+                  <Col xs={24} lg={7}>
+                    <div className={styles.shortcutCopy}>
+                      <Text>{label}</Text>
+                      <span className={styles.description}>{detail}</span>
+                    </div>
+                  </Col>
+                  <Col xs={24} lg={17}>
+                    <div className={styles.shortcutBinding}>
+                      {status(id)}
+                      <Form.Item
+                        className={styles.shortcutFormItem}
+                        name={name}
+                        rules={[{ required: true, message: "请选择快捷键" }]}
+                      >
+                        <ShortcutSelect aria-label={label} />
+                      </Form.Item>
+                    </div>
+                  </Col>
                 </Row>
               ))}
             </div>
@@ -284,35 +304,58 @@ export default function ScreenshotSettings({
             />
           </Form.Item>
           <Row gutter={screens.lg ? 16 : 12}>
-            <Col xs={24} lg={12}><Form.Item name="color_copy_format" label="取色复制格式">
-              <Select
-                options={["hex", "rgb", "hsl", "hsv", "css"].map((value) => ({
-                  value,
-                  label: value.toUpperCase(),
-                }))}
-              />
-            </Form.Item></Col>
-            <Col xs={24} lg={12}><Form.Item name="capture_size_unit" label="截图尺寸单位">
-              <Select
-                options={[
-                  { value: "px", label: "PX（导出像素）" },
-                  { value: "dip", label: "DIP（逻辑尺寸）" },
-                ]}
-              />
-            </Form.Item></Col>
+            <Col xs={24} lg={12}>
+              <Form.Item name="color_copy_format" label="取色复制格式">
+                <Select
+                  options={["hex", "rgb", "hsl", "hsv", "css"].map((value) => ({
+                    value,
+                    label: value.toUpperCase(),
+                  }))}
+                />
+              </Form.Item>
+            </Col>
+            <Col xs={24} lg={12}>
+              <Form.Item name="capture_size_unit" label="截图尺寸单位">
+                <Select
+                  options={[
+                    { value: "px", label: "PX（导出像素）" },
+                    { value: "dip", label: "DIP（逻辑尺寸）" },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
           </Row>
           <Form.Item name="filename_prefix" label="文件名前缀">
             <Input />
           </Form.Item>
-          {saveError && <Alert type="error" showIcon message="截图设置未保存" description={saveError} action={<Button size="small" onClick={() => scheduleSave(form.getFieldsValue(true))}>重试保存</Button>} />}
+          {saveError && (
+            <Alert
+              type="error"
+              showIcon
+              message="截图设置未保存"
+              description={saveError}
+              action={
+                <Button size="small" onClick={() => scheduleSave(form.getFieldsValue(true))}>
+                  重试保存
+                </Button>
+              }
+            />
+          )}
           <div className={styles.autoSaveFooter}>
-            <Text type="secondary">{saveError ? "保存失败" : saving ? "正在自动保存…" : dirty ? "等待自动保存…" : "已自动保存"}</Text>
+            <Text type="secondary">
+              {saveError
+                ? "保存失败"
+                : saving
+                  ? "正在自动保存…"
+                  : dirty
+                    ? "等待自动保存…"
+                    : "已自动保存"}
+            </Text>
             <Button
               disabled={!dirty || saving}
               onClick={() => {
                 if (saved) {
-                  saveRevision.current += 1;
-                  if (saveTimer.current) clearTimeout(saveTimer.current);
+                  invalidateSave();
                   form.setFieldsValue(saved);
                   form.setFields(shortcutNames.map((name) => ({ name, errors: [] })));
                   setSaveError(null);

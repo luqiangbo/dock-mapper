@@ -38,7 +38,58 @@ export interface ScreenshotConfig {
   save_directory: string | null;
   filename_prefix: string;
   color_copy_format: "hex" | "rgb" | "hsl" | "hsv" | "css";
+  annotation_color: string;
+  annotation_outline: AnnotationOutlineConfig;
+  annotation_styles: ScreenshotAnnotationStyles;
+  /** Internal migration marker round-tripped by settings updates. */
+  _annotation_styles_initialized?: boolean;
   capture_size_unit: "px" | "dip";
+}
+
+export type AnnotationStrokeStyle = "solid" | "dashed" | "dotted";
+export type AnnotationFillStyle = "none" | "solid" | "hachure" | "cross_hatch";
+export type AnnotationArrowType = "sharp" | "round" | "elbow";
+export type AnnotationArrowhead = "none" | "arrow" | "triangle" | "circle" | "diamond" | "bar";
+
+/**
+ * One persisted tool preset. Fields that are not meaningful for a given tool
+ * are retained so the native config has one forward-compatible wire shape.
+ */
+export interface AnnotationToolStyleConfig {
+  stroke_color: string;
+  background_color: string;
+  stroke_width: number;
+  stroke_style: AnnotationStrokeStyle;
+  fill_style: AnnotationFillStyle;
+  roughness: 0 | 1 | 2;
+  opacity: number;
+  arrow_type: AnnotationArrowType;
+  start_arrowhead: AnnotationArrowhead;
+  end_arrowhead: AnnotationArrowhead;
+  pressure: boolean;
+  block_size: number;
+  font_size: number;
+  marker_size: number;
+  outline_enabled: boolean;
+  outline_color: string;
+  outline_width: number;
+}
+
+export interface ScreenshotAnnotationStyles {
+  shape: AnnotationToolStyleConfig;
+  line: AnnotationToolStyleConfig;
+  arrow: AnnotationToolStyleConfig;
+  pen: AnnotationToolStyleConfig;
+  highlight: AnnotationToolStyleConfig;
+  text: AnnotationToolStyleConfig;
+  number: AnnotationToolStyleConfig;
+  mosaic: AnnotationToolStyleConfig;
+}
+
+export interface AnnotationOutlineConfig {
+  enabled: boolean;
+  color: string;
+  width: number;
 }
 
 export interface WidgetConfig {

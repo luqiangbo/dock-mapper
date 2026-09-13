@@ -50,6 +50,7 @@ body,
   width: 100vw;
   height: 100vh;
   cursor: crosshair;
+  touch-action: none;
 }
 
 /* ---------- Capture surface ---------- */
@@ -559,6 +560,93 @@ body,
   cursor: crosshair;
 }
 
+.scene-marquee {
+  position: absolute;
+  z-index: 10000;
+  box-sizing: border-box;
+  pointer-events: none;
+  border: 1px solid #6366f1;
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.scene-snap-guide {
+  position: absolute;
+  z-index: 9999;
+  pointer-events: none;
+  background: #ec4899;
+}
+.scene-snap-guide--x { top: 0; bottom: 0; width: 1px; }
+.scene-snap-guide--y { left: 0; right: 0; height: 1px; }
+
+.scene-selection {
+  position: absolute;
+  z-index: 10000;
+  box-sizing: border-box;
+  border: 2px solid #6366f1;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.92);
+  cursor: move;
+  pointer-events: none;
+}
+
+.scene-selection__handle,
+.scene-selection__rotate {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #fff;
+  border-radius: 2px;
+  background: #6366f1;
+  pointer-events: auto;
+}
+.scene-selection__handle--nw { left: -6px; top: -6px; cursor: nwse-resize; }
+.scene-selection__handle--n { left: 50%; top: -6px; transform: translateX(-50%); cursor: ns-resize; }
+.scene-selection__handle--ne { right: -6px; top: -6px; cursor: nesw-resize; }
+.scene-selection__handle--e { right: -6px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+.scene-selection__handle--se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.scene-selection__handle--s { left: 50%; bottom: -6px; transform: translateX(-50%); cursor: ns-resize; }
+.scene-selection__handle--sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.scene-selection__handle--w { left: -6px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+.scene-selection__rotate {
+  left: 50%;
+  top: -28px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  cursor: grab;
+}
+.scene-selection__rotate::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 8px;
+  width: 1px;
+  height: 16px;
+  background: #6366f1;
+}
+
+.linear-node-handle {
+  position: absolute;
+  z-index: 10001;
+  width: 11px;
+  height: 11px;
+  transform: translate(-50%, -50%);
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #ec4899;
+  cursor: move;
+}
+
+.linear-node {
+  position: absolute;
+  z-index: 14;
+  width: 11px;
+  height: 11px;
+  transform: translate(-50%, -50%);
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #6366f1;
+  cursor: move;
+}
+
 .raster-object {
   box-sizing: border-box;
   position: absolute;
@@ -573,6 +661,18 @@ body,
 .raster-object.is-selected {
   border: 2px solid #6366f1;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.9);
+}
+
+.raster-object.is-binding-target {
+  border: 2px solid #22c55e;
+  background: rgba(34, 197, 94, 0.12);
+  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.2);
+}
+
+.text-object.is-binding-target,
+.number-object.is-binding-target {
+  outline: 3px solid #22c55e;
+  outline-offset: 3px;
 }
 
 .raster-object__resize {
@@ -613,6 +713,12 @@ body,
   scrollbar-width: thin;
 }
 
+.tool-options__mixed {
+  color: #fbbf24;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .tool-options--picker {
   gap: 7px;
   min-height: 38px;
@@ -649,10 +755,85 @@ body,
   font-weight: 600;
 }
 
-.tool-options .ant-color-picker-trigger {
-  min-width: 30px;
-  min-height: 30px;
-  padding: 4px;
+.tool-options__group--color-only {
+  gap: 0;
+}
+
+.tool-options__color-trigger {
+  box-sizing: border-box;
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  padding: 3px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  outline: 0;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 120ms ease, transform 120ms ease;
+}
+
+.tool-options__color-trigger:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.tool-options__color-trigger:active {
+  transform: scale(0.92);
+}
+
+.tool-options__color-trigger:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.9);
+  outline-offset: 1px;
+}
+
+.tool-options__color-swatch {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+}
+
+.tool-options__outline-trigger {
+  position: relative;
+  box-sizing: border-box;
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  padding: 3px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  outline: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.tool-options__outline-trigger:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.tool-options__outline-trigger:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.9);
+  outline-offset: 1px;
+}
+
+.tool-options__outline-trigger > span {
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 3px solid #fff;
+  border-radius: 50%;
+}
+
+.tool-options__outline-trigger.is-disabled::after {
+  position: absolute;
+  width: 16px;
+  height: 2px;
+  border-radius: 1px;
+  background: #ff6b6b;
+  content: "";
+  transform: rotate(-45deg);
 }
 
 .tool-options .ant-select-selection-item,

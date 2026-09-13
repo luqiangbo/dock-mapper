@@ -23,6 +23,7 @@ import type {
   KeyVisualizerStatus,
 } from "../types";
 import styles from "./components.module.scss";
+import { useQueuedAutosave } from "../hooks/useQueuedAutosave";
 
 const { Text, Title } = Typography;
 
@@ -90,13 +91,43 @@ export default function KeyVisualizerSettings() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const values = Form.useWatch([], form);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const saveRevision = useRef(0);
-  const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const ownSaveInFlight = useRef(false);
   const statusRefreshRevision = useRef(0);
+  const {
+    schedule: queueSave,
+    invalidate: invalidateSave,
+    isCurrent: isSaveCurrent,
+  } = useQueuedAutosave({
+    delayMs: 450,
+    save: async (next: KeyVisualizerConfig) => {
+      ownSaveInFlight.current = true;
+      try {
+        return await keyVisualizerApi.update(next);
+      } finally {
+        ownSaveInFlight.current = false;
+      }
+    },
+    onSavingChange: setSaving,
+    onSuccess: async (config, { latest }) => {
+      setSaved(config);
+      if (!latest) return;
+      form.setFieldsValue(config);
+      setError(null);
+      const request = ++statusRefreshRevision.current;
+      try {
+        const nextStatus = await keyVisualizerApi.status();
+        if (request === statusRefreshRevision.current) setStatus(nextStatus);
+      } catch (reason) {
+        setError(`设置已保存，但刷新运行状态失败：${errorMessage(reason)}`);
+      }
+    },
+    onError: (reason, { latest }) => {
+      if (latest) setError(errorMessage(reason));
+    },
+  });
 
   const load = useCallback(async () => {
+    const revision = invalidateSave();
     setLoading(true);
     setError(null);
     try {
@@ -104,15 +135,16 @@ export default function KeyVisualizerSettings() {
         keyVisualizerApi.config(),
         keyVisualizerApi.status(),
       ]);
+      if (!isSaveCurrent(revision)) return;
       setSaved(config);
       form.setFieldsValue(config);
       setStatus(nextStatus);
     } catch (reason) {
-      setError(errorMessage(reason));
+      if (isSaveCurrent(revision)) setError(errorMessage(reason));
     } finally {
-      setLoading(false);
+      if (isSaveCurrent(revision)) setLoading(false);
     }
-  }, [form]);
+  }, [form, invalidateSave, isSaveCurrent]);
 
   useEffect(() => {
     void load();
@@ -126,8 +158,7 @@ export default function KeyVisualizerSettings() {
         MAIN_EVENTS.keyVisualizerConfigChanged,
         ({ payload }) => {
           if (disposed || ownSaveInFlight.current) return;
-          saveRevision.current += 1;
-          if (saveTimer.current) clearTimeout(saveTimer.current);
+          invalidateSave();
           setSaved(payload);
           form.setFieldsValue(payload);
         },
@@ -157,11 +188,9 @@ export default function KeyVisualizerSettings() {
     });
     return () => {
       disposed = true;
-      saveRevision.current += 1;
-      if (saveTimer.current) clearTimeout(saveTimer.current);
       offs.forEach((off) => off());
     };
-  }, [form]);
+  }, [form, invalidateSave]);
 
   const dirty = useMemo(
     () => !!saved && !!values && JSON.stringify(values) !== JSON.stringify(saved),
@@ -170,8 +199,7 @@ export default function KeyVisualizerSettings() {
 
   const scheduleSave = useCallback(
     (next: KeyVisualizerConfig) => {
-      const revision = ++saveRevision.current;
-      if (saveTimer.current) clearTimeout(saveTimer.current);
+      invalidateSave();
       setError(null);
       form.setFields([{ name: "enabled", errors: [] }]);
       if (next.enabled && !hasVisibleContent(next)) {
@@ -185,37 +213,9 @@ export default function KeyVisualizerSettings() {
         setError("请填写有效的字号、缩放和透明度后再自动保存");
         return;
       }
-      saveTimer.current = setTimeout(() => {
-        saveQueue.current = saveQueue.current.then(async () => {
-          if (revision !== saveRevision.current) return;
-          setSaving(true);
-          ownSaveInFlight.current = true;
-          try {
-            const config = await keyVisualizerApi.update(next);
-            setSaved(config);
-            if (revision === saveRevision.current) {
-              form.setFieldsValue(config);
-              setError(null);
-            }
-            const request = ++statusRefreshRevision.current;
-            try {
-              const nextStatus = await keyVisualizerApi.status();
-              if (request === statusRefreshRevision.current) setStatus(nextStatus);
-            } catch (reason) {
-              if (revision === saveRevision.current) {
-                setError(`设置已保存，但刷新运行状态失败：${errorMessage(reason)}`);
-              }
-            }
-          } catch (reason) {
-            if (revision === saveRevision.current) setError(errorMessage(reason));
-          } finally {
-            ownSaveInFlight.current = false;
-            if (revision === saveRevision.current) setSaving(false);
-          }
-        });
-      }, 450);
+      queueSave(next);
     },
-    [form],
+    [form, invalidateSave, queueSave],
   );
 
   if (loading) {
@@ -301,15 +301,17 @@ export default function KeyVisualizerSettings() {
             </div>
             <Row gutter={[screens.lg ? 8 : 6, 8]}>
               {CONTENT_FIELDS.map((item) => (
-                <Col xs={24} lg={12} key={item.name}><div className={styles.visualizerOption}>
-                  <div>
-                    <Text strong>{item.label}</Text>
-                    <span className={styles.description}>{item.description}</span>
+                <Col xs={24} lg={12} key={item.name}>
+                  <div className={styles.visualizerOption}>
+                    <div>
+                      <Text strong>{item.label}</Text>
+                      <span className={styles.description}>{item.description}</span>
+                    </div>
+                    <Form.Item name={item.name} valuePropName="checked">
+                      <Switch />
+                    </Form.Item>
                   </div>
-                  <Form.Item name={item.name} valuePropName="checked">
-                    <Switch />
-                  </Form.Item>
-                </div></Col>
+                </Col>
               ))}
             </Row>
           </section>
@@ -320,33 +322,39 @@ export default function KeyVisualizerSettings() {
               <Text type="secondary">修改后自动同步到悬浮窗</Text>
             </div>
             <Row gutter={[8, 8]}>
-              <Col xs={24} sm={12} lg={8}><label className={styles.visualizerMetric}>
-                <span>字号</span>
-                <Form.Item
-                  name="font_size"
-                  rules={[{ required: true, type: "number", min: 16, max: 48 }]}
-                >
-                  <InputNumber min={16} max={48} suffix="px" />
-                </Form.Item>
-              </label></Col>
-              <Col xs={24} sm={12} lg={8}><label className={styles.visualizerMetric}>
-                <span>整体缩放</span>
-                <Form.Item
-                  name="scale_percent"
-                  rules={[{ required: true, type: "number", min: 75, max: 200 }]}
-                >
-                  <InputNumber min={75} max={200} step={5} suffix="%" />
-                </Form.Item>
-              </label></Col>
-              <Col xs={24} sm={12} lg={8}><label className={styles.visualizerMetric}>
-                <span>文本透明度</span>
-                <Form.Item
-                  name="text_opacity"
-                  rules={[{ required: true, type: "number", min: 20, max: 100 }]}
-                >
-                  <InputNumber min={20} max={100} step={5} suffix="%" />
-                </Form.Item>
-              </label></Col>
+              <Col xs={24} sm={12} lg={8}>
+                <label className={styles.visualizerMetric}>
+                  <span>字号</span>
+                  <Form.Item
+                    name="font_size"
+                    rules={[{ required: true, type: "number", min: 16, max: 48 }]}
+                  >
+                    <InputNumber min={16} max={48} suffix="px" />
+                  </Form.Item>
+                </label>
+              </Col>
+              <Col xs={24} sm={12} lg={8}>
+                <label className={styles.visualizerMetric}>
+                  <span>整体缩放</span>
+                  <Form.Item
+                    name="scale_percent"
+                    rules={[{ required: true, type: "number", min: 75, max: 200 }]}
+                  >
+                    <InputNumber min={75} max={200} step={5} suffix="%" />
+                  </Form.Item>
+                </label>
+              </Col>
+              <Col xs={24} sm={12} lg={8}>
+                <label className={styles.visualizerMetric}>
+                  <span>文本透明度</span>
+                  <Form.Item
+                    name="text_opacity"
+                    rules={[{ required: true, type: "number", min: 20, max: 100 }]}
+                  >
+                    <InputNumber min={20} max={100} step={5} suffix="%" />
+                  </Form.Item>
+                </label>
+              </Col>
             </Row>
           </section>
 
@@ -373,8 +381,7 @@ export default function KeyVisualizerSettings() {
                 icon={<UndoOutlined />}
                 disabled={!dirty || saving}
                 onClick={() => {
-                  saveRevision.current += 1;
-                  if (saveTimer.current) clearTimeout(saveTimer.current);
+                  invalidateSave();
                   form.setFieldsValue(saved);
                   form.setFields([{ name: "enabled", errors: [] }]);
                   setError(null);

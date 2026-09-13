@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import ReactDOM from "react-dom/client";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { CaretDownFilled, CaretUpFilled } from "@ant-design/icons";
 import { Battery, Cpu, MemoryStick } from "lucide-react";
@@ -13,6 +12,8 @@ import type {
 } from "./types";
 import { formatSpeedParts } from "./utils/format";
 import { calculateWidgetResponsiveLayout } from "./widgetLayout";
+import { invokeCommand } from "./api/ipc";
+import type { WidgetLayoutBudget } from "./api/screenshotTypes";
 import "./widget.scss";
 
 const FALLBACK_METRICS: WidgetMetricConfig[] = [
@@ -26,12 +27,6 @@ const FALLBACK_CONFIG: WidgetConfig = {
   network_interface: null,
   speed_unit: "auto",
 };
-
-interface WidgetLayoutBudget {
-  allocatedWidth: number;
-  constrained: boolean;
-  visible: boolean;
-}
 
 interface WidgetMeasurements {
   preferredWidth: number;
@@ -81,7 +76,13 @@ function CapsuleIndicator({
   );
 }
 
-function RingIndicator({ usage, kind }: { usage: number; kind: Exclude<WidgetMetricKind, "network"> }) {
+function RingIndicator({
+  usage,
+  kind,
+}: {
+  usage: number;
+  kind: Exclude<WidgetMetricKind, "network">;
+}) {
   const radius = 9.5;
   const circumference = 2 * Math.PI * radius;
   const dash = (usage / 100) * circumference;
@@ -106,7 +107,13 @@ function RingIndicator({ usage, kind }: { usage: number; kind: Exclude<WidgetMet
   );
 }
 
-function GaugeIndicator({ usage, kind }: { usage: number; kind: Exclude<WidgetMetricKind, "network"> }) {
+function GaugeIndicator({
+  usage,
+  kind,
+}: {
+  usage: number;
+  kind: Exclude<WidgetMetricKind, "network">;
+}) {
   const filled = Math.ceil(usage / 20);
   const color = memoryColor(usage);
   return (
@@ -146,7 +153,12 @@ interface MetricContentProps {
   download: ReturnType<typeof formatSpeedParts>;
 }
 
-function MetricContent({ metric, status, upload, download }: MetricContentProps): React.JSX.Element {
+function MetricContent({
+  metric,
+  status,
+  upload,
+  download,
+}: MetricContentProps): React.JSX.Element {
   if (metric.kind === "network") {
     return (
       <div className="net-speed" aria-label="实时网速">
@@ -213,11 +225,13 @@ function TaskbarWidget() {
   const download = status.network_available
     ? formatSpeedParts(status.download_speed, config.speed_unit)
     : { value: "—", unit: "" };
-  const enabled = config.metrics.filter((metric) => metric.enabled).filter((metric) => {
-    if (metric.kind === "battery") return status.battery != null;
-    if (metric.kind === "cpu") return status.cpu_usage != null;
-    return true;
-  });
+  const enabled = config.metrics
+    .filter((metric) => metric.enabled)
+    .filter((metric) => {
+      if (metric.kind === "battery") return status.battery != null;
+      if (metric.kind === "cpu") return status.cpu_usage != null;
+      return true;
+    });
   const enabledKey = enabled.map((metric) => `${metric.kind}:${metric.usage_scheme}`).join("|");
 
   const flushLayoutSync = useCallback(() => {
@@ -230,7 +244,7 @@ function TaskbarWidget() {
     if (key === lastRequestKey.current) return;
     lastRequestKey.current = key;
     syncInFlight.current = true;
-    void invoke<WidgetLayoutBudget>("sync_widget_dynamic_width", request)
+    void invokeCommand("sync_widget_dynamic_width", request)
       .then((nextBudget) => {
         if (!disposed.current) setBudget(nextBudget);
       })
@@ -258,7 +272,7 @@ function TaskbarWidget() {
 
   useEffect(() => {
     disposed.current = false;
-    void invoke<WidgetConfig>("get_widget_config")
+    void invokeCommand("get_widget_config")
       .then(setConfig)
       .catch((error) => console.error("任务栏挂件配置读取失败", error));
 
@@ -269,7 +283,7 @@ function TaskbarWidget() {
       setConfig(event.payload);
     });
     const refreshPosition = (): void => {
-      void invoke<WidgetLayoutBudget>("refresh_widget_position")
+      void invokeCommand("refresh_widget_position")
         .then((nextBudget) => {
           if (!disposed.current) setBudget(nextBudget);
         })
@@ -321,8 +335,12 @@ function TaskbarWidget() {
     const observer = new ResizeObserver(measureContent);
     observer.observe(normalRow);
     observer.observe(compactRow);
-    normalItemRefs.current.slice(0, enabled.length).forEach((item) => item && observer.observe(item));
-    compactItemRefs.current.slice(0, enabled.length).forEach((item) => item && observer.observe(item));
+    normalItemRefs.current
+      .slice(0, enabled.length)
+      .forEach((item) => item && observer.observe(item));
+    compactItemRefs.current
+      .slice(0, enabled.length)
+      .forEach((item) => item && observer.observe(item));
     measureContent();
     return () => observer.disconnect();
   }, [enabled.length, enabledKey, measureContent]);
@@ -365,7 +383,9 @@ function TaskbarWidget() {
             </div>
           ))
         ) : (
-          <span className="widget-empty" aria-label="暂无可用挂件指标">—</span>
+          <span className="widget-empty" aria-label="暂无可用挂件指标">
+            —
+          </span>
         )}
         {responsive.showOverflow && (
           <span

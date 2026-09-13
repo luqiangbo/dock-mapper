@@ -1,47 +1,79 @@
 import type {
+  Arrowhead,
   ArrowStyle,
-  FrameEffect,
+  FillStyle,
   FrameShape,
-  GradientStop,
+  LegacyFrameEffect,
+  LineStyle,
+  Roughness,
   TextStyle,
 } from "./annotationTypes";
-import { calculateArrowGeometry, drawArrow, hasVisibleArrowLength } from "./arrowGeometry";
-import { arrowBrushPadding } from "./arrowBrushRenderer";
-import { normalizeArrowBrushId, type ArrowBrushId } from "./arrowBrushPresets";
-import { drawStyledFrame, shapeEffectPadding } from "./shapeEffects";
+import type { AnnotationOutlineConfig } from "../../../types";
+import { hasVisibleArrowLength } from "./arrowGeometry";
 import type { ArrowAssemblyVariation } from "./arrowAssembly";
-import { drawP5Stroke } from "./p5StrokeRenderer";
+import {
+  arrowVisualBounds,
+  styledLinePadding,
+} from "./annotationLineRenderer";
 
 export interface ScenePoint {
   x: number;
   y: number;
+  pressure?: number;
 }
 
 export interface RasterAnnotationStyle {
   color: string;
-  gradientStops?: GradientStop[];
+  backgroundColor?: string;
   strokeWidth: number;
-  fillOpacity: number;
+  outline: AnnotationOutlineConfig;
+  lineStyle?: LineStyle;
+  fillStyle?: FillStyle;
+  roughness?: Roughness;
+  pressure?: boolean;
   arrowStyle: ArrowStyle;
-  arrowBrushId?: ArrowBrushId;
+  startArrowhead?: Arrowhead;
+  endArrowhead?: Arrowhead;
   arrowAssembly?: ArrowAssemblyVariation;
-  /** Legacy hot-reload/undo compatibility; new annotations only write arrowBrushId. */
+  /** Legacy hot-reload/undo compatibility. New annotations never write these fields. */
+  gradientStops?: Array<{ offset: number; color: string }>;
+  fillOpacity?: number;
+  arrowBrushId?: string;
   arrowEffect?: string;
-  shapeEffect?: FrameEffect;
-  arrowHeadSize: number;
+  shapeEffect?: LegacyFrameEffect;
+  arrowHeadSize?: number;
   opacity: number;
   mosaicBlock: number;
   arrowLabel?: string;
   arrowLabelStyle?: TextStyle;
 }
 
-export type RasterAnnotationKind = "rect" | "ellipse" | "arrow" | "pen" | "highlight" | "mosaic";
+export interface AnnotationBinding {
+  elementId: string;
+  anchor: { x: number; y: number };
+}
+
+export type RasterAnnotationKind =
+  | "rect"
+  | "ellipse"
+  | "diamond"
+  | "line"
+  | "arrow"
+  | "pen"
+  | "highlight"
+  | "mosaic";
 
 export interface RasterAnnotation {
   id: string;
   kind: RasterAnnotationKind;
   points: ScenePoint[];
   style: RasterAnnotationStyle;
+  angle?: number;
+  groupId?: string | null;
+  version?: number;
+  seed?: number;
+  startBinding?: AnnotationBinding | null;
+  endBinding?: AnnotationBinding | null;
 }
 
 export interface SceneBounds {
@@ -51,8 +83,16 @@ export interface SceneBounds {
   height: number;
 }
 
+export function annotationSolidColor(style: RasterAnnotationStyle): string {
+  return (
+    style.gradientStops?.find(
+      (stop) => typeof stop.color === "string" && stop.color.trim().length > 0,
+    )?.color ?? style.color
+  );
+}
+
 export function isFrameAnnotationKind(kind: string | null): kind is FrameShape {
-  return kind === "rect" || kind === "ellipse";
+  return kind === "rect" || kind === "ellipse" || kind === "diamond";
 }
 
 export function convertFrameAnnotation(
@@ -69,34 +109,28 @@ function annotationPadding(annotation: RasterAnnotation): number {
     annotation.kind === "arrow" && annotation.style.arrowStyle === "label"
       ? (annotation.style.arrowLabelStyle?.fontSize ?? 0) / 2 + 6
       : 0;
-  const texturePadding =
-    annotation.kind === "arrow"
-      ? arrowBrushPadding(
-          normalizeArrowBrushId(annotation.style.arrowBrushId, annotation.style.arrowEffect),
-          annotation.style.strokeWidth,
-        )
-      : annotation.kind === "rect" || annotation.kind === "ellipse"
-        ? shapeEffectPadding(annotation.style.shapeEffect ?? "classic", annotation.style.strokeWidth)
-        : 0;
-  // Arrow geometry already spans the full painted area, so only the brush
-  // bleed is added; every other kind is a centred stroke.
-  const strokePadding = annotation.kind === "arrow" ? 0 : annotation.style.strokeWidth / 2;
-  return annotation.kind === "arrow"
-    ? Math.max(labelPadding, texturePadding)
-    : Math.max(4, strokePadding, labelPadding, texturePadding);
+  if (annotation.kind === "arrow") return labelPadding;
+  const outlineWidth = annotation.style.outline.enabled ? annotation.style.outline.width : 0;
+  return Math.max(
+    4,
+    styledLinePadding(annotation.style.strokeWidth, outlineWidth),
+    labelPadding,
+  );
 }
 
 export function annotationGeometryBounds(annotation: RasterAnnotation): SceneBounds {
   const lastPoint = annotation.points[annotation.points.length - 1];
-  if (annotation.kind === "arrow" && annotation.points[0] && lastPoint) {
-    const geometry = calculateArrowGeometry({
-      start: annotation.points[0],
-      end: lastPoint,
-      lineWidth: annotation.style.strokeWidth,
-      style: annotation.style.arrowStyle,
-      assembly: annotation.style.arrowAssembly,
-    });
-    if (geometry) return geometry.bounds;
+  if ((annotation.kind === "arrow" || annotation.kind === "line") && annotation.points[0] && lastPoint) {
+    return arrowVisualBounds(
+      annotation.points[0],
+      lastPoint,
+      annotation.kind === "line" ? "sharp" : annotation.style.arrowStyle,
+      annotation.style.strokeWidth,
+      annotation.id,
+      annotation.style.outline.enabled ? annotation.style.outline.width : 0,
+      annotation.style.lineStyle,
+      annotation.points,
+    );
   }
   const xs = annotation.points.map((point) => point.x);
   const ys = annotation.points.map((point) => point.y);
@@ -118,6 +152,7 @@ export function cloneRasterAnnotations(items: RasterAnnotation[]): RasterAnnotat
     points: item.points.map((point) => ({ ...point })),
     style: {
       ...item.style,
+      outline: { ...item.style.outline },
       gradientStops: item.style.gradientStops?.map((stop) => ({ ...stop })),
       arrowLabelStyle: item.style.arrowLabelStyle ? { ...item.style.arrowLabelStyle } : undefined,
       arrowAssembly: item.style.arrowAssembly
@@ -126,6 +161,12 @@ export function cloneRasterAnnotations(items: RasterAnnotation[]): RasterAnnotat
           }
         : undefined,
     },
+    startBinding: item.startBinding
+      ? { ...item.startBinding, anchor: { ...item.startBinding.anchor } }
+      : item.startBinding,
+    endBinding: item.endBinding
+      ? { ...item.endBinding, anchor: { ...item.endBinding.anchor } }
+      : item.endBinding,
   }));
 }
 
@@ -147,7 +188,7 @@ export function simplifyScenePoints(points: ScenePoint[], minimumDistance = 1): 
   return result;
 }
 
-export function annotationBounds(annotation: RasterAnnotation): SceneBounds {
+function unrotatedAnnotationBounds(annotation: RasterAnnotation): SceneBounds {
   const geometry = annotationGeometryBounds(annotation);
   const padding = annotationPadding(annotation);
   if (annotation.kind === "arrow" && annotation.style.arrowStyle === "label") {
@@ -171,6 +212,36 @@ export function annotationBounds(annotation: RasterAnnotation): SceneBounds {
     width: geometry.width + padding * 2,
     height: geometry.height + padding * 2,
   };
+}
+
+function rotatePoint(point: ScenePoint, center: ScenePoint, angle: number): ScenePoint {
+  const cosine = Math.cos(angle);
+  const sine = Math.sin(angle);
+  const dx = point.x - center.x;
+  const dy = point.y - center.y;
+  return {
+    x: center.x + dx * cosine - dy * sine,
+    y: center.y + dx * sine + dy * cosine,
+  };
+}
+
+export function annotationBounds(annotation: RasterAnnotation): SceneBounds {
+  const bounds = unrotatedAnnotationBounds(annotation);
+  const angle = annotation.angle ?? 0;
+  if (!angle) return bounds;
+  const geometry = annotationGeometryBounds(annotation);
+  const center = { x: geometry.x + geometry.width / 2, y: geometry.y + geometry.height / 2 };
+  const corners = [
+    rotatePoint({ x: bounds.x, y: bounds.y }, center, angle),
+    rotatePoint({ x: bounds.x + bounds.width, y: bounds.y }, center, angle),
+    rotatePoint({ x: bounds.x + bounds.width, y: bounds.y + bounds.height }, center, angle),
+    rotatePoint({ x: bounds.x, y: bounds.y + bounds.height }, center, angle),
+  ];
+  const xs = corners.map((point) => point.x);
+  const ys = corners.map((point) => point.y);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
 }
 
 export function translateAnnotation(
@@ -205,7 +276,14 @@ export function resizeAnnotation(
     const previous = annotationBounds(annotation);
     const scaled = (scale: number): RasterAnnotation => ({
       ...annotation,
-      style: { ...annotation.style, strokeWidth: annotation.style.strokeWidth * scale },
+      style: {
+        ...annotation.style,
+        strokeWidth: annotation.style.strokeWidth * scale,
+        outline: {
+          ...annotation.style.outline,
+          width: annotation.style.outline.width * scale,
+        },
+      },
       points: annotation.points.map((point) => ({ x: point.x * scale, y: point.y * scale })),
     });
     // The painted bounds grow monotonically with the factor, so the largest
@@ -293,146 +371,42 @@ export function hitTestAnnotation(
   point: ScenePoint,
   tolerance = 6,
 ): boolean {
-  const bounds = annotationBounds(annotation);
-  return (
-    point.x >= bounds.x - tolerance &&
-    point.x <= bounds.x + bounds.width + tolerance &&
-    point.y >= bounds.y - tolerance &&
-    point.y <= bounds.y + bounds.height + tolerance
-  );
-}
-
-function drawMosaic(
-  context: CanvasRenderingContext2D,
-  base: HTMLCanvasElement,
-  bounds: SceneBounds,
-  block: number,
-): void {
-  const x = Math.max(0, Math.floor(bounds.x));
-  const y = Math.max(0, Math.floor(bounds.y));
-  const width = Math.min(base.width - x, Math.max(1, Math.round(bounds.width)));
-  const height = Math.min(base.height - y, Math.max(1, Math.round(bounds.height)));
-  if (width < 2 || height < 2) return;
-  const scratch = document.createElement("canvas");
-  scratch.width = Math.max(1, Math.ceil(width / block));
-  scratch.height = Math.max(1, Math.ceil(height / block));
-  const scratchContext = scratch.getContext("2d");
-  if (!scratchContext) return;
-  scratchContext.imageSmoothingEnabled = true;
-  scratchContext.drawImage(base, x, y, width, height, 0, 0, scratch.width, scratch.height);
-  context.save();
-  context.imageSmoothingEnabled = false;
-  context.drawImage(scratch, 0, 0, scratch.width, scratch.height, x, y, width, height);
-  context.restore();
-}
-
-export function drawRasterAnnotation(
-  context: CanvasRenderingContext2D,
-  annotation: RasterAnnotation,
-  canvasScale: number,
-  base: HTMLCanvasElement,
-): void {
-  const first = annotation.points[0];
-  const last = annotation.points[annotation.points.length - 1] ?? first;
-  if (!first || !last) return;
-  const style = annotation.style;
-  if (annotation.kind === "pen" || annotation.kind === "highlight") {
-    drawP5Stroke(
-      context,
-      annotation.id,
-      annotation.kind,
-      annotation.points,
-      style.color,
-      style.strokeWidth,
-      style.opacity,
-    );
-    return;
+  const bounds = annotationGeometryBounds(annotation);
+  const center = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+  const local = rotatePoint(point, center, -(annotation.angle ?? 0));
+  const width = Math.max(tolerance, annotation.style.strokeWidth / 2 + tolerance);
+  if (annotation.kind === "ellipse") {
+    const radiusX = Math.max(1, bounds.width / 2);
+    const radiusY = Math.max(1, bounds.height / 2);
+    const dx = (local.x - center.x) / radiusX;
+    const dy = (local.y - center.y) / radiusY;
+    const distance = dx * dx + dy * dy;
+    return annotation.style.fillStyle !== "none"
+      ? distance <= 1 + width / Math.min(radiusX, radiusY)
+      : Math.abs(Math.sqrt(distance) - 1) <= width / Math.min(radiusX, radiusY);
   }
-  const x = Math.min(first.x, last.x);
-  const y = Math.min(first.y, last.y);
-  const width = Math.abs(last.x - first.x);
-  const height = Math.abs(last.y - first.y);
-  if (annotation.kind === "mosaic") {
-    drawMosaic(context, base, { x, y, width, height }, Math.max(2, style.mosaicBlock));
-    return;
+  if (annotation.kind === "diamond") {
+    const normalized =
+      Math.abs(local.x - center.x) / Math.max(1, bounds.width / 2) +
+      Math.abs(local.y - center.y) / Math.max(1, bounds.height / 2);
+    return annotation.style.fillStyle !== "none"
+      ? normalized <= 1 + width / Math.min(bounds.width, bounds.height)
+      : Math.abs(normalized - 1) <= (width * 2) / Math.min(bounds.width, bounds.height);
   }
-  context.save();
-  try {
-    context.globalAlpha = 1;
-    context.strokeStyle = style.color;
-    context.fillStyle = style.color;
-    context.lineWidth = style.strokeWidth;
-    context.lineCap = "round";
-    context.lineJoin = "round";
-    if (annotation.kind === "rect" || annotation.kind === "ellipse") {
-      drawStyledFrame(
-        context,
-        annotation.kind,
-        { x, y, width, height },
-        style.color,
-        style.strokeWidth,
-        style.fillOpacity,
-        style.shapeEffect ?? "classic",
-        canvasScale,
-        annotation.id,
-        style.gradientStops,
-      );
-    } else if (annotation.kind === "arrow") {
-      drawArrow(context, {
-        start: first,
-        end: last,
-        style: style.arrowStyle,
-        lineWidth: style.strokeWidth,
-        canvasScale,
-        color: style.color,
-        brushId: normalizeArrowBrushId(style.arrowBrushId, style.arrowEffect),
-        gradientStops: style.gradientStops,
-        textureSeed: annotation.id,
-        assembly: style.arrowAssembly,
-        label: style.arrowLabel,
-        labelStyle: style.arrowLabelStyle,
-      });
+  if (annotation.kind === "line" || annotation.kind === "arrow" || annotation.kind === "pen" || annotation.kind === "highlight") {
+    for (let index = 1; index < annotation.points.length; index += 1) {
+      const start = annotation.points[index - 1];
+      const end = annotation.points[index];
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const lengthSquared = dx * dx + dy * dy;
+      const amount = lengthSquared
+        ? Math.max(0, Math.min(1, ((local.x - start.x) * dx + (local.y - start.y) * dy) / lengthSquared))
+        : 0;
+      if (Math.hypot(local.x - (start.x + dx * amount), local.y - (start.y + dy * amount)) <= width)
+        return true;
     }
-  } finally {
-    context.restore();
+    return false;
   }
-}
-
-export function renderRasterScene(
-  context: CanvasRenderingContext2D,
-  base: HTMLCanvasElement,
-  annotations: RasterAnnotation[],
-  canvasScale: number,
-): void {
-  context.save();
-  try {
-    context.globalAlpha = 1;
-    context.globalCompositeOperation = "source-over";
-    context.clearRect(0, 0, context.canvas.width, context.canvas.height);
-    context.drawImage(base, 0, 0);
-    annotations.forEach((annotation) =>
-      drawRasterAnnotation(context, annotation, canvasScale, base),
-    );
-  } finally {
-    context.restore();
-  }
-}
-
-export function renderRasterOverlay(
-  context: CanvasRenderingContext2D,
-  base: HTMLCanvasElement,
-  annotations: RasterAnnotation[],
-  canvasScale: number,
-): void {
-  context.save();
-  try {
-    context.globalAlpha = 1;
-    context.globalCompositeOperation = "source-over";
-    context.clearRect(0, 0, context.canvas.width, context.canvas.height);
-    annotations.forEach((annotation) =>
-      drawRasterAnnotation(context, annotation, canvasScale, base),
-    );
-  } finally {
-    context.restore();
-  }
+  return local.x >= bounds.x - width && local.x <= bounds.x + bounds.width + width && local.y >= bounds.y - width && local.y <= bounds.y + bounds.height + width;
 }

@@ -1,7 +1,7 @@
 export type MeasureTextWidth = (value: string) => number;
 
 export function isTextObjectInteractive(tool: string | null): boolean {
-  return tool === "text";
+  return tool === "text" || tool === "select";
 }
 
 function breakOversizedToken(

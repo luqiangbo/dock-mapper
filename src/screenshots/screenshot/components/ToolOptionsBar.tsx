@@ -7,29 +7,37 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import type { ColorPaletteConfig, ScreenshotConfig } from "../../../types";
+import type {
+  AnnotationOutlineConfig,
+  ColorPaletteConfig,
+  ScreenshotConfig,
+} from "../../../types";
 import { STROKE_COLORS, type AnnotTool } from "./AnnotationToolbar";
 import {
-  DEFAULT_FRAME_EFFECT,
-  FRAME_EFFECT_OPTIONS,
   FRAME_SHAPE_OPTIONS,
+  ARROWHEAD_OPTIONS,
+  FILL_STYLE_OPTIONS,
+  LINE_STYLE_OPTIONS,
+  ROUGHNESS_OPTIONS,
   normalizeArrowStyle,
   type ArrowStyle,
-  type FrameEffect,
+  type Arrowhead,
+  type FillStyle,
   type FrameShape,
-  type GradientStop,
+  type LineStyle,
+  type Roughness,
   type TextStyle,
   type ToolSettings,
 } from "./annotationTypes";
 import { ARROW_SHAPE_CHOICES } from "./ArrowOptionThumbs";
-import ArrowBrushPicker from "./ArrowBrushPicker";
 import { normalizeHexColor, selectNumber } from "./toolOptionValues";
-import { normalizeGradientStops } from "./annotationPaint";
 
 interface Props {
   tool: Exclude<AnnotTool, null>;
   settings: ToolSettings;
   onChange: (changes: Partial<ToolSettings>) => void;
+  onColorCommit?: (color: string) => void;
+  onOutlineCommit?: (outline: AnnotationOutlineConfig) => void;
   onPopupOpenChange: (open: boolean) => void;
   palette?: ColorPaletteConfig;
   paletteBusy?: boolean;
@@ -37,16 +45,58 @@ interface Props {
   onPaletteFavorite?: (color: string, favorite: boolean) => void;
   style?: CSSProperties;
 }
+
+function Outline({
+  value,
+  change,
+  commit,
+  popup,
+}: {
+  value: AnnotationOutlineConfig;
+  change: (value: AnnotationOutlineConfig) => void;
+  commit?: (value: AnnotationOutlineConfig) => void;
+  popup: (key: string, open: boolean) => void;
+}) {
+  const applyColor = (color: string): AnnotationOutlineConfig => ({
+    ...value,
+    enabled: true,
+    color,
+  });
+  return (
+    <span className="tool-options__group tool-options__group--color-only">
+      <ColorPicker
+        mode="single"
+        value={value.color}
+        allowClear
+        disabledAlpha
+        disabledFormat
+        presets={[{ label: "描边", colors: ["#ffffff", "#000000", ...STROKE_COLORS] }]}
+        placement="bottom"
+        onOpenChange={(open) => popup("annotation-outline", open)}
+        onChange={(color) => change(applyColor(normalizeHexColor(color.toHexString())))}
+        onChangeComplete={(color) =>
+          commit?.(applyColor(normalizeHexColor(color.toHexString())))
+        }
+        onClear={() => {
+          const next = { ...value, enabled: false };
+          change(next);
+          commit?.(next);
+        }}
+      >
+        <button
+          type="button"
+          className={`tool-options__outline-trigger${value.enabled ? "" : " is-disabled"}`}
+          aria-label={value.enabled ? `描边：${value.color}` : "描边：无"}
+          title={value.enabled ? `描边 ${value.color}` : "无描边"}
+        >
+          <span style={{ borderColor: value.color }} />
+        </button>
+      </ColorPicker>
+    </span>
+  );
+}
 const WIDTHS = [2, 3, 4, 6, 8].map((value) => ({ value, label: `${value}px` }));
 const PRESETS = [{ label: "快捷色", colors: [...STROKE_COLORS] }];
-const ARROW_CRAYON_COLORS = [
-  "#ff2d2d",
-  "#ffad42",
-  "#6c63ff",
-  "#a90cc2",
-  "#178f28",
-  "#39bf20",
-] as const;
 const FORMATS: Array<{ value: ScreenshotConfig["color_copy_format"]; label: string }> = [
   "hex",
   "rgb",
@@ -71,23 +121,23 @@ function Color({
   value,
   name,
   change,
+  commit,
   popup,
   palette,
   quickColors = STROKE_COLORS,
   presetLabel = "快捷色",
-  gradientStops,
-  allowGradient = false,
+  compact = false,
 }: {
   label: string;
   value: string;
   name: string;
-  change: (value: string, gradientStops?: GradientStop[] | null) => void;
+  change: (value: string) => void;
+  commit?: (value: string) => void;
   popup: (key: string, open: boolean) => void;
   palette?: ColorPaletteConfig;
   quickColors?: readonly string[];
   presetLabel?: string;
-  gradientStops?: GradientStop[] | null;
-  allowGradient?: boolean;
+  compact?: boolean;
 }) {
   const presets = [
     { label: presetLabel, colors: [...quickColors] },
@@ -96,34 +146,32 @@ function Color({
       : []),
     ...(palette?.recent.length ? [{ label: "最近吸取", colors: palette.recent.slice(0, 5) }] : []),
   ];
-  return (
-    <Group label={label}>
-      <ColorPicker
-        size="small"
-        mode={allowGradient ? ["single", "gradient"] : "single"}
-        value={
-          allowGradient && gradientStops?.length
-            ? gradientStops.map((stop) => ({ color: stop.color, percent: stop.offset * 100 }))
-            : value
-        }
-        disabledAlpha
-        disabledFormat
-        presets={presets}
-        placement="bottom"
-        onOpenChange={(open) => popup(name, open)}
-        onChange={(color) => {
-          if (allowGradient && color.isGradient()) {
-            const stops = normalizeGradientStops(
-              color.getColors().map((stop) => ({
-                offset: Math.max(0, Math.min(1, stop.percent / 100)),
-                color: normalizeHexColor(stop.color.toHexString()),
-              })),
-            );
-            change(stops?.[0]?.color ?? value, stops ?? null);
-          } else change(normalizeHexColor(color.toHexString()), null);
-        }}
-      />
-    </Group>
+  const picker = (
+    <ColorPicker
+      mode="single"
+      value={value}
+      disabledAlpha
+      disabledFormat
+      presets={presets}
+      placement="bottom"
+      onOpenChange={(open) => popup(name, open)}
+      onChange={(color) => change(normalizeHexColor(color.toHexString()))}
+      onChangeComplete={(color) => commit?.(normalizeHexColor(color.toHexString()))}
+    >
+      <button
+        type="button"
+        className="tool-options__color-trigger"
+        aria-label={`${label}：${value}`}
+        title={`${label} ${value}`}
+      >
+        <span className="tool-options__color-swatch" style={{ backgroundColor: value }} />
+      </button>
+    </ColorPicker>
+  );
+  return compact ? (
+    <span className="tool-options__group tool-options__group--color-only">{picker}</span>
+  ) : (
+    <Group label={label}>{picker}</Group>
   );
 }
 function Choice({
@@ -217,6 +265,8 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
     tool,
     settings,
     onChange,
+    onColorCommit,
+    onOutlineCommit,
     onPopupOpenChange,
     palette = { recent: [], favorites: [] },
     paletteBusy,
@@ -236,28 +286,25 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
     },
     [onPopupOpenChange],
   );
-  const arrowBrushPopup = useCallback(
-    (open: boolean) => popup("arrow-brush", open),
-    [popup],
-  );
   const color = (
     <Color
       label="颜色"
       value={settings.strokeColor}
       name={`${tool}-color`}
-      change={(strokeColor, gradientStops) =>
-        onChange(
-          tool === "arrow" || tool === "rect" || tool === "ellipse"
-            ? { strokeColor, gradientStops }
-            : { strokeColor },
-        )
-      }
+      change={(strokeColor) => onChange({ strokeColor })}
+      commit={onColorCommit}
       popup={popup}
       palette={palette}
-      quickColors={tool === "arrow" ? ARROW_CRAYON_COLORS : PRESETS[0].colors}
-      presetLabel={tool === "arrow" ? "推荐色" : "快捷色"}
-      gradientStops={settings.gradientStops}
-      allowGradient={tool === "arrow" || tool === "rect" || tool === "ellipse"}
+      quickColors={PRESETS[0].colors}
+      compact
+    />
+  );
+  const outline = (
+    <Outline
+      value={settings.outline}
+      change={(next) => onChange({ outline: next })}
+      commit={onOutlineCommit}
+      popup={popup}
     />
   );
   const width = (
@@ -270,10 +317,6 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
       popup={popup}
     />
   );
-  const fillOptions = [
-    { value: 0, label: "无" },
-    ...[20, 40, 60, 80].map((n) => ({ value: n / 100, label: `${n}%` })),
-  ];
   return (
     <div
       ref={ref}
@@ -281,7 +324,10 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
       style={style}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      {(tool === "rect" || tool === "ellipse") && (
+      {settings.mixedProperties?.length ? (
+        <span className="tool-options__mixed" title={`混合属性：${settings.mixedProperties.join("、")}`}>混合</span>
+      ) : null}
+      {(tool === "rect" || tool === "ellipse" || tool === "diamond") && (
         <>
           <Choice
             label="形状"
@@ -293,50 +339,101 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             popup={popup}
           />
           {color}
+          {outline}
           {width}
           <Choice
-            label="效果"
-            value={settings.shapeEffect ?? DEFAULT_FRAME_EFFECT}
-            options={[...FRAME_EFFECT_OPTIONS]}
-            name="frame-effect"
-            compactWidth={96}
-            change={(value) => onChange({ shapeEffect: value as FrameEffect })}
+            label="样式"
+            value={settings.lineStyle}
+            options={[...LINE_STYLE_OPTIONS]}
+            name="frame-line-style"
+            compactWidth={108}
+            change={(value) => onChange({ lineStyle: value as LineStyle })}
             popup={popup}
+          />
+          <Color
+            label="填充"
+            value={settings.fillColor}
+            name="frame-fill-color"
+            change={(fillColor) => onChange({ fillColor })}
+            popup={popup}
+            palette={palette}
+            compact
           />
           <Choice
             label="填充"
-            value={settings.fillOpacity}
-            options={fillOptions}
-            name="fill"
-            change={(value) => onChange({ fillOpacity: selectNumber(value) })}
+            value={settings.fillStyle}
+            options={[...FILL_STYLE_OPTIONS]}
+            name="frame-fill-style"
+            change={(value) => onChange({ fillStyle: value as FillStyle })}
+            popup={popup}
+          />
+          <Choice
+            label="粗糙度"
+            value={settings.roughness}
+            options={[...ROUGHNESS_OPTIONS]}
+            name="frame-roughness"
+            change={(value) => onChange({ roughness: value as Roughness })}
             popup={popup}
           />
         </>
       )}
-      {tool === "arrow" && (
+      {(tool === "arrow" || tool === "line") && (
         <>
           {color}
+          {outline}
+          {width}
+          {tool === "arrow" && (
+            <>
+              <Choice
+                label="形状"
+                value={normalizeArrowStyle(settings.arrowStyle)}
+                options={ARROW_SHAPE_CHOICES}
+                name="arrow-style"
+                compactWidth={116}
+                change={(value) => onChange({ arrowStyle: value as ArrowStyle })}
+                popup={popup}
+              />
+              <Choice
+                label="起点"
+                value={settings.startArrowhead}
+                options={[...ARROWHEAD_OPTIONS]}
+                name="arrow-start"
+                change={(value) => onChange({ startArrowhead: value as Arrowhead })}
+                popup={popup}
+              />
+              <Choice
+                label="终点"
+                value={settings.endArrowhead}
+                options={[...ARROWHEAD_OPTIONS]}
+                name="arrow-end"
+                change={(value) => onChange({ endArrowhead: value as Arrowhead })}
+                popup={popup}
+              />
+            </>
+          )}
           <Choice
-            label="形状"
-            value={normalizeArrowStyle(settings.arrowStyle)}
-            options={ARROW_SHAPE_CHOICES}
-            name="arrow-style"
-            compactWidth={116}
-            change={(value) => onChange({ arrowStyle: value as ArrowStyle })}
+            label="样式"
+            value={settings.lineStyle}
+            options={[...LINE_STYLE_OPTIONS]}
+            name="arrow-line-style"
+            compactWidth={108}
+            change={(value) => onChange({ lineStyle: value as LineStyle })}
             popup={popup}
           />
-          <Group label="笔刷">
-            <ArrowBrushPicker
-              value={settings.arrowBrushId}
-              onChange={(arrowBrushId) => onChange({ arrowBrushId })}
-              onOpenChange={arrowBrushPopup}
-            />
-          </Group>
+          <Choice
+            label="粗糙度"
+            value={settings.roughness}
+            options={[...ROUGHNESS_OPTIONS]}
+            name={`${tool}-roughness`}
+            change={(value) => onChange({ roughness: value as Roughness })}
+            popup={popup}
+          />
         </>
       )}
       {tool === "pen" && (
         <>
           {color}
+          {outline}
           <Choice
             label="宽度"
             value={settings.penWidth}
@@ -345,17 +442,44 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             change={(value) => onChange({ penWidth: selectNumber(value) })}
             popup={popup}
           />
+          <Choice
+            label="样式"
+            value={settings.lineStyle}
+            options={[...LINE_STYLE_OPTIONS]}
+            name="pen-line-style"
+            compactWidth={88}
+            change={(value) => onChange({ lineStyle: value as LineStyle })}
+            popup={popup}
+          />
+          <Choice
+            label="压感"
+            value={settings.penPressure ? "pressure" : "fixed"}
+            options={[{ value: "pressure", label: "开启" }, { value: "fixed", label: "关闭" }]}
+            name="pen-pressure"
+            change={(value) => onChange({ penPressure: value === "pressure" })}
+            popup={popup}
+          />
         </>
       )}
       {tool === "highlight" && (
         <>
           {color}
+          {outline}
           <Choice
             label="宽度"
             value={settings.highlightWidth}
             options={[12, 20, 28, 36].map((value) => ({ value, label: `${value}px` }))}
             name="highlight-width"
             change={(value) => onChange({ highlightWidth: selectNumber(value) })}
+            popup={popup}
+          />
+          <Choice
+            label="样式"
+            value={settings.lineStyle}
+            options={[...LINE_STYLE_OPTIONS]}
+            name="highlight-line-style"
+            compactWidth={88}
+            change={(value) => onChange({ lineStyle: value as LineStyle })}
             popup={popup}
           />
           <Choice
@@ -430,31 +554,7 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             popup={popup}
             palette={palette}
           />
-          <Choice
-            label="描边"
-            value={settings.textStyle.strokeWidth}
-            options={[0, 1, 2, 3, 4].map((value) => ({
-              value,
-              label: value ? `${value}px` : "无",
-            }))}
-            name="text-stroke"
-            change={(value) =>
-              onChange({ textStyle: { ...settings.textStyle, strokeWidth: selectNumber(value) } })
-            }
-            popup={popup}
-          />
-          {settings.textStyle.strokeWidth > 0 && (
-            <Color
-              label="描边色"
-              value={settings.textStyle.strokeColor}
-              name="text-stroke-color"
-              change={(strokeColor) =>
-                onChange({ textStyle: { ...settings.textStyle, strokeColor } })
-              }
-              popup={popup}
-              palette={palette}
-            />
-          )}
+          {tool === "text" && outline}
         </>
       )}
       {tool === "picker" && (
@@ -509,6 +609,7 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             popup={popup}
             palette={palette}
           />
+          {outline}
           <Choice
             label="尺寸"
             value={settings.numberStyle.size}

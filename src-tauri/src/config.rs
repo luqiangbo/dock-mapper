@@ -112,9 +112,19 @@ pub struct ScreenshotConfig {
     pub save_directory: Option<String>,
     pub filename_prefix: String,
     pub color_copy_format: ColorCopyFormat,
+    /// Last solid color selected by the screenshot annotation tools.
+    pub annotation_color: String,
+    pub annotation_outline: AnnotationOutlineConfig,
+    pub annotation_styles: ScreenshotAnnotationStyles,
+    #[serde(default = "annotation_styles_not_initialized", rename = "_annotation_styles_initialized")]
+    pub annotation_styles_initialized: bool,
     /// The size unit preferred by the capture overlay. PNG export is always
     /// physical pixels; DIP is only an editing/display convenience.
     pub capture_size_unit: CaptureSizeUnit,
+}
+
+fn annotation_styles_not_initialized() -> bool {
+    false
 }
 
 impl Default for ScreenshotConfig {
@@ -128,7 +138,162 @@ impl Default for ScreenshotConfig {
             save_directory: None,
             filename_prefix: "DockMapper".into(),
             color_copy_format: ColorCopyFormat::Hex,
+            annotation_color: "#e03131".into(),
+            annotation_outline: AnnotationOutlineConfig::default(),
+            annotation_styles: ScreenshotAnnotationStyles::default(),
+            annotation_styles_initialized: true,
             capture_size_unit: CaptureSizeUnit::Px,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AnnotationStrokeStyle {
+    #[default]
+    Solid,
+    Dashed,
+    Dotted,
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AnnotationFillStyle {
+    #[default]
+    None,
+    Solid,
+    Hachure,
+    CrossHatch,
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AnnotationArrowType {
+    #[default]
+    Sharp,
+    Round,
+    Elbow,
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AnnotationArrowhead {
+    #[default]
+    None,
+    Arrow,
+    Triangle,
+    Circle,
+    Diamond,
+    Bar,
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct AnnotationToolStyleConfig {
+    pub stroke_color: String,
+    pub background_color: String,
+    pub stroke_width: f64,
+    pub stroke_style: AnnotationStrokeStyle,
+    pub fill_style: AnnotationFillStyle,
+    pub roughness: u8,
+    pub opacity: f64,
+    pub arrow_type: AnnotationArrowType,
+    pub start_arrowhead: AnnotationArrowhead,
+    pub end_arrowhead: AnnotationArrowhead,
+    pub pressure: bool,
+    pub block_size: u32,
+    pub font_size: u32,
+    pub marker_size: u32,
+    pub outline_enabled: bool,
+    pub outline_color: String,
+    pub outline_width: f64,
+}
+
+impl Default for AnnotationToolStyleConfig {
+    fn default() -> Self {
+        Self {
+            stroke_color: "#e03131".into(),
+            background_color: "#ffc9c9".into(),
+            stroke_width: 3.0,
+            stroke_style: AnnotationStrokeStyle::Solid,
+            fill_style: AnnotationFillStyle::None,
+            roughness: 1,
+            opacity: 1.0,
+            arrow_type: AnnotationArrowType::Sharp,
+            start_arrowhead: AnnotationArrowhead::None,
+            end_arrowhead: AnnotationArrowhead::Arrow,
+            pressure: true,
+            block_size: 12,
+            font_size: 24,
+            marker_size: 32,
+            outline_enabled: true,
+            outline_color: "#ffffff".into(),
+            outline_width: 1.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ScreenshotAnnotationStyles {
+    pub shape: AnnotationToolStyleConfig,
+    pub line: AnnotationToolStyleConfig,
+    pub arrow: AnnotationToolStyleConfig,
+    pub pen: AnnotationToolStyleConfig,
+    pub highlight: AnnotationToolStyleConfig,
+    pub text: AnnotationToolStyleConfig,
+    pub number: AnnotationToolStyleConfig,
+    pub mosaic: AnnotationToolStyleConfig,
+}
+
+impl Default for ScreenshotAnnotationStyles {
+    fn default() -> Self {
+        let base = AnnotationToolStyleConfig::default();
+        let mut highlight = base.clone();
+        highlight.stroke_width = 20.0;
+        highlight.opacity = 0.32;
+        highlight.pressure = false;
+        let mut text = base.clone();
+        text.stroke_color = "#ffffff".into();
+        text.background_color = "#000000".into();
+        let mut number = base.clone();
+        number.background_color = "#ef4444".into();
+        number.stroke_color = "#ffffff".into();
+        Self {
+            shape: base.clone(),
+            line: base.clone(),
+            arrow: base.clone(),
+            pen: base.clone(),
+            highlight,
+            text,
+            number,
+            mosaic: base,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct AnnotationOutlineConfig {
+    pub enabled: bool,
+    pub color: String,
+    pub width: f64,
+}
+
+impl Default for AnnotationOutlineConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            color: "#ffffff".into(),
+            width: 1.0,
         }
     }
 }
@@ -278,6 +443,120 @@ pub fn normalize_screenshot_config(config: &mut ScreenshotConfig) {
     {
         config.save_directory = None;
     }
+    let color = config.annotation_color.trim();
+    if color.len() == 7
+        && color.starts_with('#')
+        && color[1..].chars().all(|character| character.is_ascii_hexdigit())
+    {
+        config.annotation_color = color.to_ascii_lowercase();
+    } else {
+        config.annotation_color = ScreenshotConfig::default().annotation_color;
+    }
+    let outline_color = config.annotation_outline.color.trim();
+    if outline_color.len() == 7
+        && outline_color.starts_with('#')
+        && outline_color[1..]
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    {
+        config.annotation_outline.color = outline_color.to_ascii_lowercase();
+    } else {
+        config.annotation_outline.color = AnnotationOutlineConfig::default().color;
+    }
+    // 描边宽度是固定视觉规范，不暴露为用户配置；读取旧值或异常值时统一收敛到 1px。
+    config.annotation_outline.width = AnnotationOutlineConfig::default().width;
+
+    // Configs written before the whiteboard style model only have one shared
+    // annotation colour. Seed the new defaults from it exactly once.
+    if !config.annotation_styles_initialized {
+        for style in [
+            &mut config.annotation_styles.shape,
+            &mut config.annotation_styles.line,
+            &mut config.annotation_styles.arrow,
+            &mut config.annotation_styles.pen,
+            &mut config.annotation_styles.highlight,
+        ] {
+            style.stroke_color = config.annotation_color.clone();
+            style.outline_enabled = config.annotation_outline.enabled;
+            style.outline_color = config.annotation_outline.color.clone();
+            style.outline_width = config.annotation_outline.width;
+        }
+        config.annotation_styles_initialized = true;
+    }
+
+    for style in [
+        &mut config.annotation_styles.shape,
+        &mut config.annotation_styles.line,
+        &mut config.annotation_styles.arrow,
+        &mut config.annotation_styles.pen,
+        &mut config.annotation_styles.highlight,
+        &mut config.annotation_styles.text,
+        &mut config.annotation_styles.number,
+        &mut config.annotation_styles.mosaic,
+    ] {
+        normalize_annotation_tool_style(style);
+    }
+    config.annotation_styles.line.fill_style = AnnotationFillStyle::None;
+    config.annotation_styles.arrow.fill_style = AnnotationFillStyle::None;
+    config.annotation_styles.pen.fill_style = AnnotationFillStyle::None;
+    config.annotation_styles.highlight.fill_style = AnnotationFillStyle::None;
+    config.annotation_styles.highlight.pressure = false;
+}
+
+fn normalize_annotation_tool_style(style: &mut AnnotationToolStyleConfig) {
+    let fallback = AnnotationToolStyleConfig::default();
+    style.stroke_color = normalize_hex_color(&style.stroke_color)
+        .unwrap_or_else(|| fallback.stroke_color.clone());
+    style.background_color = if style.background_color.eq_ignore_ascii_case("transparent") {
+        "transparent".into()
+    } else {
+        normalize_hex_color(&style.background_color)
+            .unwrap_or_else(|| fallback.background_color.clone())
+    };
+    style.stroke_width = if style.stroke_width.is_finite() {
+        style.stroke_width.clamp(1.0, 32.0)
+    } else {
+        fallback.stroke_width
+    };
+    style.roughness = style.roughness.min(2);
+    style.opacity = if style.opacity.is_finite() {
+        style.opacity.clamp(0.05, 1.0)
+    } else {
+        fallback.opacity
+    };
+    style.block_size = style.block_size.clamp(2, 64);
+    style.font_size = style.font_size.clamp(8, 96);
+    style.marker_size = style.marker_size.clamp(16, 64);
+    style.outline_color = normalize_hex_color(&style.outline_color)
+        .unwrap_or_else(|| fallback.outline_color.clone());
+    style.outline_width = if style.outline_width.is_finite() {
+        style.outline_width.clamp(0.5, 8.0)
+    } else {
+        fallback.outline_width
+    };
+    if style.stroke_style == AnnotationStrokeStyle::Unknown {
+        style.stroke_style = fallback.stroke_style;
+    }
+    if style.fill_style == AnnotationFillStyle::Unknown {
+        style.fill_style = fallback.fill_style;
+    }
+    if style.arrow_type == AnnotationArrowType::Unknown {
+        style.arrow_type = fallback.arrow_type;
+    }
+    if style.start_arrowhead == AnnotationArrowhead::Unknown {
+        style.start_arrowhead = fallback.start_arrowhead;
+    }
+    if style.end_arrowhead == AnnotationArrowhead::Unknown {
+        style.end_arrowhead = fallback.end_arrowhead;
+    }
+}
+
+fn normalize_hex_color(value: &str) -> Option<String> {
+    let value = value.trim();
+    (value.len() == 7
+        && value.starts_with('#')
+        && value[1..].chars().all(|character| character.is_ascii_hexdigit()))
+    .then(|| value.to_ascii_lowercase())
 }
 
 fn normalize_loaded_config(config: &mut AppConfig) {
@@ -491,10 +770,45 @@ mod tests {
 
     #[test]
     fn screenshot_size_unit_defaults_to_px_for_existing_config() {
-        let config: ScreenshotConfig =
-            serde_json::from_str(r#"{"shortcut":"Control+1","color_copy_format":"hex"}"#)
+        let mut config: ScreenshotConfig =
+            serde_json::from_str(r##"{"shortcut":"Control+1","color_copy_format":"hex","annotation_color":"#1971c2"}"##)
                 .expect("old screenshot config remains readable");
         assert_eq!(config.capture_size_unit, CaptureSizeUnit::Px);
+        assert!(!config.annotation_styles_initialized);
+        normalize_screenshot_config(&mut config);
+        assert!(config.annotation_styles_initialized);
+        assert_eq!(config.annotation_styles.shape.stroke_color, "#1971c2");
+        assert_eq!(config.annotation_styles.arrow.stroke_color, "#1971c2");
+    }
+
+    #[test]
+    fn screenshot_annotation_color_is_normalized_and_invalid_values_fall_back() {
+        let mut valid = ScreenshotConfig {
+            annotation_color: " #A1B2C3 ".into(),
+            ..ScreenshotConfig::default()
+        };
+        normalize_screenshot_config(&mut valid);
+        assert_eq!(valid.annotation_color, "#a1b2c3");
+
+        valid.annotation_color = "linear-gradient(red, blue)".into();
+        normalize_screenshot_config(&mut valid);
+        assert_eq!(valid.annotation_color, "#e03131");
+    }
+
+    #[test]
+    fn screenshot_annotation_outline_uses_fixed_one_pixel_width() {
+        let mut config = ScreenshotConfig {
+            annotation_outline: AnnotationOutlineConfig {
+                enabled: false,
+                color: " #AABBCC ".into(),
+                width: 20.0,
+            },
+            ..ScreenshotConfig::default()
+        };
+        normalize_screenshot_config(&mut config);
+        assert_eq!(config.annotation_outline.color, "#aabbcc");
+        assert_eq!(config.annotation_outline.width, 1.0);
+        assert!(!config.annotation_outline.enabled);
     }
 
     #[test]
@@ -508,6 +822,57 @@ mod tests {
         )
         .expect("deserialize screenshot config");
         assert_eq!(restored.capture_size_unit, CaptureSizeUnit::Dip);
+    }
+
+    #[test]
+    fn old_screenshot_config_migrates_shared_colour_into_tool_styles() {
+        let mut config: ScreenshotConfig = serde_json::from_str(
+            r##"{"annotation_color":"#1971c2"}"##,
+        )
+        .expect("old screenshot config remains readable");
+        normalize_screenshot_config(&mut config);
+        assert_eq!(config.annotation_styles.shape.stroke_color, "#1971c2");
+        assert_eq!(config.annotation_styles.arrow.stroke_color, "#1971c2");
+        assert_eq!(config.annotation_styles.text.stroke_color, "#ffffff");
+    }
+
+    #[test]
+    fn screenshot_annotation_styles_normalize_invalid_values_and_ranges() {
+        let mut config: ScreenshotConfig = serde_json::from_str(
+            r##"{
+              "annotation_styles": {
+                "shape": {
+                  "stroke_color": "bad",
+                  "stroke_width": 999,
+                  "stroke_style": "wave",
+                  "fill_style": "spray",
+                  "roughness": 9,
+                  "opacity": -2,
+                  "arrow_type": "spiral",
+                  "start_arrowhead": "hook",
+                  "end_arrowhead": "hook",
+                  "block_size": 1000,
+                  "font_size": 2,
+                  "marker_size": 200
+                }
+              }
+            }"##,
+        )
+        .expect("unknown style enums fall back during normalization");
+        normalize_screenshot_config(&mut config);
+        let shape = &config.annotation_styles.shape;
+        assert_eq!(shape.stroke_color, "#e03131");
+        assert_eq!(shape.stroke_width, 32.0);
+        assert_eq!(shape.stroke_style, AnnotationStrokeStyle::Solid);
+        assert_eq!(shape.fill_style, AnnotationFillStyle::None);
+        assert_eq!(shape.roughness, 2);
+        assert_eq!(shape.opacity, 0.05);
+        assert_eq!(shape.arrow_type, AnnotationArrowType::Sharp);
+        assert_eq!(shape.start_arrowhead, AnnotationArrowhead::None);
+        assert_eq!(shape.end_arrowhead, AnnotationArrowhead::Arrow);
+        assert_eq!(shape.block_size, 64);
+        assert_eq!(shape.font_size, 8);
+        assert_eq!(shape.marker_size, 64);
     }
 
     #[test]

@@ -21,12 +21,15 @@ mod clipboard;
 use capture::*;
 pub(crate) mod output;
 mod overlay;
+mod pin_geometry;
 mod pin_runtime;
 mod runtime;
 mod shortcut;
 use output::*;
 pub use output::{copy_png_bytes, pin_external_image};
 use overlay::*;
+pub use pin_geometry::{PinWindowGeometry, PinWindowGeometryRequest};
+use pin_geometry::*;
 pub use pin_runtime::PinOptions;
 use pin_runtime::*;
 use runtime::URI_CAPTURE;
@@ -54,6 +57,20 @@ pub struct Rect {
     y: f64,
     width: f64,
     height: f64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CaptureSelectionTrace {
+    stage: String,
+    pointer_x: f64,
+    pointer_y: f64,
+    selection: Option<Rect>,
+    candidate_id: Option<String>,
+    drag_mode: String,
+    viewport_width: f64,
+    viewport_height: f64,
+    device_pixel_ratio: f64,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -272,24 +289,19 @@ fn build_pin_window(
     width: f64,
     height: f64,
 ) -> Result<(), String> {
-    WebviewWindowBuilder::new(
-        app,
-        id,
-        WebviewUrl::App(format!("screenshot.html?view=pin&id={id}").into()),
-    )
-    .title("DockMapper 截图")
-    .position(x, y)
-    .inner_size(width, height)
-    .min_inner_size(60.0, 60.0)
-    .decorations(false)
-    .transparent(true)
-    .shadow(true)
-    .resizable(false)
-    .always_on_top(true)
-    .visible(false)
-    .build()
-    .map(|_| ())
-    .map_err(|error| error.to_string())
+    WebviewWindowBuilder::new(app, id, WebviewUrl::App(format!("pin.html?id={id}").into()))
+        .title("DockMapper 截图")
+        .position(x, y)
+        .inner_size(width, height)
+        .decorations(false)
+        .transparent(true)
+        .shadow(true)
+        .resizable(false)
+        .always_on_top(true)
+        .visible(false)
+        .build()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 fn release_pin_runtime(app: &AppHandle, id: &str, destroy_window: bool) {
@@ -455,17 +467,58 @@ pub fn report_capture_rendered(
     app: AppHandle,
     generation: u64,
     label: String,
+    trace: Option<CaptureSelectionTrace>,
 ) -> Result<bool, String> {
     let state = app.state::<AppState>();
-    let is_current = state
+    let capture = state
         .capture
         .lock()
         .map_err(|_| "截图状态已损坏".to_string())?
         .as_ref()
-        .is_some_and(|capture| capture.generation == generation);
-    if !is_current {
+        .filter(|capture| capture.generation == generation)
+        .cloned();
+    let Some(capture) = capture else {
         return Err("Capture frame has been superseded".into());
+    };
+    if let Some(trace) = trace {
+        if !trace.pointer_x.is_finite()
+            || !trace.pointer_y.is_finite()
+            || !trace.viewport_width.is_finite()
+            || !trace.viewport_height.is_finite()
+            || !trace.device_pixel_ratio.is_finite()
+        {
+            return Err("截图区域诊断坐标无效".into());
+        }
+        tracing::info!(
+            target: "dock_mapper::capture_selection",
+            generation,
+            stage = %trace.stage,
+            pointer_x = trace.pointer_x,
+            pointer_y = trace.pointer_y,
+            selection = ?trace.selection,
+            candidate_id = trace.candidate_id.as_deref().unwrap_or("none"),
+            drag_mode = %trace.drag_mode,
+            viewport_width = trace.viewport_width,
+            viewport_height = trace.viewport_height,
+            device_pixel_ratio = trace.device_pixel_ratio,
+            "Screenshot selection trace"
+        );
+        return Ok(true);
     }
+    tracing::info!(
+        target: "dock_mapper::capture_selection",
+        generation,
+        logical_bounds = ?capture.bounds,
+        image_width = capture.image_width,
+        image_height = capture.image_height,
+        physical_origin_x = capture.physical_origin_x,
+        physical_origin_y = capture.physical_origin_y,
+        physical_width = capture.physical_width,
+        physical_height = capture.physical_height,
+        scale_factor = capture.scale_factor,
+        candidates = ?capture.window_candidates,
+        "Screenshot capture geometry"
+    );
     let mut timings = state.capture_timings.lock_or_recover();
     if let Some(timing) = timings
         .iter_mut()
@@ -601,12 +654,17 @@ fn pin_image_impl(
                 // A physical window pixel now maps to one captured image pixel.
                 // This also avoids sizing the reused WebView with the DPI of the
                 // monitor where it was prewarmed instead of the capture monitor.
-                window
-                    .set_position(tauri::PhysicalPosition::new(x, y))
-                    .map_err(|error| error.to_string())?;
-                window
-                    .set_size(tauri::PhysicalSize::new(width, height))
-                    .map_err(|error| error.to_string())?;
+                apply_pin_geometry(
+                    &window,
+                    PinWindowGeometry {
+                        x,
+                        y,
+                        width,
+                        height,
+                        scale: 1.0,
+                        sequence: 0,
+                    },
+                )?;
             } else {
                 window
                     .set_position(tauri::LogicalPosition::new(layout.x, layout.y))
@@ -615,7 +673,33 @@ fn pin_image_impl(
                     .set_size(tauri::LogicalSize::new(layout.width, layout.height))
                     .map_err(|error| error.to_string())?;
             }
-            let _ = window.emit("pin-image-updated", &id);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            window
+                .set_position(tauri::LogicalPosition::new(layout.x, layout.y))
+                .map_err(|error| error.to_string())?;
+            window
+                .set_size(tauri::LogicalSize::new(layout.width, layout.height))
+                .map_err(|error| error.to_string())?;
+        }
+        let size = window.inner_size().map_err(|error| error.to_string())?;
+        let should_show = {
+            let state = app.state::<AppState>();
+            let mut runtime = state.pin_runtime.lock_or_recover();
+            runtime.geometries.insert(
+                id.clone(),
+                PinGeometryRuntime {
+                    base_width: size.width.max(1),
+                    base_height: size.height.max(1),
+                    sequence: 0,
+                },
+            );
+            runtime.mark_initialized(&id)
+        };
+        let _ = window.emit("pin-image-updated", &id);
+        if should_show {
+            window.show().map_err(|error| error.to_string())?;
         }
         Ok::<(), String>(())
     })();
@@ -628,16 +712,20 @@ fn pin_image_impl(
     let fallback_id = id.clone();
     thread::spawn(move || {
         thread::sleep(std::time::Duration::from_secs(2));
-        let ready = fallback_app
-            .state::<AppState>()
-            .pin_runtime
-            .lock_or_recover()
-            .ready
-            .contains(&fallback_id);
+        let (ready, initialized) = {
+            let state = fallback_app.state::<AppState>();
+            let runtime = state.pin_runtime.lock_or_recover();
+            (
+                runtime.ready.contains(&fallback_id),
+                runtime.initialized.contains(&fallback_id),
+            )
+        };
         if !ready {
             tracing::warn!(target: "dock_mapper::pin", pin_id = %fallback_id, "贴图解码握手超时，显示窗口以便诊断");
-            if let Some(window) = fallback_app.get_webview_window(&fallback_id) {
-                let _ = window.show();
+            if initialized {
+                if let Some(window) = fallback_app.get_webview_window(&fallback_id) {
+                    let _ = window.show();
+                }
             }
         }
     });
@@ -676,12 +764,14 @@ pub fn pin_image_ready(app: AppHandle, id: String) -> Result<bool, String> {
     if !runtime.data.contains_key(&id) {
         return Err("贴图数据不存在".into());
     }
-    runtime.ready.insert(id.clone());
+    let should_show = runtime.mark_ready(&id);
     drop(runtime);
     let window = app
         .get_webview_window(&id)
         .ok_or_else(|| "贴图窗口不存在".to_string())?;
-    window.show().map_err(|error| error.to_string())?;
+    if should_show {
+        window.show().map_err(|error| error.to_string())?;
+    }
     Ok(true)
 }
 
@@ -722,44 +812,79 @@ pub fn close_pin_window(app: AppHandle, id: String) {
 }
 
 #[tauri::command]
-pub fn scale_pin_window(
+pub fn get_pin_window_geometry(
     app: AppHandle,
     id: String,
-    anchor_x: f64,
-    anchor_y: f64,
-    factor: f64,
-) -> Result<bool, String> {
+) -> Result<PinWindowGeometry, String> {
     let window = app
         .get_webview_window(&id)
         .ok_or_else(|| "贴图窗口不存在".to_string())?;
     let size = window.inner_size().map_err(|error| error.to_string())?;
     let position = window.outer_position().map_err(|error| error.to_string())?;
-    let monitor = window
-        .current_monitor()
-        .map_err(|error| error.to_string())?;
-    let (max_width, max_height) = monitor
-        .map(|item| {
-            (
-                item.size().width.saturating_sub(40),
-                item.size().height.saturating_sub(40),
-            )
-        })
-        .unwrap_or((3840, 2160));
-    let next_width = ((size.width as f64 * factor).round() as u32).clamp(60, max_width.max(60));
-    let next_height = ((size.height as f64 * factor).round() as u32).clamp(60, max_height.max(60));
-    let x = position.x
-        + ((size.width as i64 - next_width as i64) as f64 * anchor_x.clamp(0.0, 1.0)).round()
-            as i32;
-    let y = position.y
-        + ((size.height as i64 - next_height as i64) as f64 * anchor_y.clamp(0.0, 1.0)).round()
-            as i32;
-    window
-        .set_position(tauri::PhysicalPosition::new(x, y))
-        .map_err(|error| error.to_string())?;
-    window
-        .set_size(tauri::PhysicalSize::new(next_width, next_height))
-        .map_err(|error| error.to_string())?;
-    Ok(true)
+    let state = app.state::<AppState>();
+    let mut runtime = state.pin_runtime.lock_or_recover();
+    if !runtime.options.contains_key(&id) {
+        return Err("贴图窗口不存在".into());
+    }
+    let geometry = runtime
+        .geometries
+        .entry(id)
+        .or_insert(PinGeometryRuntime {
+            base_width: size.width.max(1),
+            base_height: size.height.max(1),
+            sequence: 0,
+        });
+    Ok(PinWindowGeometry {
+        x: position.x,
+        y: position.y,
+        width: size.width,
+        height: size.height,
+        scale: size.width as f64 / geometry.base_width as f64,
+        sequence: geometry.sequence,
+    })
+}
+
+#[tauri::command]
+pub fn set_pin_window_geometry(
+    app: AppHandle,
+    id: String,
+    request: PinWindowGeometryRequest,
+) -> Result<PinWindowGeometry, String> {
+    let window = app
+        .get_webview_window(&id)
+        .ok_or_else(|| "贴图窗口不存在".to_string())?;
+    let size = window.inner_size().map_err(|error| error.to_string())?;
+    let position = window.outer_position().map_err(|error| error.to_string())?;
+    let work_area = work_area_for(request).ok_or_else(|| "无法读取显示器工作区".to_string())?;
+    let state = app.state::<AppState>();
+    let mut runtime = state.pin_runtime.lock_or_recover();
+    let locked = runtime
+        .options
+        .get(&id)
+        .ok_or_else(|| "贴图窗口不存在".to_string())?
+        .locked;
+    let geometry_runtime = runtime
+        .geometries
+        .entry(id)
+        .or_insert(PinGeometryRuntime {
+            base_width: size.width.max(1),
+            base_height: size.height.max(1),
+            sequence: 0,
+        });
+    if locked {
+        return Ok(PinWindowGeometry {
+            x: position.x,
+            y: position.y,
+            width: size.width,
+            height: size.height,
+            scale: size.width as f64 / geometry_runtime.base_width.max(1) as f64,
+            sequence: geometry_runtime.sequence,
+        });
+    }
+    let applied = fit_pin_geometry(request, *geometry_runtime, work_area)?;
+    apply_pin_geometry(&window, applied)?;
+    geometry_runtime.sequence = applied.sequence;
+    Ok(applied)
 }
 
 #[tauri::command]
@@ -914,5 +1039,17 @@ mod tests {
         runtime.remove("pin-4");
         runtime.remove("pin-2");
         assert_eq!(runtime.latest(), None);
+    }
+
+    #[test]
+    fn pin_window_waits_for_both_image_and_geometry_before_showing() {
+        let mut runtime = PinRuntimeState::default();
+        runtime.reserve("image-first".into(), Arc::<[u8]>::from(vec![1]), 7);
+        assert!(!runtime.mark_ready("image-first"));
+        assert!(runtime.mark_initialized("image-first"));
+
+        runtime.reserve("geometry-first".into(), Arc::<[u8]>::from(vec![2]), 7);
+        assert!(!runtime.mark_initialized("geometry-first"));
+        assert!(runtime.mark_ready("geometry-first"));
     }
 }

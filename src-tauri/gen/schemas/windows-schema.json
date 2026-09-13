@@ -489,6 +489,12 @@
           "markdownDescription": "Enables the get_pin_options command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_pin_window_geometry command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-pin-window-geometry",
+          "markdownDescription": "Enables the get_pin_window_geometry command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_runtime_health command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-runtime-health",
@@ -651,12 +657,6 @@
           "markdownDescription": "Enables the save_pin_image command without any pre-configured scope."
         },
         {
-          "description": "Enables the scale_pin_window command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-scale-pin-window",
-          "markdownDescription": "Enables the scale_pin_window command without any pre-configured scope."
-        },
-        {
           "description": "Enables the set_minimize_to_tray command without any pre-configured scope.",
           "type": "string",
           "const": "allow-set-minimize-to-tray",
@@ -669,6 +669,12 @@
           "markdownDescription": "Enables the set_palette_favorite command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_pin_window_geometry command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-pin-window-geometry",
+          "markdownDescription": "Enables the set_pin_window_geometry command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_screenshot_history_favorite command without any pre-configured scope.",
           "type": "string",
           "const": "allow-set-screenshot-history-favorite",
@@ -679,6 +685,12 @@
           "type": "string",
           "const": "allow-show-capture-overlay",
           "markdownDescription": "Enables the show_capture_overlay command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the start_quick_ocr command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-start-quick-ocr",
+          "markdownDescription": "Enables the start_quick_ocr command without any pre-configured scope."
         },
         {
           "description": "Enables the start_screenshot command without any pre-configured scope.",
@@ -709,6 +721,24 @@
           "type": "string",
           "const": "allow-update-pin-options",
           "markdownDescription": "Enables the update_pin_options command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_screenshot_annotation_color command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-update-screenshot-annotation-color",
+          "markdownDescription": "Enables the update_screenshot_annotation_color command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_screenshot_annotation_outline command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-update-screenshot-annotation-outline",
+          "markdownDescription": "Enables the update_screenshot_annotation_outline command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_screenshot_annotation_styles command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-update-screenshot-annotation-styles",
+          "markdownDescription": "Enables the update_screenshot_annotation_styles command without any pre-configured scope."
         },
         {
           "description": "Enables the update_screenshot_config command without any pre-configured scope.",
@@ -873,6 +903,12 @@
           "markdownDescription": "Denies the get_pin_options command without any pre-configured scope."
         },
         {
+          "description": "Denies the get_pin_window_geometry command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-pin-window-geometry",
+          "markdownDescription": "Denies the get_pin_window_geometry command without any pre-configured scope."
+        },
+        {
           "description": "Denies the get_runtime_health command without any pre-configured scope.",
           "type": "string",
           "const": "deny-get-runtime-health",
@@ -1035,12 +1071,6 @@
           "markdownDescription": "Denies the save_pin_image command without any pre-configured scope."
         },
         {
-          "description": "Denies the scale_pin_window command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-scale-pin-window",
-          "markdownDescription": "Denies the scale_pin_window command without any pre-configured scope."
-        },
-        {
           "description": "Denies the set_minimize_to_tray command without any pre-configured scope.",
           "type": "string",
           "const": "deny-set-minimize-to-tray",
@@ -1053,6 +1083,12 @@
           "markdownDescription": "Denies the set_palette_favorite command without any pre-configured scope."
         },
         {
+          "description": "Denies the set_pin_window_geometry command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-pin-window-geometry",
+          "markdownDescription": "Denies the set_pin_window_geometry command without any pre-configured scope."
+        },
+        {
           "description": "Denies the set_screenshot_history_favorite command without any pre-configured scope.",
           "type": "string",
           "const": "deny-set-screenshot-history-favorite",
@@ -1063,6 +1099,12 @@
           "type": "string",
           "const": "deny-show-capture-overlay",
           "markdownDescription": "Denies the show_capture_overlay command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the start_quick_ocr command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-start-quick-ocr",
+          "markdownDescription": "Denies the start_quick_ocr command without any pre-configured scope."
         },
         {
           "description": "Denies the start_screenshot command without any pre-configured scope.",
@@ -1093,6 +1135,24 @@
           "type": "string",
           "const": "deny-update-pin-options",
           "markdownDescription": "Denies the update_pin_options command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_screenshot_annotation_color command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-update-screenshot-annotation-color",
+          "markdownDescription": "Denies the update_screenshot_annotation_color command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_screenshot_annotation_outline command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-update-screenshot-annotation-outline",
+          "markdownDescription": "Denies the update_screenshot_annotation_outline command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_screenshot_annotation_styles command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-update-screenshot-annotation-styles",
+          "markdownDescription": "Denies the update_screenshot_annotation_styles command without any pre-configured scope."
         },
         {
           "description": "Denies the update_screenshot_config command without any pre-configured scope.",

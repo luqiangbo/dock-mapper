@@ -13,7 +13,12 @@ const numberObject = (value: number, canvasX = 10, canvasY = 20): NumberObject =
   value,
   canvasX,
   canvasY,
-  style: { backgroundColor: "#ef4444", textColor: "#ffffff", size: 32 },
+  style: {
+    backgroundColor: "#ef4444",
+    textColor: "#ffffff",
+    size: 32,
+    outline: { enabled: true, color: "#ffffff", width: 1 },
+  },
 });
 
 describe("screenshot number objects", () => {

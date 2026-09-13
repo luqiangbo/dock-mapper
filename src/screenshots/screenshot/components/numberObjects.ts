@@ -6,6 +6,10 @@ export interface NumberObject {
   canvasX: number;
   canvasY: number;
   style: NumberStyle;
+  angle?: number;
+  groupId?: string | null;
+  version?: number;
+  seed?: number;
 }
 
 export function nextAvailableNumber(objects: ReadonlyArray<Pick<NumberObject, "value">>): number {
@@ -23,7 +27,7 @@ export function appendNumberObject(
 }
 
 export function isNumberObjectInteractive(tool: string | null): boolean {
-  return tool === "number";
+  return tool === "number" || tool === "select";
 }
 
 export function clampNumberCenter(

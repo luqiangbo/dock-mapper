@@ -18,9 +18,11 @@ pub(super) struct PinPlacement {
 pub(super) struct PinRuntimeState {
     pub(super) data: HashMap<String, Arc<[u8]>>,
     pub(super) ready: HashSet<String>,
+    pub(super) initialized: HashSet<String>,
     pub(super) options: HashMap<String, PinOptions>,
     pub(super) placements: HashMap<String, PinPlacement>,
     pub(super) order: Vec<String>,
+    pub(super) geometries: HashMap<String, PinGeometryRuntime>,
 }
 
 impl PinRuntimeState {
@@ -43,13 +45,25 @@ impl PinRuntimeState {
     pub(super) fn remove(&mut self, id: &str) {
         self.data.remove(id);
         self.ready.remove(id);
+        self.initialized.remove(id);
         self.options.remove(id);
         self.placements.remove(id);
         self.order.retain(|candidate| candidate != id);
+        self.geometries.remove(id);
     }
 
     pub(super) fn latest(&self) -> Option<&str> {
         self.order.last().map(String::as_str)
+    }
+
+    pub(super) fn mark_ready(&mut self, id: &str) -> bool {
+        self.ready.insert(id.to_owned());
+        self.initialized.contains(id)
+    }
+
+    pub(super) fn mark_initialized(&mut self, id: &str) -> bool {
+        self.initialized.insert(id.to_owned());
+        self.ready.contains(id)
     }
 }
 

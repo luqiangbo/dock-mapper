@@ -13,6 +13,11 @@ import {
   Save,
   ScanText,
   Square,
+  Diamond,
+  Eraser,
+  Lock,
+  Minus,
+  MousePointer2,
   Type,
   Undo2,
   Redo2,
@@ -24,8 +29,11 @@ import TooltipButton from "./TooltipButton";
 import type { FrameShape } from "./annotationTypes";
 
 export type AnnotTool =
+  | "select"
   | "rect"
   | "ellipse"
+  | "diamond"
+  | "line"
   | "arrow"
   | "pen"
   | "highlight"
@@ -33,16 +41,18 @@ export type AnnotTool =
   | "picker"
   | "text"
   | "number"
+  | "eraser"
   | null;
 
 export const STROKE_COLORS = [
-  "#f43f5e",
-  "#f59e0b",
-  "#22c55e",
-  "#3b82f6",
-  "#6366f1",
+  "#e03131",
+  "#f08c00",
+  "#2f9e44",
+  "#1971c2",
+  "#7048e8",
+  "#c2255c",
+  "#1e1e1e",
   "#ffffff",
-  "#15161d",
 ] as const;
 
 interface AnnotationToolbarProps {
@@ -55,6 +65,8 @@ interface AnnotationToolbarProps {
   confirmDisabled?: boolean;
   ocrDisabled?: boolean;
   ocrRunning?: boolean;
+  continuousDraw?: boolean;
+  selectionCount?: number;
   onToolChange: (tool: AnnotTool) => void;
   onUndo: () => void;
   onRedo?: () => void;
@@ -65,6 +77,11 @@ interface AnnotationToolbarProps {
   onCancel: () => void;
   onConfirm: () => void;
   onPopupOpenChange: (open: boolean) => void;
+  onContinuousDrawChange?: (locked: boolean) => void;
+  onDuplicateSelection?: () => void;
+  onGroupSelection?: () => void;
+  onUngroupSelection?: () => void;
+  onLayerMove?: (move: "front" | "forward" | "backward" | "back") => void;
   style?: React.CSSProperties;
 }
 
@@ -80,6 +97,8 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
       confirmDisabled,
       ocrDisabled,
       ocrRunning,
+      continuousDraw,
+      selectionCount = 0,
       onToolChange,
       onUndo,
       onRedo,
@@ -90,14 +109,19 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
       onCancel,
       onConfirm,
       onPopupOpenChange,
+      onContinuousDrawChange,
+      onDuplicateSelection,
+      onGroupSelection,
+      onUngroupSelection,
+      onLayerMove,
       style,
     },
     ref,
   ): React.JSX.Element {
     const { t } = useI18n();
     const locked = Boolean(toolsDisabled);
-    const toggle = (next: Exclude<AnnotTool, null>) => onToolChange(tool === next ? null : next);
-    const frameActive = tool === "rect" || tool === "ellipse";
+    const toggle = (next: Exclude<AnnotTool, null>) => onToolChange(tool === next ? "select" : next);
+    const frameActive = tool === "rect" || tool === "ellipse" || tool === "diamond";
     const iconProps = { size: 19, strokeWidth: 2.45, "aria-hidden": true };
     const overflowActions = { ocr: onOcr, qr: onQr, save: onSave, pin: onPin } as const;
     const overflowItems: MenuProps["items"] = [
@@ -127,6 +151,16 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
         disabled: locked || confirmDisabled,
       },
     ];
+    const selectionItems: MenuProps["items"] = [
+      { key: "duplicate", label: "复制对象（Ctrl+D）" },
+      { key: "group", label: "分组（Ctrl+G）", disabled: selectionCount < 2 },
+      { key: "ungroup", label: "取消分组（Ctrl+Shift+G）" },
+      { type: "divider" },
+      { key: "front", label: "置顶（Ctrl+Shift+]）" },
+      { key: "forward", label: "上移一层（Ctrl+]）" },
+      { key: "backward", label: "下移一层（Ctrl+[）" },
+      { key: "back", label: "置底（Ctrl+Shift+[）" },
+    ];
 
     return (
       <div
@@ -138,12 +172,36 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
         <div className="wx-toolbar__row">
           <div className="wx-toolbar__group">
             <TooltipButton
+              label="选择（V）"
+              active={tool === "select"}
+              disabled={locked}
+              onClick={() => onToolChange("select")}
+            >
+              <MousePointer2 {...iconProps} />
+            </TooltipButton>
+            <TooltipButton
               label="框选标注"
               active={frameActive}
               disabled={locked}
-              onClick={() => onToolChange(frameActive ? null : shapeKind)}
+              onClick={() => onToolChange(frameActive ? "select" : shapeKind)}
             >
               <Square {...iconProps} />
+            </TooltipButton>
+            <TooltipButton
+              label="菱形"
+              active={tool === "diamond"}
+              disabled={locked}
+              onClick={() => toggle("diamond")}
+            >
+              <Diamond {...iconProps} />
+            </TooltipButton>
+            <TooltipButton
+              label="线条"
+              active={tool === "line"}
+              disabled={locked}
+              onClick={() => toggle("line")}
+            >
+              <Minus {...iconProps} />
             </TooltipButton>
             <TooltipButton
               label={t.toolbar.arrow}
@@ -201,6 +259,22 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
             >
               <ListOrdered {...iconProps} />
             </TooltipButton>
+            <TooltipButton
+              label="对象橡皮擦"
+              active={tool === "eraser"}
+              disabled={locked}
+              onClick={() => toggle("eraser")}
+            >
+              <Eraser {...iconProps} />
+            </TooltipButton>
+            <TooltipButton
+              label={continuousDraw ? "关闭连续绘制" : "连续绘制"}
+              active={continuousDraw}
+              disabled={locked}
+              onClick={() => onContinuousDrawChange?.(!continuousDraw)}
+            >
+              <Lock {...iconProps} />
+            </TooltipButton>
           </div>
 
           {!compact && (
@@ -224,6 +298,23 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
 
           <Divider type="vertical" />
           <div className="wx-toolbar__group">
+            {selectionCount > 0 && (
+              <Dropdown
+                trigger={["click"]}
+                menu={{
+                  items: selectionItems,
+                  onClick: ({ key }) => {
+                    if (key === "duplicate") onDuplicateSelection?.();
+                    else if (key === "group") onGroupSelection?.();
+                    else if (key === "ungroup") onUngroupSelection?.();
+                    else onLayerMove?.(key as "front" | "forward" | "backward" | "back");
+                  },
+                }}
+                onOpenChange={onPopupOpenChange}
+              >
+                <span><TooltipButton label="对象操作"><MoreHorizontal {...iconProps} /></TooltipButton></span>
+              </Dropdown>
+            )}
             <TooltipButton label={t.toolbar.undo} disabled={locked || !canUndo} onClick={onUndo}>
               <Undo2 {...iconProps} />
             </TooltipButton>

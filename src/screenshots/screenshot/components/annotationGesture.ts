@@ -1,8 +1,17 @@
-export type RasterTool = "rect" | "ellipse" | "arrow" | "pen" | "highlight" | "mosaic";
+export type RasterTool =
+  | "rect"
+  | "ellipse"
+  | "diamond"
+  | "line"
+  | "arrow"
+  | "pen"
+  | "highlight"
+  | "mosaic";
 
 export interface GesturePoint {
   x: number;
   y: number;
+  pressure?: number;
 }
 
 export interface AnnotationGesture<TSnapshot> {
@@ -26,7 +35,7 @@ export function createAnnotationGesture<TSnapshot>(
     start,
     points: [start],
     baseline,
-    changed: tool === "pen",
+    changed: tool === "pen" || tool === "highlight",
   };
 }
 

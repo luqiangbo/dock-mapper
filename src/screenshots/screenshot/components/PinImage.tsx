@@ -1,13 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { copyBinaryPayload } from "../utils/binaryPayload";
-
-interface PinOptions {
-  opacity: number;
-  locked: boolean;
-}
+import { invokeCommand, type PinActionCommand } from "../../../api/ipc";
+import type { PinOptions } from "../../../api/screenshotTypes";
+import { usePinZoomController } from "../hooks/usePinZoomController";
 
 export default function PinImage(): React.JSX.Element {
   const pinId = new URLSearchParams(window.location.search).get("id") ?? getCurrentWindow().label;
@@ -19,10 +16,7 @@ export default function PinImage(): React.JSX.Element {
   });
   const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const imageUrlRef = useRef("");
-  const scaleFrame = useRef<number | null>(null);
-  const pendingScale = useRef<{ factor: number; anchorX: number; anchorY: number } | null>(null);
-  const scaleInFlight = useRef(false);
-  const scaleDisposed = useRef(false);
+  const { onWheel: scaleAtPointer, zoomError } = usePinZoomController(pinId, !options.locked);
 
   useEffect(() => {
     let disposed = false;
@@ -33,7 +27,7 @@ export default function PinImage(): React.JSX.Element {
         // `tauri::ipc::Response` is delivered to JavaScript as an ArrayBuffer.
         // Normalize it instead of relying on the invoke generic, which only
         // affects TypeScript and does not convert the runtime value.
-        const png = await invoke<unknown>("get_pin_image", { id: pinId });
+        const png = await invokeCommand("get_pin_image", { id: pinId });
         const pngBuffer = copyBinaryPayload(png);
         if (disposed) return;
         const nextUrl = URL.createObjectURL(new Blob([pngBuffer], { type: "image/png" }));
@@ -81,7 +75,7 @@ export default function PinImage(): React.JSX.Element {
           return;
         }
         off = unlisten;
-        const value = await invoke<PinOptions>("get_pin_options", { id: pinId });
+        const value = await invokeCommand("get_pin_options", { id: pinId });
         if (!disposed) setOptions(value);
       })
       .catch((error) => {
@@ -90,16 +84,6 @@ export default function PinImage(): React.JSX.Element {
     return () => {
       disposed = true;
       off?.();
-    };
-  }, [pinId]);
-
-  useEffect(() => {
-    scaleDisposed.current = false;
-    return () => {
-      scaleDisposed.current = true;
-      if (scaleFrame.current !== null) cancelAnimationFrame(scaleFrame.current);
-      scaleFrame.current = null;
-      pendingScale.current = null;
     };
   }, [pinId]);
 
@@ -121,7 +105,7 @@ export default function PinImage(): React.JSX.Element {
   const updateOptions = async (next: PinOptions): Promise<void> => {
     const previous = options;
     try {
-      const saved = await invoke<PinOptions>("update_pin_options", {
+      const saved = await invokeCommand("update_pin_options", {
         id: pinId,
         opacity: next.opacity,
         locked: next.locked,
@@ -133,59 +117,18 @@ export default function PinImage(): React.JSX.Element {
     }
   };
 
-  const runPinCommand = async (command: string): Promise<void> => {
+  const runPinCommand = async (command: PinActionCommand): Promise<void> => {
     try {
-      await invoke(command, { id: pinId });
+      await invokeCommand(command, { id: pinId });
       if (command !== "close_pin_window") setMenuPosition(null);
     } catch (error) {
       setLoadError(`贴图操作失败：${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
-  const flushScale = (): void => {
-    scaleFrame.current = null;
-    if (scaleDisposed.current || scaleInFlight.current || !pendingScale.current) return;
-
-    const request = pendingScale.current;
-    pendingScale.current = null;
-    scaleInFlight.current = true;
-    void invoke("scale_pin_window", {
-      id: pinId,
-      anchorX: request.anchorX,
-      anchorY: request.anchorY,
-      factor: request.factor,
-    })
-      .catch((error) => {
-        if (!scaleDisposed.current)
-          setLoadError(`贴图缩放失败：${error instanceof Error ? error.message : String(error)}`);
-      })
-      .finally(() => {
-        scaleInFlight.current = false;
-        if (!scaleDisposed.current && pendingScale.current && scaleFrame.current === null)
-          scaleFrame.current = requestAnimationFrame(flushScale);
-      });
-  };
-
-  const scaleAtPointer = (event: React.WheelEvent<HTMLDivElement>): void => {
-    event.preventDefault();
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const delta =
-      event.deltaY *
-      (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? Math.max(1, bounds.height) : 1);
-    const factor = Math.exp((-delta * Math.log(1.12)) / 100);
-    const current = pendingScale.current;
-    pendingScale.current = {
-      factor: Math.min(4, Math.max(0.25, (current?.factor ?? 1) * factor)),
-      anchorX: (event.clientX - bounds.left) / Math.max(1, bounds.width),
-      anchorY: (event.clientY - bounds.top) / Math.max(1, bounds.height),
-    };
-    if (!scaleInFlight.current && scaleFrame.current === null)
-      scaleFrame.current = requestAnimationFrame(flushScale);
-  };
-
   return (
     <div
-      className={`pin-wrap${loadError ? " pin-wrap-error" : ""}`}
+      className={`pin-wrap${loadError || zoomError ? " pin-wrap-error" : ""}`}
       onPointerDown={startDragging}
       onWheel={scaleAtPointer}
       onContextMenu={(event) => {
@@ -203,7 +146,7 @@ export default function PinImage(): React.JSX.Element {
           style={{ opacity: options.opacity }}
           onLoad={() => {
             setLoadError("");
-            void invoke("pin_image_ready", { id: pinId }).catch((error) => {
+            void invokeCommand("pin_image_ready", { id: pinId }).catch((error) => {
               setLoadError(
                 `贴图显示失败：${error instanceof Error ? error.message : String(error)}`,
               );
@@ -212,9 +155,9 @@ export default function PinImage(): React.JSX.Element {
           onError={() => setLoadError("贴图加载失败：无法解码 PNG 图片")}
         />
       ) : null}
-      {loadError ? (
+      {loadError || zoomError ? (
         <div className="pin-load-error" role="alert">
-          {loadError}
+          {loadError || zoomError}
         </div>
       ) : null}
       {menuPosition ? (

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WindowCandidate } from "../api";
-import { findWindowCandidate } from "./windowCandidates";
+import { advanceWindowSelectionDragMode, findWindowCandidate } from "./windowCandidates";
 
 describe("window candidate selection", () => {
   it("selects the topmost overlapping window by z-order", () => {
@@ -18,5 +18,12 @@ describe("window candidate selection", () => {
       { id: "second", x: 20, y: 20, width: 160, height: 160, zIndex: 1 },
     ];
     expect(findWindowCandidate(candidates, 80, 80)?.id).toBe("first");
+  });
+
+  it("never returns a manual drag to automatic window selection", () => {
+    const start = { x: 100, y: 100 };
+    const manual = advanceWindowSelectionDragMode("candidate", start, { x: 110, y: 100 });
+    expect(manual).toBe("manual");
+    expect(advanceWindowSelectionDragMode(manual, start, { x: 101, y: 100 })).toBe("manual");
   });
 });

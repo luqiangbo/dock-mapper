@@ -1,75 +1,27 @@
 fn main() {
     println!("cargo:rerun-if-changed=icons/icon.ico");
+    println!("cargo:rerun-if-changed=../ipc-contract.json");
 
-    const COMMANDS: &[&str] = &[
-        "get_supported_keys",
-        "get_key_mappings",
-        "sync_key_mappings",
-        "get_scancode_map_status",
-        "apply_scancode_map",
-        "restore_scancode_map",
-        "upload_image",
-        "release_image",
-        "list_screenshot_history",
-        "get_screenshot_history_image",
-        "get_screenshot_history_thumbnail",
-        "create_screenshot_history",
-        "set_screenshot_history_favorite",
-        "delete_screenshot_history",
-        "copy_screenshot_history",
-        "pin_screenshot_history",
-        "get_runtime_health",
-        "start_screenshot",
-        "close_overlay",
-        "show_capture_overlay",
-        "overlay_ready",
-        "get_full_screenshot",
-        "report_capture_rendered",
-        "check_screen_permission",
-        "copy_image",
-        "copy_text",
-        "save_image",
-        "pin_image",
-        "get_pin_image",
-        "pin_image_ready",
-        "get_pin_options",
-        "update_pin_options",
-        "copy_pin_image",
-        "save_pin_image",
-        "close_pin_window",
-        "scale_pin_window",
-        "open_url",
-        "get_screenshot_config",
-        "update_screenshot_config",
-        "get_color_palette",
-        "record_palette_color",
-        "set_palette_favorite",
-        "clear_recent_palette",
-        "get_screenshot_shortcut_statuses",
-        "reset_screenshot_shortcuts",
-        "choose_screenshot_save_directory",
-        "export_diagnostics",
-        "recognize_selection",
-        "decode_qr_selection",
-        "refresh_widget_position",
-        "get_widget_config",
-        "update_widget_config",
-        "sync_widget_dynamic_width",
-        "get_minimize_to_tray",
-        "set_minimize_to_tray",
-        "key_visualizer_ready",
-        "get_key_visualizer_session",
-        "get_key_visualizer_effects_status",
-        "locate_key_visualizer_mouse",
-        "key_visualizer_effects_ready",
-        "get_key_visualizer_config",
-        "update_key_visualizer_config",
-        "get_key_visualizer_status",
-        "retry_key_visualizer",
-    ];
+    let contract = std::fs::read_to_string("../ipc-contract.json")
+        .expect("failed to read the shared IPC contract");
+    let contract: serde_json::Value =
+        serde_json::from_str(&contract).expect("failed to parse the shared IPC contract");
+    let commands = contract["commands"]
+        .as_array()
+        .expect("IPC contract commands must be an array")
+        .iter()
+        .map(|command| {
+            let command = command
+                .as_str()
+                .expect("IPC contract command names must be strings")
+                .to_owned();
+            &*Box::leak(command.into_boxed_str())
+        })
+        .collect::<Vec<&'static str>>();
+    let commands = Box::leak(commands.into_boxed_slice());
     tauri_build::try_build(
         tauri_build::Attributes::new()
-            .app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)),
+            .app_manifest(tauri_build::AppManifest::new().commands(commands)),
     )
     .expect("failed to build DockMapper Tauri context")
 }

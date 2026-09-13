@@ -1,5 +1,4 @@
-import type { ArrowPreset } from "./annotationTypes";
-import type { ArrowBrushId } from "./arrowBrushPresets";
+import type { ArrowStyle } from "./annotationTypes";
 import type { ArrowGeometry, ArrowPoint } from "./arrowShapes";
 
 export const ARROW_ASSEMBLY_VERSION = 1 as const;
@@ -18,17 +17,12 @@ export interface ArrowLinePart {
   end: ArrowPoint;
 }
 
-const BRUSH_VARIATION: Record<ArrowBrushId, number> = {
-  solid: 0.62,
-  marker: 0.75,
-  highlighter: 0.58,
-  "brush-pen": 1,
-  pencil: 0.85,
-  charcoal: 1.08,
-  watercolor: 0.95,
-  spray: 0.9,
-  hatch: 0.7,
-};
+function legacyVariation(value: string): number {
+  if (value === "solid") return 0.62;
+  if (value === "marker" || value === "highlighter") return 0.7;
+  if (value === "charcoal" || value === "watercolor") return 1;
+  return 0.85;
+}
 
 const COMPONENTS = [
   [0.06, 0.02, -0.02],
@@ -58,13 +52,13 @@ function gaussian(random: () => number): number {
 
 /** Samples only assembly proportions; the center axis is never perturbed. */
 export function createArrowAssemblyVariation(
-  style: ArrowPreset,
-  brushId: ArrowBrushId,
+  style: ArrowStyle,
+  brushId: string,
   seed: number,
 ): ArrowAssemblyVariation {
   const features = [1, 1, 1];
   const random = randomSource(seed);
-  const strength = BRUSH_VARIATION[brushId] * (style === "segmented" ? 0.78 : 1);
+  const strength = legacyVariation(brushId) * (style === "segmented" ? 0.78 : 1);
   for (const component of COMPONENTS) {
     const score = clamp(gaussian(random), -2.1, 2.1) * strength;
     component.forEach((weight, index) => {

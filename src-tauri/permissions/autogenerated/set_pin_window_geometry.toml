@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-pin-window-geometry"
+description = "Enables the set_pin_window_geometry command without any pre-configured scope."
+commands.allow = ["set_pin_window_geometry"]
+
+[[permission]]
+identifier = "deny-set-pin-window-geometry"
+description = "Denies the set_pin_window_geometry command without any pre-configured scope."
+commands.deny = ["set_pin_window_geometry"]

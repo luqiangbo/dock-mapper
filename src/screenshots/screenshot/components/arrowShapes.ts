@@ -1,4 +1,4 @@
-import { normalizeArrowStyle, type ArrowPreset, type ArrowStyle } from "./annotationTypes";
+import type { ArrowStyle } from "./annotationTypes";
 import type { ArrowAssemblyVariation } from "./arrowAssembly";
 
 export interface ArrowPoint {
@@ -18,7 +18,7 @@ export interface ArrowHeadGeometry {
   filled: boolean;
 }
 export interface ArrowGeometry {
-  style: ArrowPreset;
+  style: ArrowStyle;
   length: number;
   /** Effective body width; short drags compress it together with the head. */
   width: number;
@@ -95,7 +95,7 @@ export function calculateArrowGeometry(input: ArrowGeometryInput): ArrowGeometry
     input.lineWidth <= 0
   )
     return null;
-  const style = normalizeArrowStyle(input.style);
+  const style: ArrowStyle = input.style;
   const width = Math.min(input.lineWidth, length * 0.16);
   const half = width / 2;
   const variation = input.assembly;
