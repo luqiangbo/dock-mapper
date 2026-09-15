@@ -11,10 +11,18 @@ import type { CaptureSelectionTrace, OcrTextBlock, WindowCandidate } from "../..
 import type { AnnotationOutlineConfig } from "../../../types";
 import { useI18n } from "../i18n";
 import { paletteApi } from "../../../api/commands";
-import AnnotationToolbar from "./AnnotationToolbar";
+import AnnotationToolbar, { type AnnotTool } from "./AnnotationToolbar";
+import ExcalidrawScreenshotEditor, {
+  type ExcalidrawScreenshotEditorHandle,
+  type ExcalidrawSelectionState,
+} from "./ExcalidrawScreenshotEditor";
 import { loadImageFromUrl } from "../utils/imageLoad";
 import { fontFamily, TEXT_SIZES, type TextObject, type TextSize } from "./textTypes";
 import ToolOptionsBar from "./ToolOptionsBar";
+import {
+  isExcalidrawStyleTool,
+  isSameExcalidrawSelection,
+} from "./excalidrawScreenshotAdapter";
 import { clearArrowRenderCache } from "./arrowGeometry";
 import { useOcr } from "../hooks/useOcr";
 import { RequestGeneration } from "../hooks/requestGeneration";
@@ -249,6 +257,7 @@ function ScreenshotOverlay(): React.JSX.Element {
   const overlayLabel = getCurrentWindow().label;
   const bgRef = useRef<HTMLCanvasElement>(null);
   const shotRef = useRef<HTMLCanvasElement>(null);
+  const excalidrawEditorRef = useRef<ExcalidrawScreenshotEditorHandle>(null);
   const shotBaseRef = useRef<HTMLCanvasElement | null>(null);
   const shotViewportRef = useRef<HTMLDivElement>(null);
   const fullImageRef = useRef<HTMLImageElement | null>(null);
@@ -359,6 +368,12 @@ function ScreenshotOverlay(): React.JSX.Element {
   >(null);
 
   const [dragging, setDragging] = useState(false);
+  const [editorReady, setEditorReady] = useState(false);
+  const [editorSelection, setEditorSelection] = useState<ExcalidrawSelectionState>({
+    tool: null,
+    tools: [],
+    count: 0,
+  });
   const [windowCandidates, setWindowCandidates] = useState<WindowCandidate[]>([]);
   const [hoveredWindow, setHoveredWindow] = useState<Selection | null>(null);
   const {
@@ -380,6 +395,13 @@ function ScreenshotOverlay(): React.JSX.Element {
     setSelection,
     selectionRef,
   } = useCaptureLifecycle();
+  const handleEditorReady = useCallback(() => setEditorReady(true), []);
+  const handleEditorSelectionChange = useCallback((next: ExcalidrawSelectionState) => {
+    setEditorSelection((previous) =>
+      isSameExcalidrawSelection(previous, next) ? previous : next,
+    );
+  }, []);
+  const handleEditorError = useCallback((message: string) => setError(message), [setError]);
   const {
     tool,
     setTool,
@@ -459,7 +481,10 @@ function ScreenshotOverlay(): React.JSX.Element {
     popupOpen: toolbarPopupOpen,
     reportPopup: reportToolbarPopup,
     closePopups: closeToolbarPopups,
-  } = useOverlayToolbarLayout(phase === "editing", tool);
+  } = useOverlayToolbarLayout(
+    phase === "editing",
+    tool === "select" ? editorSelection.tool : tool,
+  );
 
   useEffect(
     () => () => {
@@ -544,6 +569,8 @@ function ScreenshotOverlay(): React.JSX.Element {
     qrRequest.current.cancel();
     setQrContents(null);
     setActiveOcrBlock(null);
+    setEditorReady(false);
+    setEditorSelection({ tool: null, tools: [], count: 0 });
   }, [selection?.x, selection?.y, selection?.width, selection?.height]);
 
   useEffect(() => {
@@ -582,27 +609,6 @@ function ScreenshotOverlay(): React.JSX.Element {
     (open: boolean) => reportToolbarPopup("primary", open),
     [reportToolbarPopup],
   );
-  const reportSecondaryPopup = useCallback(
-    (open: boolean) => {
-      reportToolbarPopup("secondary", open);
-      if (open && (selectedTextId || selectedNumberId || selectedRasterId)) {
-        objectStyleChangedRef.current = false;
-        beginObjectMutation();
-      } else if (!open && objectMutationRef.current.active) {
-        commitObjectMutation(objectStyleChangedRef.current);
-        objectStyleChangedRef.current = false;
-      }
-    },
-    [
-      beginObjectMutation,
-      commitObjectMutation,
-      reportToolbarPopup,
-      selectedNumberId,
-      selectedRasterId,
-      selectedTextId,
-    ],
-  );
-
   const {
     palette,
     paletteBusy,
@@ -841,8 +847,22 @@ function ScreenshotOverlay(): React.JSX.Element {
   );
 
   const exportPng = useCallback(async (): Promise<Uint8Array> => {
+    if (editorReady && excalidrawEditorRef.current)
+      return excalidrawEditorRef.current.exportPng();
     const canvas = shotRef.current;
     if (!canvas) throw new Error("No canvas");
+
+    // A failed editor initialization must not make the capture unusable.
+    // The visible canvas is the untouched physical-pixel crop in this state.
+    if (!editorReady) {
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (value) => (value ? resolve(value) : reject(new Error("toBlob failed"))),
+          "image/png",
+        );
+      });
+      return new Uint8Array(await blob.arrayBuffer());
+    }
 
     const exportCanvas = document.createElement("canvas");
     exportCanvas.width = canvas.width;
@@ -870,7 +890,7 @@ function ScreenshotOverlay(): React.JSX.Element {
       );
     });
     return new Uint8Array(await blob.arrayBuffer());
-  }, [sceneElements, selection?.width]);
+  }, [editorReady, sceneElements, selection?.width]);
 
   const exportOcrPng = useCallback(async (): Promise<Uint8Array> => {
     const canvas = shotRef.current;
@@ -1469,6 +1489,8 @@ function ScreenshotOverlay(): React.JSX.Element {
     hasSelectedRaster: Boolean(selectedRasterId),
     shotReady,
     busy,
+    editorActive: editorReady,
+    isEditingText: () => excalidrawEditorRef.current?.isEditingText() ?? false,
     copyPickerHex: () => void copyPickerHex(),
     exitPicker: () => {
       setTool(null);
@@ -2688,24 +2710,17 @@ function ScreenshotOverlay(): React.JSX.Element {
 
   const shotViewportHeight = displayHeight;
 
-  const primarySelectedElement = [...sceneElements]
-    .reverse()
-    .find((element) => selectedIds.includes(element.id));
-  const selectedElementTool = primarySelectedElement?.type === "raster"
-    ? primarySelectedElement.value.kind
-    : primarySelectedElement?.type === "text"
-      ? "text"
-      : primarySelectedElement?.type === "number"
-        ? "number"
-        : null;
-  const optionsTool = tool === "select" ? selectedElementTool : tool;
-  const secondarySize = optionsTool && secondaryToolbarSize.width > 0 ? secondaryToolbarSize : undefined;
+  const selectedStyleTool = tool === "select" ? editorSelection.tool : tool;
+  const optionsTool = isExcalidrawStyleTool(selectedStyleTool) ? selectedStyleTool : null;
+  const secondarySize = optionsTool && secondaryToolbarSize.width > 0
+    ? secondaryToolbarSize
+    : undefined;
   const toolbarLayout =
     selection && phase === "editing" && primaryToolbarSize.width > 0
       ? calculateToolbarLayout(selection, viewportSize, primaryToolbarSize, secondarySize)
       : undefined;
   const toolbarMeasured = Boolean(
-    toolbarLayout && (!optionsTool || optionsTool === "eraser" || (secondarySize && toolbarLayout.secondary)),
+    toolbarLayout && (!optionsTool || (secondarySize && toolbarLayout.secondary)),
   );
 
   // Tools usable as soon as crop is on canvas — only lock while an action is running
@@ -2748,7 +2763,30 @@ function ScreenshotOverlay(): React.JSX.Element {
     textStyle,
     numberStyle,
   };
-  const updateToolSettings = (initialChanges: Partial<ToolSettings>): void => {
+  const displayedToolSettings: ToolSettings = editorSelection.count > 0
+    ? {
+        ...toolSettings,
+        ...(editorSelection.strokeColor === undefined ? {} : { strokeColor: editorSelection.strokeColor }),
+        ...(editorSelection.strokeWidth === undefined ? {} : { strokeWidth: editorSelection.strokeWidth }),
+        ...(editorSelection.tool === "pen" && editorSelection.strokeWidth !== undefined
+          ? { penWidth: editorSelection.strokeWidth }
+          : {}),
+        ...(editorSelection.lineStyle === undefined ? {} : { lineStyle: editorSelection.lineStyle }),
+        ...(editorSelection.fillColor === undefined ? {} : { fillColor: editorSelection.fillColor }),
+        ...(editorSelection.fillStyle === undefined ? {} : { fillStyle: editorSelection.fillStyle }),
+        ...(editorSelection.roughness === undefined ? {} : { roughness: editorSelection.roughness }),
+        ...(editorSelection.arrowStyle === undefined ? {} : { arrowStyle: editorSelection.arrowStyle }),
+        ...(editorSelection.startArrowhead === undefined
+          ? {}
+          : { startArrowhead: editorSelection.startArrowhead }),
+        ...(editorSelection.endArrowhead === undefined ? {} : { endArrowhead: editorSelection.endArrowhead }),
+        ...(editorSelection.textStyle === undefined ? {} : { textStyle: editorSelection.textStyle }),
+      }
+    : toolSettings;
+  const updateToolSettings = (
+    initialChanges: Partial<ToolSettings>,
+    styleTool: AnnotTool = tool,
+  ): void => {
     const selectedText = objectStateRef.current.textObjects.find(
       (item) => item.id === selectedTextId,
     );
@@ -2886,7 +2924,7 @@ function ScreenshotOverlay(): React.JSX.Element {
         return element;
       }));
     }
-    const visualTool = visualToolFor(selectedRaster?.kind ?? tool);
+    const visualTool = visualToolFor(selectedRaster?.kind ?? styleTool);
     if (changes.strokeColor !== undefined && visualTool)
       updateVisual(visualTool, { color: changes.strokeColor });
     if (changes.outline !== undefined) setOutlineStyle(changes.outline);
@@ -2895,7 +2933,7 @@ function ScreenshotOverlay(): React.JSX.Element {
     if (changes.strokeWidth !== undefined) setStrokeWidth(changes.strokeWidth);
     if (changes.shapeKind !== undefined) {
       setShapeKind(changes.shapeKind);
-      if (isFrameAnnotationKind(tool)) setTool(changes.shapeKind);
+      if (isFrameAnnotationKind(styleTool)) setTool(changes.shapeKind);
     }
     if (changes.arrowStyle !== undefined) setArrowStyle(changes.arrowStyle);
     if (changes.fillStyle !== undefined) setFillStyle(changes.fillStyle);
@@ -2997,7 +3035,8 @@ function ScreenshotOverlay(): React.JSX.Element {
         "取色复制格式保存失败",
       );
     }
-    const styleSource = selectedRaster?.kind ?? (selectedText ? "text" : selectedNumber ? "number" : tool);
+    const styleSource = selectedRaster?.kind ??
+      (selectedText ? "text" : selectedNumber ? "number" : styleTool);
     const styleKey = isFrameAnnotationKind(styleSource) ? "shape"
       : styleSource === "line" || styleSource === "arrow" || styleSource === "pen" || styleSource === "highlight" || styleSource === "text" || styleSource === "number" || styleSource === "mosaic"
         ? styleSource : null;
@@ -3052,7 +3091,7 @@ function ScreenshotOverlay(): React.JSX.Element {
       {phase === "editing" && selection && (
         <div
           ref={shotViewportRef}
-          className="shot-viewport"
+          className="shot-viewport shot-viewport--excalidraw"
           style={{
             left: selection.x,
             top: selection.y,
@@ -3067,6 +3106,26 @@ function ScreenshotOverlay(): React.JSX.Element {
               width: selection.width,
               height: displayHeight,
             }}
+          />
+          <ExcalidrawScreenshotEditor
+            ref={excalidrawEditorRef}
+            baseCanvas={shotBaseRef.current}
+            captureKey={`${selection.x}-${selection.y}-${selection.width}-${selection.height}-${shotRef.current?.width ?? 0}-${shotRef.current?.height ?? 0}`}
+            strokeColor={tool === "text" ? textStyle.color : strokeColor}
+            strokeWidth={tool === "pen" || (tool === "select" && editorSelection.tool === "pen")
+              ? penWidth
+              : strokeWidth}
+            fillColor={fillColor}
+            fillStyle={fillStyle}
+            lineStyle={lineStyle}
+            roughness={roughness}
+            arrowStyle={arrowStyle}
+            startArrowhead={startArrowhead}
+            endArrowhead={endArrowhead}
+            textStyle={textStyle}
+            onReady={handleEditorReady}
+            onError={handleEditorError}
+            onSelectionChange={handleEditorSelectionChange}
           />
           {marquee && shotRef.current && (
             <div
@@ -3906,45 +3965,14 @@ function ScreenshotOverlay(): React.JSX.Element {
             ref={primaryToolbarRef}
             tool={tool}
             shapeKind={shapeKind}
-            canUndo={canUndo}
-            canRedo={canRedo}
+            canUndo={editorReady}
+            canRedo={editorReady}
             compact={compactToolbar}
-            toolsDisabled={toolsLocked}
+            toolsDisabled={toolsLocked || !editorReady}
+            actionsDisabled={toolsLocked}
             confirmDisabled={toolsLocked}
             ocrDisabled={!selection || !shotReady || ocrRunning}
             ocrRunning={ocrRunning}
-            continuousDraw={continuousDraw}
-            onContinuousDrawChange={setContinuousDraw}
-            selectionCount={selectedIds.length}
-            onDuplicateSelection={() => {
-              const selected = new Set(selectedIds);
-              const source = sceneElements.filter((element) => selected.has(element.id));
-              if (!source.length) return;
-              const result = duplicateSceneSelection(
-                source,
-                new Set(source.map((element) => element.id)),
-                (id) => `${id}-copy-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-              );
-              pushCurrentObjects();
-              setSceneElements((previous) => [...previous, ...result.elements.slice(source.length)]);
-              setSelectedIds([...result.selectedIds]);
-              setTool("select");
-            }}
-            onGroupSelection={() => {
-              if (selectedIds.length < 2) return;
-              pushCurrentObjects();
-              setSceneElements((previous) => groupElements(previous, new Set(selectedIds), `group-${Date.now()}`));
-            }}
-            onUngroupSelection={() => {
-              if (!selectedIds.length) return;
-              pushCurrentObjects();
-              setSceneElements((previous) => ungroupElements(previous, new Set(selectedIds)));
-            }}
-            onLayerMove={(move) => {
-              if (!selectedIds.length) return;
-              pushCurrentObjects();
-              setSceneElements((previous) => moveSceneLayer(previous, new Set(selectedIds), move));
-            }}
             onPopupOpenChange={reportPrimaryPopup}
             style={{
               left: toolbarLayout?.primary.left ?? 8,
@@ -3960,6 +3988,7 @@ function ScreenshotOverlay(): React.JSX.Element {
               }
               closeToolbarPopups();
               setTool(next);
+              excalidrawEditorRef.current?.setTool(next);
               if (isFrameAnnotationKind(next)) setShapeKind(next);
               const selectedRaster = objectStateRef.current.rasterAnnotations.find(
                 (item) => item.id === selectedRasterId,
@@ -3974,8 +4003,8 @@ function ScreenshotOverlay(): React.JSX.Element {
               if (next !== "picker") setPickerSample(null);
               if (next !== "number") setSelectedNumberId(null);
             }}
-            onUndo={undo}
-            onRedo={redo}
+            onUndo={() => excalidrawEditorRef.current?.undo()}
+            onRedo={() => excalidrawEditorRef.current?.redo()}
             onSave={() => {
               void runCommittedImageAction(window.api.saveImage, "保存截图失败");
             }}
@@ -4012,18 +4041,22 @@ function ScreenshotOverlay(): React.JSX.Element {
               void runCommittedImageAction(window.api.copyImage, "复制截图失败");
             }}
           />
-          {optionsTool && optionsTool !== "eraser" && (
+          {optionsTool && (
             <ToolOptionsBar
               key={optionsTool}
               ref={secondaryToolbarRef}
               tool={optionsTool}
-              settings={toolSettings}
-              onChange={updateToolSettings}
-              onPopupOpenChange={reportSecondaryPopup}
+              settings={displayedToolSettings}
+              onChange={(changes) => {
+                excalidrawEditorRef.current?.applyStyle(changes);
+                updateToolSettings(changes, optionsTool);
+              }}
+              onPopupOpenChange={(open) => reportToolbarPopup("secondary", open)}
               palette={palette}
               paletteBusy={paletteBusy}
               onPaletteCopy={(color) => void copyPaletteColor(color)}
               onPaletteFavorite={(color, favorite) => void setPaletteFavorite(color, favorite)}
+              selectedTools={editorSelection.tools}
               style={{
                 left: toolbarLayout?.secondary?.left ?? 8,
                 top: toolbarLayout?.secondary?.top ?? 8,

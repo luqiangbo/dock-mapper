@@ -28,9 +28,18 @@ export default defineConfig({
       return "./index.html";
     },
   },
+  output: {
+    copy: [
+      {
+        from: "./node_modules/@excalidraw/excalidraw/dist/prod/fonts",
+        to: "excalidraw/fonts",
+        noErrorOnMissing: false,
+      },
+    ],
+  },
   server: {
     host: "127.0.0.1",
-    port: 1420,
+    port: 11420,
     strictPort: true,
   },
 });

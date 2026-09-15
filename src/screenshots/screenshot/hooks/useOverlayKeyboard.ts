@@ -9,6 +9,8 @@ interface Options {
   hasSelectedRaster: boolean;
   shotReady: boolean;
   busy: boolean;
+  editorActive?: boolean;
+  isEditingText?: () => boolean;
   copyPickerHex: () => void;
   exitPicker: () => void;
   clearSelection: () => void;
@@ -24,6 +26,21 @@ export function useOverlayKeyboard(options: Options): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (options.blocked) return;
+      // Excalidraw owns editing shortcuts (including Escape, delete and
+      // undo/redo) while mounted. The host keeps only screenshot confirmation.
+      if (options.editorActive) {
+        if (
+          event.key === "Enter" &&
+          options.phase === "editing" &&
+          options.shotReady &&
+          !options.busy &&
+          !options.isEditingText?.()
+        ) {
+          event.preventDefault();
+          options.confirm();
+        }
+        return;
+      }
       if (
         options.tool === "picker" &&
         !event.metaKey &&

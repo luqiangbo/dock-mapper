@@ -185,6 +185,75 @@ body,
   touch-action: none;
 }
 
+/* Excalidraw provides the interaction engine only. DockMapper keeps ownership
+ * of every visible editor control through the floating toolbar below. */
+.excalidraw-screenshot-editor {
+  position: absolute;
+  z-index: 30;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+/* Keep the cropped source canvas visible until Excalidraw has loaded the
+ * locked background image and positioned its viewport. This avoids exposing
+ * Excalidraw's transient empty canvas during editor startup. */
+.excalidraw-screenshot-editor[data-ready="false"] {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.excalidraw-screenshot-editor .excalidraw,
+.excalidraw-screenshot-editor .excalidraw__canvas-wrapper,
+.excalidraw-screenshot-editor .excalidraw__canvas {
+  width: 100%;
+  height: 100%;
+  background: transparent !important;
+}
+
+.excalidraw-screenshot-editor .excalidraw {
+  --default-bg-color: transparent;
+}
+
+/* Legacy DOM affordances must never bleed through Excalidraw's transparent
+ * canvas. Excalidraw itself owns selection, resize and linear-element editing. */
+.shot-viewport--excalidraw .scene-marquee,
+.shot-viewport--excalidraw .scene-snap-guide,
+.shot-viewport--excalidraw .raster-object,
+.shot-viewport--excalidraw .text-object,
+.shot-viewport--excalidraw .number-object,
+.shot-viewport--excalidraw .scene-selection,
+.shot-viewport--excalidraw .linear-node,
+.shot-viewport--excalidraw .linear-node-handle,
+.shot-viewport--excalidraw .inline-text-editor,
+.shot-viewport--excalidraw .inline-arrow-label-editor {
+  display: none !important;
+}
+
+/* Excalidraw is intentionally headless here. Every interactive control is
+ * supplied by the one DockMapper toolbar outside this editor root. Keep this
+ * selector scoped so regular Excalidraw consumers are unaffected. */
+.excalidraw-screenshot-editor .layer-ui__wrapper,
+.excalidraw-screenshot-editor .FixedSideContainer,
+.excalidraw-screenshot-editor .App-menu,
+.excalidraw-screenshot-editor .App-top-bar,
+.excalidraw-screenshot-editor .App-bottom-bar,
+.excalidraw-screenshot-editor .App-toolbar-container,
+.excalidraw-screenshot-editor .App-mobile-menu,
+.excalidraw-screenshot-editor .App-toolbar--mobile,
+.excalidraw-screenshot-editor .mobile-misc-tools-container,
+.excalidraw-screenshot-editor .excalidraw__toast-container,
+.excalidraw-screenshot-editor .excalidraw .help-dialog,
+.excalidraw-screenshot-editor .excalidraw .help-icon,
+.excalidraw-screenshot-editor .excalidraw .zoom-actions,
+.excalidraw-screenshot-editor .excalidraw .reset-zoom-button,
+.excalidraw-screenshot-editor .excalidraw .scroll-back-to-content,
+.excalidraw-screenshot-editor .excalidraw .sidebar,
+.excalidraw-screenshot-editor .excalidraw aside {
+  display: none !important;
+}
+
 /* ---------- Floating hints ---------- */
 
 .overlay-interaction-hint {

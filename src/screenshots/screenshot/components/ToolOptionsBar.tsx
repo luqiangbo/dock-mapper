@@ -13,6 +13,7 @@ import type {
   ScreenshotConfig,
 } from "../../../types";
 import { STROKE_COLORS, type AnnotTool } from "./AnnotationToolbar";
+import { excalidrawStyleCapabilities } from "./excalidrawScreenshotAdapter";
 import {
   FRAME_SHAPE_OPTIONS,
   ARROWHEAD_OPTIONS,
@@ -43,6 +44,7 @@ interface Props {
   paletteBusy?: boolean;
   onPaletteCopy?: (color: string) => void;
   onPaletteFavorite?: (color: string, favorite: boolean) => void;
+  selectedTools?: AnnotTool[];
   style?: CSSProperties;
 }
 
@@ -272,6 +274,7 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
     paletteBusy,
     onPaletteCopy,
     onPaletteFavorite,
+    selectedTools = [],
     style,
   },
   ref,
@@ -317,6 +320,36 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
       popup={popup}
     />
   );
+  const selectedKinds = [...new Set(selectedTools.filter((value): value is Exclude<AnnotTool, null> => value !== null))];
+  const capabilities = excalidrawStyleCapabilities(selectedKinds);
+  const mixedKinds = selectedKinds.length > 1 && !capabilities.fill;
+  const sharedOptions = mixedKinds ? (
+    <>
+      {color}
+      {capabilities.strokeWidth && width}
+      {capabilities.lineStyle && capabilities.roughness && (
+        <>
+          <Choice
+            label="样式"
+            value={settings.lineStyle}
+            options={[...LINE_STYLE_OPTIONS]}
+            name="shared-line-style"
+            compactWidth={108}
+            change={(value) => onChange({ lineStyle: value as LineStyle })}
+            popup={popup}
+          />
+          <Choice
+            label="粗糙度"
+            value={settings.roughness}
+            options={[...ROUGHNESS_OPTIONS]}
+            name="shared-roughness"
+            change={(value) => onChange({ roughness: value as Roughness })}
+            popup={popup}
+          />
+        </>
+      )}
+    </>
+  ) : null;
   return (
     <div
       ref={ref}
@@ -327,19 +360,9 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
       {settings.mixedProperties?.length ? (
         <span className="tool-options__mixed" title={`混合属性：${settings.mixedProperties.join("、")}`}>混合</span>
       ) : null}
-      {(tool === "rect" || tool === "ellipse" || tool === "diamond") && (
+      {sharedOptions ? sharedOptions : (tool === "rect" || tool === "ellipse" || tool === "diamond") && (
         <>
-          <Choice
-            label="形状"
-            value={settings.shapeKind}
-            options={[...FRAME_SHAPE_OPTIONS]}
-            name="frame-shape"
-            compactWidth={72}
-            change={(value) => onChange({ shapeKind: value as FrameShape })}
-            popup={popup}
-          />
           {color}
-          {outline}
           {width}
           <Choice
             label="样式"
@@ -377,10 +400,9 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
           />
         </>
       )}
-      {(tool === "arrow" || tool === "line") && (
+      {!sharedOptions && (tool === "arrow" || tool === "line") && (
         <>
           {color}
-          {outline}
           {width}
           {tool === "arrow" && (
             <>
@@ -430,10 +452,9 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
           />
         </>
       )}
-      {tool === "pen" && (
+      {!sharedOptions && tool === "pen" && (
         <>
           {color}
-          {outline}
           <Choice
             label="宽度"
             value={settings.penWidth}
@@ -442,67 +463,9 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             change={(value) => onChange({ penWidth: selectNumber(value) })}
             popup={popup}
           />
-          <Choice
-            label="样式"
-            value={settings.lineStyle}
-            options={[...LINE_STYLE_OPTIONS]}
-            name="pen-line-style"
-            compactWidth={88}
-            change={(value) => onChange({ lineStyle: value as LineStyle })}
-            popup={popup}
-          />
-          <Choice
-            label="压感"
-            value={settings.penPressure ? "pressure" : "fixed"}
-            options={[{ value: "pressure", label: "开启" }, { value: "fixed", label: "关闭" }]}
-            name="pen-pressure"
-            change={(value) => onChange({ penPressure: value === "pressure" })}
-            popup={popup}
-          />
         </>
       )}
-      {tool === "highlight" && (
-        <>
-          {color}
-          {outline}
-          <Choice
-            label="宽度"
-            value={settings.highlightWidth}
-            options={[12, 20, 28, 36].map((value) => ({ value, label: `${value}px` }))}
-            name="highlight-width"
-            change={(value) => onChange({ highlightWidth: selectNumber(value) })}
-            popup={popup}
-          />
-          <Choice
-            label="样式"
-            value={settings.lineStyle}
-            options={[...LINE_STYLE_OPTIONS]}
-            name="highlight-line-style"
-            compactWidth={88}
-            change={(value) => onChange({ lineStyle: value as LineStyle })}
-            popup={popup}
-          />
-          <Choice
-            label="透明度"
-            value={settings.highlightOpacity}
-            options={[20, 32, 50, 70].map((n) => ({ value: n / 100, label: `${n}%` }))}
-            name="highlight-opacity"
-            change={(value) => onChange({ highlightOpacity: selectNumber(value) })}
-            popup={popup}
-          />
-        </>
-      )}
-      {tool === "mosaic" && (
-        <Choice
-          label="像素块"
-          value={settings.mosaicBlock}
-          options={[8, 12, 20, 32].map((value) => ({ value, label: `${value}px` }))}
-          name="mosaic-size"
-          change={(value) => onChange({ mosaicBlock: selectNumber(value) })}
-          popup={popup}
-        />
-      )}
-      {(tool === "text" || (tool === "arrow" && settings.arrowStyle === "label")) && (
+      {!sharedOptions && tool === "text" && (
         <>
           <Choice
             label="字体"
@@ -533,19 +496,6 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             }
             popup={popup}
           />
-          <Choice
-            label="字重"
-            value={settings.textStyle.bold ? "bold" : "normal"}
-            options={[
-              { value: "normal", label: "常规" },
-              { value: "bold", label: "粗体" },
-            ]}
-            name="text-weight"
-            change={(value) =>
-              onChange({ textStyle: { ...settings.textStyle, bold: value === "bold" } })
-            }
-            popup={popup}
-          />
           <Color
             label="文字"
             value={settings.textStyle.color}
@@ -553,72 +503,6 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             change={(color) => onChange({ textStyle: { ...settings.textStyle, color } })}
             popup={popup}
             palette={palette}
-          />
-          {tool === "text" && outline}
-        </>
-      )}
-      {tool === "picker" && (
-        <>
-          <Choice
-            label="复制格式"
-            value={settings.pickerFormat}
-            options={FORMATS}
-            name="picker-format"
-            change={(value) =>
-              onChange({ pickerFormat: value as ScreenshotConfig["color_copy_format"] })
-            }
-            popup={popup}
-          />
-          <PaletteGroup
-            label="收藏"
-            colors={palette.favorites}
-            favorites={palette.favorites}
-            busy={paletteBusy}
-            onCopy={onPaletteCopy}
-            onFavorite={onPaletteFavorite}
-          />
-          <PaletteGroup
-            label="最近"
-            colors={palette.recent}
-            favorites={palette.favorites}
-            busy={paletteBusy}
-            onCopy={onPaletteCopy}
-            onFavorite={onPaletteFavorite}
-          />
-        </>
-      )}
-      {tool === "number" && (
-        <>
-          <Color
-            label="底色"
-            value={settings.numberStyle.backgroundColor}
-            name="number-background"
-            change={(backgroundColor) =>
-              onChange({ numberStyle: { ...settings.numberStyle, backgroundColor } })
-            }
-            popup={popup}
-            palette={palette}
-          />
-          <Color
-            label="文字"
-            value={settings.numberStyle.textColor}
-            name="number-text"
-            change={(textColor) =>
-              onChange({ numberStyle: { ...settings.numberStyle, textColor } })
-            }
-            popup={popup}
-            palette={palette}
-          />
-          {outline}
-          <Choice
-            label="尺寸"
-            value={settings.numberStyle.size}
-            options={[24, 32, 40].map((value) => ({ value, label: `${value}px` }))}
-            name="number-size"
-            change={(value) =>
-              onChange({ numberStyle: { ...settings.numberStyle, size: selectNumber(value) } })
-            }
-            popup={popup}
           />
         </>
       )}
