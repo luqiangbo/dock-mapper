@@ -8,7 +8,9 @@ import type {
   PanelPosition,
 } from "./selectionSizeGeometry";
 
-export const SELECTION_SIZE_PANEL_SIZE = { width: 370, height: 38 } as const;
+export const SELECTION_SIZE_PANEL_SIZE = { width: 290, height: 34 } as const;
+export const SELECTION_SIZE_CUSTOM_PANEL_SIZE = { width: 360, height: 34 } as const;
+export const SELECTION_SIZE_BADGE_SIZE = { width: 128, height: 22 } as const;
 export type AspectPreset = "free" | "current" | "1:1" | "4:3" | "16:9" | "9:16" | "custom";
 
 interface SelectionSizePanelProps {

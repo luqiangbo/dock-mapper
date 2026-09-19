@@ -15,11 +15,9 @@ interface Options {
   enabled: boolean;
   exportPng: () => Promise<Uint8Array>;
   engineFailed: string;
-  exportFailed: string;
-  onError: (message: string) => void;
 }
 
-export function useOcr({ enabled, exportPng, engineFailed, exportFailed, onError }: Options) {
+export function useOcr({ enabled, exportPng, engineFailed }: Options) {
   const request = useRef(new RequestGeneration());
   const [panel, setPanel] = useState<OcrPanelState>(EMPTY);
   const [running, setRunning] = useState(false);
@@ -59,13 +57,12 @@ export function useOcr({ enabled, exportPng, engineFailed, exportFailed, onError
         if (imageId) await window.api.releaseImage(imageId).catch(() => undefined);
         if (!request.current.isCurrent(generation)) return;
         const message = error instanceof Error ? error.message : engineFailed;
-        onError(error instanceof Error ? error.message : exportFailed);
         setPanel({ result: null, error: message, pending: false, elapsedMs: null });
       } finally {
         if (request.current.isCurrent(generation)) setRunning(false);
       }
     })();
-  }, [enabled, engineFailed, exportFailed, exportPng, onError, running]);
+  }, [enabled, engineFailed, exportPng, running]);
 
   return { panel, running, recognize, dismiss };
 }

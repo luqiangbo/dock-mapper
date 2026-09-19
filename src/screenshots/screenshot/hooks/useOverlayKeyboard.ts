@@ -10,7 +10,9 @@ interface Options {
   shotReady: boolean;
   busy: boolean;
   editorActive?: boolean;
+  hasEditorSelection?: boolean;
   isEditingText?: () => boolean;
+  dismissTransientPanel?: () => boolean;
   copyPickerHex: () => void;
   exitPicker: () => void;
   clearSelection: () => void;
@@ -26,9 +28,22 @@ export function useOverlayKeyboard(options: Options): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (options.blocked) return;
+      if (event.key === "Escape" && options.dismissTransientPanel?.()) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
       // Excalidraw owns editing shortcuts (including Escape, delete and
       // undo/redo) while mounted. The host keeps only screenshot confirmation.
       if (options.editorActive) {
+        if (event.key === "Escape" && !options.isEditingText?.()) {
+          if (options.hasEditorSelection) return;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          if (options.tool && options.tool !== "select") options.returnToSelect();
+          else options.cancel();
+          return;
+        }
         if (
           event.key === "Enter" &&
           options.phase === "editing" &&

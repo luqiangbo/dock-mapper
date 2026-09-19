@@ -47,9 +47,9 @@ export interface ScreenshotConfig {
 }
 
 export type AnnotationStrokeStyle = "solid" | "dashed" | "dotted";
-export type AnnotationFillStyle = "none" | "solid" | "hachure" | "cross_hatch";
+export type AnnotationFillStyle = "none" | "solid" | "hachure" | "cross_hatch" | "zigzag";
 export type AnnotationArrowType = "sharp" | "round" | "elbow";
-export type AnnotationArrowhead = "none" | "arrow" | "triangle" | "circle" | "diamond" | "bar";
+export type AnnotationArrowhead = "none" | "arrow" | "triangle" | "triangle_outline" | "circle" | "circle_outline" | "dot" | "diamond" | "diamond_outline" | "bar" | "crowfoot_one" | "crowfoot_many" | "crowfoot_one_or_many";
 
 /**
  * One persisted tool preset. Fields that are not meaningful for a given tool

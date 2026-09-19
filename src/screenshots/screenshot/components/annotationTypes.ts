@@ -27,6 +27,12 @@ export type FillStyle = AnnotationFillStyle;
 export type Arrowhead = AnnotationArrowhead;
 export type Roughness = 0 | 1 | 2;
 export const DEFAULT_LINE_STYLE: LineStyle = "solid";
+const EXCALIDRAW_STROKE_WIDTHS = [1, 2, 3, 4, 6, 8, 12] as const;
+export function normalizeExcalidrawStrokeWidth(value: number): number {
+  return EXCALIDRAW_STROKE_WIDTHS.reduce((closest, candidate) =>
+    Math.abs(candidate - value) < Math.abs(closest - value) ? candidate : closest
+  );
+}
 export const LINE_STYLE_OPTIONS: ReadonlyArray<{ value: LineStyle; label: string }> = [
   { value: "solid", label: "实线" },
   { value: "dashed", label: "虚线" },
@@ -37,19 +43,27 @@ export const FILL_STYLE_OPTIONS: ReadonlyArray<{ value: FillStyle; label: string
   { value: "solid", label: "纯色" },
   { value: "hachure", label: "排线" },
   { value: "cross_hatch", label: "交叉排线" },
+  { value: "zigzag" as FillStyle, label: "锯齿" },
 ];
 export const ROUGHNESS_OPTIONS: ReadonlyArray<{ value: Roughness; label: string }> = [
-  { value: 0, label: "建筑师" },
-  { value: 1, label: "艺术家" },
-  { value: 2, label: "漫画家" },
+  { value: 0, label: "精准" },
+  { value: 1, label: "手绘" },
+  { value: 2, label: "粗糙" },
 ];
 export const ARROWHEAD_OPTIONS: ReadonlyArray<{ value: Arrowhead; label: string }> = [
   { value: "none", label: "无" },
   { value: "arrow", label: "箭头" },
-  { value: "triangle", label: "三角" },
-  { value: "circle", label: "圆点" },
-  { value: "diamond", label: "菱形" },
+  { value: "triangle", label: "实心三角" },
+  { value: "circle", label: "实心圆" },
+  { value: "diamond", label: "实心菱形" },
   { value: "bar", label: "横杠" },
+  { value: "dot" as Arrowhead, label: "圆点" },
+  { value: "circle_outline" as Arrowhead, label: "空心圆" },
+  { value: "triangle_outline" as Arrowhead, label: "空心三角" },
+  { value: "diamond_outline" as Arrowhead, label: "空心菱形" },
+  { value: "crowfoot_one" as Arrowhead, label: "Crowfoot 1" },
+  { value: "crowfoot_many" as Arrowhead, label: "Crowfoot 多" },
+  { value: "crowfoot_one_or_many" as Arrowhead, label: "Crowfoot 1/多" },
 ];
 
 /** Read old hot-reload/undo objects without keeping their renderer alive. */
@@ -65,7 +79,20 @@ export function normalizeLineStyle(
   if (legacy === "classic" || legacy === "gradient" || legacy === "solid") return "solid";
   return DEFAULT_LINE_STYLE;
 }
-export type TextFont = "sans" | "serif" | "mono";
+export type TextFont =
+  | "virgil"
+  | "helvetica"
+  | "cascadia"
+  | "excalifont"
+  | "nunito"
+  | "lilita"
+  | "comic-shanns"
+  | "liberation-sans"
+  | "sans"
+  | "serif"
+  | "mono";
+export type TextAlign = "left" | "center" | "right";
+export type ElementRoundness = "sharp" | "round";
 /** @deprecated Only used while normalizing an in-memory annotation from older code. */
 export type LegacyFrameEffect =
   | "classic"
@@ -87,6 +114,8 @@ export interface TextStyle {
   fontSize: number;
   color: string;
   font: TextFont;
+  textAlign: TextAlign;
+  opacity: number;
   bold: boolean;
   strokeColor: string;
   strokeWidth: number;
@@ -109,6 +138,8 @@ export interface ToolSettings {
   fillStyle: FillStyle;
   fillColor: string;
   roughness: Roughness;
+  roundness: ElementRoundness;
+  opacity: number;
   arrowStyle: ArrowStyle;
   startArrowhead: Arrowhead;
   endArrowhead: Arrowhead;
@@ -123,9 +154,11 @@ export interface ToolSettings {
 }
 
 export const DEFAULT_TEXT_STYLE: TextStyle = {
-  fontSize: 24,
-  color: "#ffffff",
-  font: "sans",
+  fontSize: 20,
+  color: "#e03131",
+  font: "helvetica",
+  textAlign: "left",
+  opacity: 100,
   bold: false,
   strokeColor: "#000000",
   strokeWidth: 0,

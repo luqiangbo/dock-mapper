@@ -39,6 +39,16 @@ export function applyVisualPatch(
   };
 }
 
+export function applySharedColor(current: ToolVisualState, color: string): ToolVisualState {
+  return {
+    ...current,
+    frame: { ...current.frame, color },
+    line: { ...current.line, color },
+    arrow: { ...current.arrow, color },
+    pen: { ...current.pen, color },
+  };
+}
+
 /**
  * Owns annotation preferences that intentionally survive each capture reset.
  * Gesture and history transitions live in the adjacent focused controllers.
@@ -49,6 +59,7 @@ export function useAnnotationController(): {
     tool: VisualTool,
     patch: { color?: string; lineStyle?: LineStyle },
   ) => void;
+  updateSharedColor: (color: string) => void;
 } {
   const [visuals, setVisuals] = useState<ToolVisualState>(DEFAULT_TOOL_VISUAL_STATE);
   const updateVisual = useCallback(
@@ -57,5 +68,8 @@ export function useAnnotationController(): {
     },
     [],
   );
-  return { visuals, updateVisual };
+  const updateSharedColor = useCallback((color: string): void => {
+    setVisuals((current) => applySharedColor(current, color));
+  }, []);
+  return { visuals, updateVisual, updateSharedColor };
 }

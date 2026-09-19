@@ -269,6 +269,8 @@ describe("retained annotation scene", () => {
           fontSize: 24,
           color: "#fff",
           font: "sans",
+          textAlign: "left",
+          opacity: 100,
           bold: false,
           strokeColor: "#000",
           strokeWidth: 1,

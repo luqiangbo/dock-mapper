@@ -33,6 +33,14 @@ export interface TextObject extends TextStyle {
 }
 
 const FONT_FAMILIES: Record<TextStyle["font"], string> = {
+  virgil: "'Virgil', 'Xiaolai', cursive",
+  helvetica: "Helvetica, 'Liberation Sans', 'Xiaolai', sans-serif",
+  cascadia: "'Cascadia Code', 'Xiaolai', monospace",
+  excalifont: "'Excalifont', 'Xiaolai', cursive",
+  nunito: "'Nunito', 'Xiaolai', sans-serif",
+  lilita: "'Lilita One', 'Xiaolai', sans-serif",
+  "comic-shanns": "'Comic Shanns', 'Xiaolai', cursive",
+  "liberation-sans": "'Liberation Sans', 'Xiaolai', sans-serif",
   sans: "system-ui, -apple-system, 'Segoe UI', sans-serif",
   serif: "Georgia, 'Times New Roman', serif",
   mono: "ui-monospace, SFMono-Regular, Consolas, monospace",

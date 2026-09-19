@@ -23,13 +23,14 @@ export interface Messages {
   ocr: {
     title: string;
     copy: string;
+    copied: string;
+    copyFailed: string;
+    retry: string;
     close: string;
     noTextFound: string;
-    onnxEngine: string;
     recognizing: string;
     completedIn: (milliseconds: number) => string;
     engineFailed: string;
-    exportFailed: string;
   };
   textEditor: {
     moveHint: string;
@@ -59,15 +60,16 @@ export const en: Messages = {
     adjustRegion: "Drag the handles to resize · Drag inside to move · Pick a tool to annotate",
   },
   ocr: {
-    title: "Text recognition",
-    copy: "Copy",
+    title: "OCR result",
+    copy: "Copy all",
+    copied: "Copied",
+    copyFailed: "Copy failed. Please try again.",
+    retry: "Retry",
     close: "Close",
     noTextFound: "No text found.",
-    onnxEngine: "ONNX · PP-OCRv6 small",
     recognizing: "Recognizing…",
     completedIn: (milliseconds) => `${milliseconds} ms`,
     engineFailed: "This OCR engine failed.",
-    exportFailed: "Failed to export the OCR selection.",
   },
   textEditor: {
     moveHint: "Drag text to move · Double-click to edit",

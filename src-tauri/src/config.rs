@@ -166,6 +166,7 @@ pub enum AnnotationFillStyle {
     Solid,
     Hachure,
     CrossHatch,
+    Zigzag,
     #[serde(other)]
     Unknown,
 }
@@ -188,9 +189,16 @@ pub enum AnnotationArrowhead {
     None,
     Arrow,
     Triangle,
+    TriangleOutline,
     Circle,
+    CircleOutline,
+    Dot,
     Diamond,
+    DiamondOutline,
     Bar,
+    CrowfootOne,
+    CrowfootMany,
+    CrowfootOneOrMany,
     #[serde(other)]
     Unknown,
 }
@@ -225,14 +233,14 @@ impl Default for AnnotationToolStyleConfig {
             stroke_width: 3.0,
             stroke_style: AnnotationStrokeStyle::Solid,
             fill_style: AnnotationFillStyle::None,
-            roughness: 1,
+            roughness: 0,
             opacity: 1.0,
             arrow_type: AnnotationArrowType::Sharp,
             start_arrowhead: AnnotationArrowhead::None,
             end_arrowhead: AnnotationArrowhead::Arrow,
             pressure: true,
             block_size: 12,
-            font_size: 24,
+            font_size: 20,
             marker_size: 32,
             outline_enabled: true,
             outline_color: "#ffffff".into(),
@@ -262,7 +270,6 @@ impl Default for ScreenshotAnnotationStyles {
         highlight.opacity = 0.32;
         highlight.pressure = false;
         let mut text = base.clone();
-        text.stroke_color = "#ffffff".into();
         text.background_color = "#000000".into();
         let mut number = base.clone();
         number.background_color = "#ef4444".into();
@@ -475,6 +482,7 @@ pub fn normalize_screenshot_config(config: &mut ScreenshotConfig) {
             &mut config.annotation_styles.arrow,
             &mut config.annotation_styles.pen,
             &mut config.annotation_styles.highlight,
+            &mut config.annotation_styles.text,
         ] {
             style.stroke_color = config.annotation_color.clone();
             style.outline_enabled = config.annotation_outline.enabled;
@@ -833,7 +841,7 @@ mod tests {
         normalize_screenshot_config(&mut config);
         assert_eq!(config.annotation_styles.shape.stroke_color, "#1971c2");
         assert_eq!(config.annotation_styles.arrow.stroke_color, "#1971c2");
-        assert_eq!(config.annotation_styles.text.stroke_color, "#ffffff");
+        assert_eq!(config.annotation_styles.text.stroke_color, "#1971c2");
     }
 
     #[test]
@@ -873,6 +881,24 @@ mod tests {
         assert_eq!(shape.block_size, 64);
         assert_eq!(shape.font_size, 8);
         assert_eq!(shape.marker_size, 64);
+    }
+
+    #[test]
+    fn excalidraw_fill_and_arrowhead_values_round_trip() {
+        let mut style = AnnotationToolStyleConfig {
+            fill_style: AnnotationFillStyle::Zigzag,
+            start_arrowhead: AnnotationArrowhead::CircleOutline,
+            end_arrowhead: AnnotationArrowhead::CrowfootOneOrMany,
+            ..AnnotationToolStyleConfig::default()
+        };
+        normalize_annotation_tool_style(&mut style);
+        let restored: AnnotationToolStyleConfig = serde_json::from_str(
+            &serde_json::to_string(&style).expect("serialize Excalidraw style"),
+        )
+        .expect("deserialize Excalidraw style");
+        assert_eq!(restored.fill_style, AnnotationFillStyle::Zigzag);
+        assert_eq!(restored.start_arrowhead, AnnotationArrowhead::CircleOutline);
+        assert_eq!(restored.end_arrowhead, AnnotationArrowhead::CrowfootOneOrMany);
     }
 
     #[test]

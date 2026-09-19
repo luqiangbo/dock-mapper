@@ -15,7 +15,6 @@ import type {
 import { STROKE_COLORS, type AnnotTool } from "./AnnotationToolbar";
 import { excalidrawStyleCapabilities } from "./excalidrawScreenshotAdapter";
 import {
-  FRAME_SHAPE_OPTIONS,
   ARROWHEAD_OPTIONS,
   FILL_STYLE_OPTIONS,
   LINE_STYLE_OPTIONS,
@@ -37,6 +36,7 @@ interface Props {
   tool: Exclude<AnnotTool, null>;
   settings: ToolSettings;
   onChange: (changes: Partial<ToolSettings>) => void;
+  onPreviewChange?: (changes: Partial<ToolSettings>) => void;
   onColorCommit?: (color: string) => void;
   onOutlineCommit?: (outline: AnnotationOutlineConfig) => void;
   onPopupOpenChange: (open: boolean) => void;
@@ -97,7 +97,35 @@ function Outline({
     </span>
   );
 }
-const WIDTHS = [2, 3, 4, 6, 8].map((value) => ({ value, label: `${value}px` }));
+const WIDTHS = [
+  { value: 1, label: "1 px" },
+  { value: 2, label: "2 px" },
+  { value: 3, label: "3 px" },
+  { value: 4, label: "4 px" },
+  { value: 6, label: "6 px" },
+  { value: 8, label: "8 px" },
+  { value: 12, label: "12 px" },
+];
+const OPACITIES = [25, 50, 75, 100].map((value) => ({ value, label: `${value}%` }));
+const ROUNDNESS_OPTIONS = [
+  { value: "sharp", label: "尖角" },
+  { value: "round", label: "圆角" },
+];
+const TEXT_ALIGN_OPTIONS = [
+  { value: "left", label: "左对齐" },
+  { value: "center", label: "居中" },
+  { value: "right", label: "右对齐" },
+];
+const FONT_OPTIONS: Array<{ value: TextStyle["font"]; label: string }> = [
+  { value: "virgil", label: "Virgil" },
+  { value: "helvetica", label: "Helvetica" },
+  { value: "cascadia", label: "Cascadia" },
+  { value: "excalifont", label: "Excalifont" },
+  { value: "nunito", label: "Nunito" },
+  { value: "lilita", label: "Lilita One" },
+  { value: "comic-shanns", label: "Comic Shanns" },
+  { value: "liberation-sans", label: "Liberation Sans" },
+];
 const PRESETS = [{ label: "快捷色", colors: [...STROKE_COLORS] }];
 const FORMATS: Array<{ value: ScreenshotConfig["color_copy_format"]; label: string }> = [
   "hex",
@@ -184,6 +212,7 @@ function Choice({
   change,
   popup,
   compactWidth,
+  mixed = false,
 }: {
   label: string;
   value: string | number;
@@ -192,15 +221,17 @@ function Choice({
   change: (value: string | number) => void;
   popup: (key: string, open: boolean) => void;
   compactWidth?: number;
+  mixed?: boolean;
 }) {
   return (
     <Group label={label}>
       <Select
         size="small"
         aria-label={label}
-        value={value}
+        value={mixed ? undefined : value}
+        placeholder={mixed ? "混合" : undefined}
         options={options}
-        style={compactWidth ? { width: compactWidth } : undefined}
+        style={{ width: compactWidth ?? 68 }}
         popupMatchSelectWidth={false}
         onOpenChange={(open) => popup(name, open)}
         onChange={change}
@@ -267,6 +298,7 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
     tool,
     settings,
     onChange,
+    onPreviewChange,
     onColorCommit,
     onOutlineCommit,
     onPopupOpenChange,
@@ -289,25 +321,28 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
     },
     [onPopupOpenChange],
   );
+  const isMixed = (property: string) => settings.mixedProperties?.includes(property) ?? false;
+  const previewChange = onPreviewChange ?? onChange;
+  const fillColorChanges = (fillColor: string): Partial<ToolSettings> => ({
+    fillColor,
+    ...(settings.fillStyle === "none" && !isMixed("fillStyle")
+      ? { fillStyle: "solid" as const }
+      : {}),
+  });
   const color = (
     <Color
       label="颜色"
       value={settings.strokeColor}
       name={`${tool}-color`}
-      change={(strokeColor) => onChange({ strokeColor })}
-      commit={onColorCommit}
+      change={(strokeColor) => previewChange({ strokeColor })}
+      commit={(strokeColor) => {
+        onChange({ strokeColor });
+        onColorCommit?.(strokeColor);
+      }}
       popup={popup}
       palette={palette}
       quickColors={PRESETS[0].colors}
       compact
-    />
-  );
-  const outline = (
-    <Outline
-      value={settings.outline}
-      change={(next) => onChange({ outline: next })}
-      commit={onOutlineCommit}
-      popup={popup}
     />
   );
   const width = (
@@ -318,15 +353,51 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
       name={`${tool}-width`}
       change={(value) => onChange({ strokeWidth: selectNumber(value) })}
       popup={popup}
+      compactWidth={62}
+      mixed={isMixed("strokeWidth")}
+    />
+  );
+  const opacity = (
+    <Choice
+      label="透明度"
+      value={settings.opacity}
+      options={OPACITIES}
+      name={`${tool}-opacity`}
+      change={(value) => onChange({ opacity: selectNumber(value) })}
+      popup={popup}
+      mixed={isMixed("opacity")}
     />
   );
   const selectedKinds = [...new Set(selectedTools.filter((value): value is Exclude<AnnotTool, null> => value !== null))];
   const capabilities = excalidrawStyleCapabilities(selectedKinds);
-  const mixedKinds = selectedKinds.length > 1 && !capabilities.fill;
+  const mixedKinds = selectedKinds.length > 1;
   const sharedOptions = mixedKinds ? (
     <>
       {color}
       {capabilities.strokeWidth && width}
+      {capabilities.fill && (
+        <>
+          <Color
+            label="填充"
+            value={settings.fillColor}
+            name="shared-fill-color"
+            change={(fillColor) => previewChange(fillColorChanges(fillColor))}
+            commit={(fillColor) => onChange(fillColorChanges(fillColor))}
+            popup={popup}
+            palette={palette}
+            compact
+          />
+          <Choice
+            label="填充"
+            value={settings.fillStyle}
+            options={[...FILL_STYLE_OPTIONS]}
+            name="shared-fill-style"
+            change={(value) => onChange({ fillStyle: value as FillStyle })}
+            popup={popup}
+            mixed={isMixed("fillStyle")}
+          />
+        </>
+      )}
       {capabilities.lineStyle && capabilities.roughness && (
         <>
           <Choice
@@ -334,9 +405,10 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             value={settings.lineStyle}
             options={[...LINE_STYLE_OPTIONS]}
             name="shared-line-style"
-            compactWidth={108}
+            compactWidth={76}
             change={(value) => onChange({ lineStyle: value as LineStyle })}
             popup={popup}
+            mixed={isMixed("lineStyle")}
           />
           <Choice
             label="粗糙度"
@@ -345,9 +417,11 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             name="shared-roughness"
             change={(value) => onChange({ roughness: value as Roughness })}
             popup={popup}
+            mixed={isMixed("roughness")}
           />
         </>
       )}
+      {capabilities.opacity && opacity}
     </>
   ) : null;
   return (
@@ -369,15 +443,17 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             value={settings.lineStyle}
             options={[...LINE_STYLE_OPTIONS]}
             name="frame-line-style"
-            compactWidth={108}
+            compactWidth={76}
             change={(value) => onChange({ lineStyle: value as LineStyle })}
             popup={popup}
+            mixed={isMixed("lineStyle")}
           />
           <Color
             label="填充"
             value={settings.fillColor}
             name="frame-fill-color"
-            change={(fillColor) => onChange({ fillColor })}
+            change={(fillColor) => previewChange(fillColorChanges(fillColor))}
+            commit={(fillColor) => onChange(fillColorChanges(fillColor))}
             popup={popup}
             palette={palette}
             compact
@@ -389,6 +465,7 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             name="frame-fill-style"
             change={(value) => onChange({ fillStyle: value as FillStyle })}
             popup={popup}
+            mixed={isMixed("fillStyle")}
           />
           <Choice
             label="粗糙度"
@@ -397,7 +474,20 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             name="frame-roughness"
             change={(value) => onChange({ roughness: value as Roughness })}
             popup={popup}
+            mixed={isMixed("roughness")}
           />
+          {tool === "rect" && (
+            <Choice
+              label="边角"
+              value={settings.roundness}
+              options={ROUNDNESS_OPTIONS}
+              name="rectangle-roundness"
+              change={(value) => onChange({ roundness: value as ToolSettings["roundness"] })}
+              popup={popup}
+              mixed={isMixed("roundness")}
+            />
+          )}
+          {opacity}
         </>
       )}
       {!sharedOptions && (tool === "arrow" || tool === "line") && (
@@ -411,9 +501,10 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
                 value={normalizeArrowStyle(settings.arrowStyle)}
                 options={ARROW_SHAPE_CHOICES}
                 name="arrow-style"
-                compactWidth={116}
+                compactWidth={82}
                 change={(value) => onChange({ arrowStyle: value as ArrowStyle })}
                 popup={popup}
+                mixed={isMixed("arrowStyle")}
               />
               <Choice
                 label="起点"
@@ -422,6 +513,7 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
                 name="arrow-start"
                 change={(value) => onChange({ startArrowhead: value as Arrowhead })}
                 popup={popup}
+                mixed={isMixed("startArrowhead")}
               />
               <Choice
                 label="终点"
@@ -430,6 +522,7 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
                 name="arrow-end"
                 change={(value) => onChange({ endArrowhead: value as Arrowhead })}
                 popup={popup}
+                mixed={isMixed("endArrowhead")}
               />
             </>
           )}
@@ -438,9 +531,10 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             value={settings.lineStyle}
             options={[...LINE_STYLE_OPTIONS]}
             name="arrow-line-style"
-            compactWidth={108}
+            compactWidth={76}
             change={(value) => onChange({ lineStyle: value as LineStyle })}
             popup={popup}
+            mixed={isMixed("lineStyle")}
           />
           <Choice
             label="粗糙度"
@@ -449,7 +543,9 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             name={`${tool}-roughness`}
             change={(value) => onChange({ roughness: value as Roughness })}
             popup={popup}
+            mixed={isMixed("roughness")}
           />
+          {opacity}
         </>
       )}
       {!sharedOptions && tool === "pen" && (
@@ -462,7 +558,10 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             name="pen-width"
             change={(value) => onChange({ penWidth: selectNumber(value) })}
             popup={popup}
+            compactWidth={62}
+            mixed={isMixed("strokeWidth")}
           />
+          {opacity}
         </>
       )}
       {!sharedOptions && tool === "text" && (
@@ -470,22 +569,21 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
           <Choice
             label="字体"
             value={settings.textStyle.font}
-            options={[
-              { value: "sans", label: "无衬线" },
-              { value: "serif", label: "衬线" },
-              { value: "mono", label: "等宽" },
-            ]}
+            options={FONT_OPTIONS}
             name="text-font"
+            compactWidth={104}
             change={(value) =>
               onChange({ textStyle: { ...settings.textStyle, font: value as TextStyle["font"] } })
             }
             popup={popup}
+            mixed={isMixed("fontFamily")}
           />
           <Choice
             label="字号"
             value={settings.textStyle.fontSize}
             options={[14, 16, 20, 24, 32, 40, 48].map((value) => ({ value, label: `${value}px` }))}
             name="text-size"
+            compactWidth={66}
             change={(value) =>
               onChange({
                 textStyle: {
@@ -495,15 +593,25 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
               })
             }
             popup={popup}
+            mixed={isMixed("fontSize")}
           />
-          <Color
-            label="文字"
-            value={settings.textStyle.color}
-            name="text-color"
-            change={(color) => onChange({ textStyle: { ...settings.textStyle, color } })}
+          <Choice
+            label="对齐"
+            value={settings.textStyle.textAlign}
+            options={TEXT_ALIGN_OPTIONS}
+            name="text-align"
+            compactWidth={70}
+            change={(value) => onChange({
+              textStyle: {
+                ...settings.textStyle,
+                textAlign: value as TextStyle["textAlign"],
+              },
+            })}
             popup={popup}
-            palette={palette}
+            mixed={isMixed("textAlign")}
           />
+          {color}
+          {opacity}
         </>
       )}
     </div>
