@@ -5,6 +5,7 @@ import { invokeCommand } from "./ipc";
 export const MAIN_EVENTS = {
   configChanged: "config-changed",
   historyChanged: "screenshot-history-changed",
+  historyWriteFailed: "screenshot-history-write-failed",
   navigate: "navigate-main",
   scancodeMapChanged: "scancode-map-changed",
   systemStatus: "sys-status-update",

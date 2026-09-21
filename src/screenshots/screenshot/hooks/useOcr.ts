@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import type { OcrResult } from "../api";
 import { RequestGeneration } from "./requestGeneration";
+import { runSelectionImageRequest } from "./selectionImageRequest";
 
 export interface OcrPanelState {
   result: OcrResult | null;
@@ -34,19 +35,15 @@ export function useOcr({ enabled, exportPng, engineFailed }: Options) {
     setPanel({ result: null, error: null, pending: true, elapsedMs: null });
     setRunning(true);
     void (async () => {
-      let imageId: string | null = null;
       try {
-        const png = await exportPng();
-        if (!request.current.isCurrent(generation)) return;
         const startedAt = performance.now();
-        imageId = await window.api.uploadImage(png);
-        if (!request.current.isCurrent(generation)) {
-          await window.api.releaseImage(imageId);
-          return;
-        }
-        const result = await window.api.recognizeSelection(imageId);
-        imageId = null;
-        if (!request.current.isCurrent(generation)) return;
+        const result = await runSelectionImageRequest({
+          request,
+          generation,
+          exportPng,
+          execute: window.api.recognizeSelection,
+        });
+        if (!result) return;
         setPanel({
           result,
           error: null,
@@ -54,7 +51,6 @@ export function useOcr({ enabled, exportPng, engineFailed }: Options) {
           elapsedMs: Math.round(performance.now() - startedAt),
         });
       } catch (error) {
-        if (imageId) await window.api.releaseImage(imageId).catch(() => undefined);
         if (!request.current.isCurrent(generation)) return;
         const message = error instanceof Error ? error.message : engineFailed;
         setPanel({ result: null, error: message, pending: false, elapsedMs: null });

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Button, Grid, Layout, Menu, Splitter, Tooltip, Typography } from "antd";
+import { App as AntApp, Button, Grid, Layout, Menu, Splitter, Tooltip, Typography } from "antd";
 import {
   DashboardOutlined,
   CameraOutlined,
@@ -60,6 +60,7 @@ const PAGES: PageItem[] = [
 ];
 
 export default function App() {
+  const { notification } = AntApp.useApp();
   const screens = Grid.useBreakpoint();
   const compactNavigation = !screens.md;
   const [activePage, setActivePage] = useState<PageKey>("dashboard");
@@ -86,6 +87,26 @@ export default function App() {
       unlisten?.();
     };
   }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen<string>(MAIN_EVENTS.historyWriteFailed, ({ payload }) => {
+      window.sessionStorage.setItem("dockmapper.history-write-error", payload);
+      notification.warning({
+        message: "截图操作已完成，但未保存到历史",
+        description: payload,
+        duration: 8,
+      });
+    }).then((off) => {
+      if (disposed) off();
+      else unlisten = off;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [notification]);
 
   useEffect(() => {
     let disposed = false;
@@ -183,14 +204,16 @@ export default function App() {
             </div>
             <div className={styles.dragRegion} data-tauri-drag-region />
             <div className={styles.headerActions}>
-              {screens.md && <Tooltip title="打开 GitHub">
-                <Button
-                  aria-label="打开 GitHub"
-                  icon={<GithubOutlined />}
-                  type="text"
-                  onClick={() => void openUrl(REPOSITORY_URL)}
-                />
-              </Tooltip>}
+              {screens.md && (
+                <Tooltip title="打开 GitHub">
+                  <Button
+                    aria-label="打开 GitHub"
+                    icon={<GithubOutlined />}
+                    type="text"
+                    onClick={() => void openUrl(REPOSITORY_URL)}
+                  />
+                </Tooltip>
+              )}
               <Tooltip title={resolved === "dark" ? "切换浅色" : "切换深色"}>
                 <Button
                   aria-label="切换主题"

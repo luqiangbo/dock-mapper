@@ -23,10 +23,7 @@ import type {
 import { loadImageFromUrl } from "../utils/imageLoad";
 import { fontFamily, TEXT_SIZES, type TextObject, type TextSize } from "./textTypes";
 import ToolOptionsBar from "./ToolOptionsBar";
-import {
-  isExcalidrawStyleTool,
-  isSameExcalidrawSelection,
-} from "./excalidrawScreenshotAdapter";
+import { isExcalidrawStyleTool, isSameExcalidrawSelection } from "./excalidrawScreenshotAdapter";
 import { clearArrowRenderCache } from "./arrowGeometry";
 import { useOcr } from "../hooks/useOcr";
 import { RequestGeneration } from "../hooks/requestGeneration";
@@ -90,6 +87,7 @@ import { NativeInputGate, type NativeInputOwner } from "./nativeInputGate";
 import { isTextObjectInteractive, wrapTextLines } from "./textLayout";
 import { calculatePickerPosition } from "./pickerGeometry";
 import { useCommittedImageAction } from "../hooks/useCommittedImageAction";
+import { useQrDecoder } from "../hooks/useQrDecoder";
 import { useOverlayPreferences } from "../hooks/useOverlayPreferences";
 import { useOverlayToolbarLayout } from "../hooks/useOverlayToolbarLayout";
 import { useObjectHistoryController } from "../hooks/useObjectHistoryController";
@@ -124,10 +122,7 @@ import {
   type RasterGestureSettings,
 } from "../hooks/annotationGestureController";
 import { formatPickerColor, type PickerSample } from "./pickerColor";
-import {
-  useAnnotationController,
-  visualToolFor,
-} from "../hooks/useAnnotationController";
+import { useAnnotationController, visualToolFor } from "../hooks/useAnnotationController";
 import {
   cloneSceneElements,
   bindingAtPoint,
@@ -156,6 +151,9 @@ const loadExcalidrawEditor = () => import("./ExcalidrawScreenshotEditor");
 const ExcalidrawScreenshotEditor = lazy(loadExcalidrawEditor);
 
 const MIN_SIZE = 8;
+const SELECTION_OUTSIDE_DIM_OPACITY = 0.58;
+const SELECTION_INSIDE_BRIGHTNESS = 1.06;
+const SELECTION_INSIDE_CONTRAST = 1.04;
 let lastConfirmedSelection: Selection | null = null;
 
 interface NativeCanvasPoint {
@@ -411,15 +409,16 @@ function ScreenshotOverlay(): React.JSX.Element {
     setEditorStatus("ready");
   }, []);
   const handleEditorSelectionChange = useCallback((next: ExcalidrawSelectionState) => {
-    setEditorSelection((previous) =>
-      isSameExcalidrawSelection(previous, next) ? previous : next,
-    );
+    setEditorSelection((previous) => (isSameExcalidrawSelection(previous, next) ? previous : next));
   }, []);
-  const handleEditorError = useCallback((message: string) => {
-    setEditorReady(false);
-    setEditorStatus("failed");
-    setError(`${message}；仍可复制、保存或贴出未标注的原始截图`);
-  }, [setError]);
+  const handleEditorError = useCallback(
+    (message: string) => {
+      setEditorReady(false);
+      setEditorStatus("failed");
+      setError(`${message}；仍可复制、保存或贴出未标注的原始截图`);
+    },
+    [setError],
+  );
   const {
     tool,
     setTool,
@@ -481,8 +480,13 @@ function ScreenshotOverlay(): React.JSX.Element {
   const [aspectPreset, setAspectPreset] = useState<AspectPreset>("free");
   const [aspectRatio, setAspectRatio] = useState<AspectRatio | null>(null);
   const [qrContents, setQrContents] = useState<string[] | null>(null);
+  const [qrCopyState, setQrCopyState] = useState<{
+    content: string;
+    state: "copied" | "failed";
+  } | null>(null);
   const [ocrCopyState, setOcrCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const ocrCopyResetTimer = useRef<number | null>(null);
+  const qrCopyResetTimer = useRef<number | null>(null);
   const [arrowStyle, setArrowStyle] = useState<ArrowStyle>("straight");
   const activeVisual = visuals[visualToolFor(tool) ?? "frame"];
   const lineStyle = "lineStyle" in activeVisual ? activeVisual.lineStyle : DEFAULT_LINE_STYLE;
@@ -502,10 +506,7 @@ function ScreenshotOverlay(): React.JSX.Element {
     popupOpen: toolbarPopupOpen,
     reportPopup: reportToolbarPopup,
     closePopups: closeToolbarPopups,
-  } = useOverlayToolbarLayout(
-    phase === "editing",
-    tool === "select" ? editorSelection.tool : tool,
-  );
+  } = useOverlayToolbarLayout(phase === "editing", tool === "select" ? editorSelection.tool : tool);
 
   useEffect(
     () => () => {
@@ -594,6 +595,9 @@ function ScreenshotOverlay(): React.JSX.Element {
   useEffect(() => {
     qrRequest.current.cancel();
     setQrContents(null);
+    if (qrCopyResetTimer.current !== null) window.clearTimeout(qrCopyResetTimer.current);
+    qrCopyResetTimer.current = null;
+    setQrCopyState(null);
   }, [selection?.x, selection?.y, selection?.width, selection?.height]);
 
   useEffect(() => {
@@ -652,7 +656,10 @@ function ScreenshotOverlay(): React.JSX.Element {
     updateVisual("line", { lineStyle: annotationStyles.line.stroke_style });
     updateVisual("arrow", { lineStyle: annotationStyles.arrow.stroke_style });
     updateVisual("pen", { lineStyle: annotationStyles.pen.stroke_style });
-    updateVisual("highlight", { color: annotationStyles.highlight.stroke_color, lineStyle: annotationStyles.highlight.stroke_style });
+    updateVisual("highlight", {
+      color: annotationStyles.highlight.stroke_color,
+      lineStyle: annotationStyles.highlight.stroke_style,
+    });
     setTextStyle((current) => ({
       ...current,
       color: sharedColor,
@@ -669,9 +676,17 @@ function ScreenshotOverlay(): React.JSX.Element {
   }, [annotationStyles, updateSharedColor, updateVisual]);
 
   useEffect(() => {
-    const key = isFrameAnnotationKind(tool) ? "shape"
-      : tool === "line" || tool === "arrow" || tool === "pen" || tool === "highlight" || tool === "text" || tool === "number" || tool === "mosaic"
-        ? tool : null;
+    const key = isFrameAnnotationKind(tool)
+      ? "shape"
+      : tool === "line" ||
+          tool === "arrow" ||
+          tool === "pen" ||
+          tool === "highlight" ||
+          tool === "text" ||
+          tool === "number" ||
+          tool === "mosaic"
+        ? tool
+        : null;
     if (!key) return;
     const style = annotationStyles[key];
     setStrokeWidth(normalizeExcalidrawStrokeWidth(style.stroke_width));
@@ -689,34 +704,39 @@ function ScreenshotOverlay(): React.JSX.Element {
   const selectedRasterForTool = rasterAnnotations.find((item) => item.id === selectedRasterId);
   const selectedRasterMatchesTool = Boolean(
     selectedRasterForTool &&
-      (tool === "select" || selectedRasterForTool.kind === tool ||
-        (isFrameAnnotationKind(selectedRasterForTool.kind) && isFrameAnnotationKind(tool))),
+    (tool === "select" ||
+      selectedRasterForTool.kind === tool ||
+      (isFrameAnnotationKind(selectedRasterForTool.kind) && isFrameAnnotationKind(tool))),
   );
   const strokeColor =
     selectedRasterForTool && selectedRasterMatchesTool
       ? annotationSolidColor(selectedRasterForTool.style)
       : visuals.frame.color;
   const selectedTextForTool =
-    tool === "text" || tool === "select" ? textObjects.find((item) => item.id === selectedTextId) : undefined;
+    tool === "text" || tool === "select"
+      ? textObjects.find((item) => item.id === selectedTextId)
+      : undefined;
   const selectedNumberForTool =
-    tool === "number" || tool === "select" ? numberObjects.find((item) => item.id === selectedNumberId) : undefined;
+    tool === "number" || tool === "select"
+      ? numberObjects.find((item) => item.id === selectedNumberId)
+      : undefined;
   const canvasScale =
-    (shotRef.current?.width ?? 1) /
-    Math.max(1, selection?.width ?? shotRef.current?.width ?? 1);
-  const activeOutline = selectedRasterForTool && selectedRasterMatchesTool
-    ? {
-        ...selectedRasterForTool.style.outline,
-        width: selectedRasterForTool.style.outline.width / canvasScale,
-      }
-    : selectedTextForTool
+    (shotRef.current?.width ?? 1) / Math.max(1, selection?.width ?? shotRef.current?.width ?? 1);
+  const activeOutline =
+    selectedRasterForTool && selectedRasterMatchesTool
       ? {
-          enabled: selectedTextForTool.strokeWidth > 0,
-          color: selectedTextForTool.strokeColor,
-          width: selectedTextForTool.strokeWidth,
+          ...selectedRasterForTool.style.outline,
+          width: selectedRasterForTool.style.outline.width / canvasScale,
         }
-      : selectedNumberForTool
-        ? selectedNumberForTool.style.outline
-        : outlineStyle;
+      : selectedTextForTool
+        ? {
+            enabled: selectedTextForTool.strokeWidth > 0,
+            color: selectedTextForTool.strokeColor,
+            width: selectedTextForTool.strokeWidth,
+          }
+        : selectedNumberForTool
+          ? selectedNumberForTool.style.outline
+          : outlineStyle;
 
   useEffect(() => {
     if (phase === "capturing") {
@@ -812,8 +832,11 @@ function ScreenshotOverlay(): React.JSX.Element {
   }, [pickerSample]);
 
   const displayHeight = selection?.height ?? 0;
-  const canAdjustRegion = phase === "editing" && shotReady && !busy
-    && (!tool || (tool === "select" && selectedIds.length === 0));
+  const canAdjustRegion =
+    phase === "editing" &&
+    shotReady &&
+    !busy &&
+    (!tool || (tool === "select" && selectedIds.length === 0));
   const textObjectsInteractive = isTextObjectInteractive(tool);
   const selectionSizePanel = (() => {
     const image = fullImageRef.current;
@@ -859,7 +882,7 @@ function ScreenshotOverlay(): React.JSX.Element {
       const { width, height } = canvas;
       ctx.clearRect(0, 0, width, height);
       ctx.drawImage(image, 0, 0, width, height);
-      ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
+      ctx.fillStyle = `rgba(0, 0, 0, ${SELECTION_OUTSIDE_DIM_OPACITY})`;
       ctx.fillRect(0, 0, width, height);
       if (rect && rect.width > 0 && rect.height > 0) {
         const visibleHeight = holeHeight ?? rect.height;
@@ -868,10 +891,21 @@ function ScreenshotOverlay(): React.JSX.Element {
         ctx.beginPath();
         ctx.rect(crop.sourceX, crop.sourceY, crop.sourceWidth, crop.sourceHeight);
         ctx.clip();
+        ctx.filter = `brightness(${SELECTION_INSIDE_BRIGHTNESS}) contrast(${SELECTION_INSIDE_CONTRAST})`;
         ctx.drawImage(image, 0, 0, width, height);
         ctx.restore();
         if (showStroke) {
-          ctx.strokeStyle = "#6366f1";
+          // The dark outer edge and white inner edge stay legible on both
+          // light and dark screenshots without affecting the exported image.
+          ctx.strokeStyle = "rgba(0, 0, 0, 0.9)";
+          ctx.lineWidth = 4;
+          ctx.strokeRect(
+            crop.sourceX + 1,
+            crop.sourceY + 1,
+            Math.max(0, crop.sourceWidth - 2),
+            Math.max(0, crop.sourceHeight - 2),
+          );
+          ctx.strokeStyle = "rgba(255, 255, 255, 0.96)";
           ctx.lineWidth = 2;
           ctx.strokeRect(
             crop.sourceX + 1,
@@ -886,8 +920,7 @@ function ScreenshotOverlay(): React.JSX.Element {
   );
 
   const exportPng = useCallback(async (): Promise<Uint8Array> => {
-    if (editorReady && excalidrawEditorRef.current)
-      return excalidrawEditorRef.current.exportPng();
+    if (editorReady && excalidrawEditorRef.current) return excalidrawEditorRef.current.exportPng();
     const canvas = shotRef.current;
     if (!canvas) throw new Error("No canvas");
 
@@ -991,6 +1024,16 @@ function ScreenshotOverlay(): React.JSX.Element {
     engineFailed: t.ocr.engineFailed,
   });
 
+  const { decode: decodeQr } = useQrDecoder({
+    exportPng: exportOcrPng,
+    request: qrRequest,
+    onResult: (contents) => {
+      setQrCopyState(null);
+      setQrContents(contents);
+    },
+    onError: setError,
+  });
+
   const runOcr = useCallback(() => {
     setOcrCopyState("idle");
     recognizeSelection();
@@ -1018,9 +1061,28 @@ function ScreenshotOverlay(): React.JSX.Element {
     }, 1400);
   }, [ocrPanel.result]);
 
-  useEffect(() => () => {
-    if (ocrCopyResetTimer.current !== null) window.clearTimeout(ocrCopyResetTimer.current);
+  const copyQrContent = useCallback(async (content: string) => {
+    if (qrCopyResetTimer.current !== null) window.clearTimeout(qrCopyResetTimer.current);
+    try {
+      const copied = await window.api.copyText(content);
+      if (!copied) throw new Error("clipboard rejected QR text");
+      setQrCopyState({ content, state: "copied" });
+    } catch {
+      setQrCopyState({ content, state: "failed" });
+    }
+    qrCopyResetTimer.current = window.setTimeout(() => {
+      setQrCopyState(null);
+      qrCopyResetTimer.current = null;
+    }, 1400);
   }, []);
+
+  useEffect(
+    () => () => {
+      if (ocrCopyResetTimer.current !== null) window.clearTimeout(ocrCopyResetTimer.current);
+      if (qrCopyResetTimer.current !== null) window.clearTimeout(qrCopyResetTimer.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     dismissOcr();
@@ -1355,7 +1417,15 @@ function ScreenshotOverlay(): React.JSX.Element {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "标注效果渲染失败，请重试");
     }
-  }, [editorStatus, phase, rasterPreview, sceneElements, selection?.width, setError, textEditor?.id]);
+  }, [
+    editorStatus,
+    phase,
+    rasterPreview,
+    sceneElements,
+    selection?.width,
+    setError,
+    textEditor?.id,
+  ]);
 
   const createRecropBaseline = useCallback((): SelectionRecropBaseline | null => {
     const image = fullImageRef.current;
@@ -1569,7 +1639,12 @@ function ScreenshotOverlay(): React.JSX.Element {
   );
 
   useOverlayKeyboard({
-    blocked: Boolean(textEditor) || Boolean(arrowLabelEditor) || Boolean(linearEditId) || Boolean(linearCreationRef.current) || toolbarPopupOpen,
+    blocked:
+      Boolean(textEditor) ||
+      Boolean(arrowLabelEditor) ||
+      Boolean(linearEditId) ||
+      Boolean(linearCreationRef.current) ||
+      toolbarPopupOpen,
     tool,
     phase,
     hasSelectedText: Boolean(selectedTextId),
@@ -1653,8 +1728,12 @@ function ScreenshotOverlay(): React.JSX.Element {
       const preview = annotationFromGesture({ ...gesture, changed: true, multiClick: true }, scale);
       const committed = {
         ...preview,
-        startBinding: gesture.disableBinding ? null : bindingAtPoint(sceneElements, preview.points[0], preview.id),
-        endBinding: gesture.disableBinding ? null : bindingAtPoint(sceneElements, preview.points[preview.points.length - 1], preview.id),
+        startBinding: gesture.disableBinding
+          ? null
+          : bindingAtPoint(sceneElements, preview.points[0], preview.id),
+        endBinding: gesture.disableBinding
+          ? null
+          : bindingAtPoint(sceneElements, preview.points[preview.points.length - 1], preview.id),
       };
       pushCurrentObjects();
       setRasterAnnotations((previous) => [...previous, committed]);
@@ -1663,7 +1742,15 @@ function ScreenshotOverlay(): React.JSX.Element {
     };
     window.addEventListener("keydown", finishLinear, true);
     return () => window.removeEventListener("keydown", finishLinear, true);
-  }, [continuousDraw, pushCurrentObjects, rasterPreview, sceneElements, selection?.width, setSelectedIds, setTool]);
+  }, [
+    continuousDraw,
+    pushCurrentObjects,
+    rasterPreview,
+    sceneElements,
+    selection?.width,
+    setSelectedIds,
+    setTool,
+  ]);
 
   useEffect(() => {
     const editingField = (target: EventTarget | null): boolean => {
@@ -1710,21 +1797,37 @@ function ScreenshotOverlay(): React.JSX.Element {
       } else if (key === "g" && selectedIds.length > 1) {
         event.preventDefault();
         pushCurrentObjects();
-        setSceneElements((previous) => event.shiftKey
-          ? ungroupElements(previous, selectedSet())
-          : groupElements(previous, selectedSet(), `group-${Date.now()}`));
+        setSceneElements((previous) =>
+          event.shiftKey
+            ? ungroupElements(previous, selectedSet())
+            : groupElements(previous, selectedSet(), `group-${Date.now()}`),
+        );
       } else if ((event.key === "]" || event.key === "[") && selectedIds.length) {
         event.preventDefault();
-        const move: LayerMove = event.key === "]"
-          ? (event.shiftKey ? "front" : "forward")
-          : (event.shiftKey ? "back" : "backward");
+        const move: LayerMove =
+          event.key === "]"
+            ? event.shiftKey
+              ? "front"
+              : "forward"
+            : event.shiftKey
+              ? "back"
+              : "backward";
         pushCurrentObjects();
         setSceneElements((previous) => moveSceneLayer(previous, selectedSet(), move));
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [phase, pushCurrentObjects, sceneElements, selectedIds, setSceneElements, setSelectedIds, setTool, toolbarPopupOpen]);
+  }, [
+    phase,
+    pushCurrentObjects,
+    sceneElements,
+    selectedIds,
+    setSceneElements,
+    setSelectedIds,
+    setTool,
+    toolbarPopupOpen,
+  ]);
 
   useEffect(() => {
     let pendingMove: PointerEvent | null = null;
@@ -1739,21 +1842,26 @@ function ScreenshotOverlay(): React.JSX.Element {
       if (linearNode && linearNode.pointerId === event.pointerId) {
         const canvasPoint = screenToCanvas(event.clientX, event.clientY);
         const point = { x: canvasPoint.canvasX, y: canvasPoint.canvasY };
-        const points = linearNode.origin.points.map((item, index) => index === linearNode.index
-          ? { ...item, ...point } : { ...item });
+        const points = linearNode.origin.points.map((item, index) =>
+          index === linearNode.index ? { ...item, ...point } : { ...item },
+        );
         const endpoint = linearNode.index === 0 || linearNode.index === points.length - 1;
-        const binding = endpoint && !event.ctrlKey
-          ? bindingAtPoint(objectStateRef.current.elements, point, linearNode.id)
-          : null;
+        const binding =
+          endpoint && !event.ctrlKey
+            ? bindingAtPoint(objectStateRef.current.elements, point, linearNode.id)
+            : null;
         const next = {
           ...linearNode.origin,
           points,
           startBinding: linearNode.index === 0 ? binding : linearNode.origin.startBinding,
-          endBinding: linearNode.index === points.length - 1 ? binding : linearNode.origin.endBinding,
+          endBinding:
+            linearNode.index === points.length - 1 ? binding : linearNode.origin.endBinding,
           version: (linearNode.origin.version ?? 0) + 1,
         };
         linearNode.changed = true;
-        setRasterAnnotations((previous) => previous.map((item) => item.id === linearNode.id ? next : item));
+        setRasterAnnotations((previous) =>
+          previous.map((item) => (item.id === linearNode.id ? next : item)),
+        );
         setBindingTargetId(binding?.elementId ?? null);
         return;
       }
@@ -1764,16 +1872,25 @@ function ScreenshotOverlay(): React.JSX.Element {
         const dy = (event.clientY - sceneTransform.startY) * scaleY;
         let next: SceneElement[];
         if (sceneTransform.mode === "move") {
-          const moving = { ...sceneTransform.bounds, x: sceneTransform.bounds.x + dx, y: sceneTransform.bounds.y + dy };
+          const moving = {
+            ...sceneTransform.bounds,
+            x: sceneTransform.bounds.x + dx,
+            y: sceneTransform.bounds.y + dy,
+          };
           const snap = snapDelta(
             moving,
-            sceneTransform.baseline.filter((element) => !sceneTransform.selectedIds.has(element.id)),
+            sceneTransform.baseline.filter(
+              (element) => !sceneTransform.selectedIds.has(element.id),
+            ),
             canvas,
             6 * Math.max(scaleX, scaleY),
           );
           setSnapGuides(snap.guides);
-          next = sceneTransform.baseline.map((element) => sceneTransform.selectedIds.has(element.id)
-            ? translateSceneElement(element, dx + snap.dx, dy + snap.dy) : element);
+          next = sceneTransform.baseline.map((element) =>
+            sceneTransform.selectedIds.has(element.id)
+              ? translateSceneElement(element, dx + snap.dx, dy + snap.dy)
+              : element,
+          );
         } else if (sceneTransform.mode === "rotate") {
           setSnapGuides([]);
           const center = {
@@ -1790,10 +1907,22 @@ function ScreenshotOverlay(): React.JSX.Element {
           );
           let delta = current - start;
           if (event.shiftKey) delta = Math.round(delta / (Math.PI / 12)) * (Math.PI / 12);
-          next = rotateSceneSelection(sceneTransform.baseline, sceneTransform.selectedIds, center, delta);
+          next = rotateSceneSelection(
+            sceneTransform.baseline,
+            sceneTransform.selectedIds,
+            center,
+            delta,
+          );
         } else {
           setSnapGuides([]);
-          let bounds = resizeRect(sceneTransform.bounds, sceneTransform.mode, dx, dy, canvas.width, canvas.height);
+          let bounds = resizeRect(
+            sceneTransform.bounds,
+            sceneTransform.mode,
+            dx,
+            dy,
+            canvas.width,
+            canvas.height,
+          );
           if (event.shiftKey) {
             const ratio = sceneTransform.bounds.width / Math.max(1, sceneTransform.bounds.height);
             bounds = { ...bounds, height: bounds.width / Math.max(0.001, ratio) };
@@ -1801,9 +1930,19 @@ function ScreenshotOverlay(): React.JSX.Element {
           if (event.altKey) {
             const centerX = sceneTransform.bounds.x + sceneTransform.bounds.width / 2;
             const centerY = sceneTransform.bounds.y + sceneTransform.bounds.height / 2;
-            bounds = { x: centerX - bounds.width / 2, y: centerY - bounds.height / 2, width: bounds.width, height: bounds.height };
+            bounds = {
+              x: centerX - bounds.width / 2,
+              y: centerY - bounds.height / 2,
+              width: bounds.width,
+              height: bounds.height,
+            };
           }
-          next = resizeSceneSelection(sceneTransform.baseline, sceneTransform.selectedIds, sceneTransform.bounds, bounds);
+          next = resizeSceneSelection(
+            sceneTransform.baseline,
+            sceneTransform.selectedIds,
+            sceneTransform.bounds,
+            bounds,
+          );
         }
         sceneTransform.changed = Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1;
         setSceneElements(resolveSceneBindings(next));
@@ -2119,18 +2258,17 @@ function ScreenshotOverlay(): React.JSX.Element {
     const candidateId = pendingWindowCandidateIdRef.current;
     pendingWindowSelection.current = null;
     pendingWindowCandidateIdRef.current = null;
-    const nextSelection =
-      aspectRatio
-        ? selectWithAspectRatio(
-            origin.current,
-            point,
-            aspectRatio,
-            fullImageRef.current?.naturalWidth ?? window.innerWidth,
-            fullImageRef.current?.naturalHeight ?? window.innerHeight,
-            window.innerWidth,
-            window.innerHeight,
-          )
-        : clampSelection(normalizeRect(origin.current.x, origin.current.y, point.x, point.y));
+    const nextSelection = aspectRatio
+      ? selectWithAspectRatio(
+          origin.current,
+          point,
+          aspectRatio,
+          fullImageRef.current?.naturalWidth ?? window.innerWidth,
+          fullImageRef.current?.naturalHeight ?? window.innerHeight,
+          window.innerWidth,
+          window.innerHeight,
+        )
+      : clampSelection(normalizeRect(origin.current.x, origin.current.y, point.x, point.y));
     setSelection(nextSelection);
     if (previousMode === "candidate")
       reportSelectionTrace("manual-selection-start", point, nextSelection, candidateId, "manual");
@@ -2187,55 +2325,63 @@ function ScreenshotOverlay(): React.JSX.Element {
     [flushBackgroundMove],
   );
 
-  const onBgPointerUp = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (selectionPointerIdRef.current !== event.pointerId) return;
-    pendingBackgroundPoint.current = { clientX: event.clientX, clientY: event.clientY };
-    flushBackgroundMove();
-    if (event.currentTarget.hasPointerCapture(event.pointerId))
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    selectionPointerIdRef.current = null;
-    const wasDragging = draggingRef.current;
-    draggingRef.current = false;
-    setDragging(false);
-    if (!wasDragging || phase !== "selecting") return;
-    const completedMode = windowSelectionDragModeRef.current;
-    const completedCandidateId = pendingWindowCandidateIdRef.current;
-    pendingWindowSelection.current = null;
-    pendingWindowCandidateIdRef.current = null;
-    windowSelectionDragModeRef.current = "manual";
-    const current = selectionRef.current;
-    reportSelectionTrace(
-      "pointer-up",
-      clampPoint(event.clientX, event.clientY),
-      current,
-      completedCandidateId,
-      completedMode,
-    );
-    if (current && current.width >= MIN_SIZE && current.height >= MIN_SIZE) {
-      enterEditMode(clampSelection(current));
-    } else {
+  const onBgPointerUp = useCallback(
+    (event: ReactPointerEvent<HTMLCanvasElement>) => {
+      if (selectionPointerIdRef.current !== event.pointerId) return;
+      pendingBackgroundPoint.current = { clientX: event.clientX, clientY: event.clientY };
+      flushBackgroundMove();
+      if (event.currentTarget.hasPointerCapture(event.pointerId))
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      selectionPointerIdRef.current = null;
+      const wasDragging = draggingRef.current;
+      draggingRef.current = false;
+      setDragging(false);
+      if (!wasDragging || phase !== "selecting") return;
+      const completedMode = windowSelectionDragModeRef.current;
+      const completedCandidateId = pendingWindowCandidateIdRef.current;
+      pendingWindowSelection.current = null;
+      pendingWindowCandidateIdRef.current = null;
+      windowSelectionDragModeRef.current = "manual";
+      const current = selectionRef.current;
+      reportSelectionTrace(
+        "pointer-up",
+        clampPoint(event.clientX, event.clientY),
+        current,
+        completedCandidateId,
+        completedMode,
+      );
+      if (current && current.width >= MIN_SIZE && current.height >= MIN_SIZE) {
+        enterEditMode(clampSelection(current));
+      } else {
+        setSelection(null);
+      }
+    },
+    [enterEditMode, flushBackgroundMove, phase, reportSelectionTrace, setSelection, selectionRef],
+  );
+
+  const onBgPointerCancel = useCallback(
+    (event: ReactPointerEvent<HTMLCanvasElement>) => {
+      if (selectionPointerIdRef.current !== event.pointerId) return;
+      if (event.currentTarget.hasPointerCapture(event.pointerId))
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      selectionPointerIdRef.current = null;
+      draggingRef.current = false;
+      pendingWindowSelection.current = null;
+      pendingWindowCandidateIdRef.current = null;
+      windowSelectionDragModeRef.current = "manual";
+      pendingBackgroundPoint.current = null;
+      setDragging(false);
       setSelection(null);
-    }
-  }, [enterEditMode, flushBackgroundMove, phase, reportSelectionTrace, setSelection, selectionRef]);
+      setHoveredWindow(null);
+    },
+    [setSelection],
+  );
 
-  const onBgPointerCancel = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (selectionPointerIdRef.current !== event.pointerId) return;
-    if (event.currentTarget.hasPointerCapture(event.pointerId))
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    selectionPointerIdRef.current = null;
-    draggingRef.current = false;
-    pendingWindowSelection.current = null;
-    pendingWindowCandidateIdRef.current = null;
-    windowSelectionDragModeRef.current = "manual";
-    pendingBackgroundPoint.current = null;
-    setDragging(false);
-    setSelection(null);
-    setHoveredWindow(null);
-  }, [setSelection]);
-
-  const toLocal = (
-    event: { clientX: number; clientY: number; pressure?: number },
-  ): { x: number; y: number; pressure?: number } => {
+  const toLocal = (event: {
+    clientX: number;
+    clientY: number;
+    pressure?: number;
+  }): { x: number; y: number; pressure?: number } => {
     const canvas = shotRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const bounds = canvas.getBoundingClientRect();
@@ -2377,14 +2523,15 @@ function ScreenshotOverlay(): React.JSX.Element {
           .find((element) => sceneElementContains(element, point));
         if (hit) {
           const hitGroup = elementGroupId(hit);
-          const group = hitGroup && activeGroupId === hitGroup
-            ? new Set([hit.id])
-            : expandGroupSelection(objectStateRef.current.elements, new Set([hit.id]));
+          const group =
+            hitGroup && activeGroupId === hitGroup
+              ? new Set([hit.id])
+              : expandGroupSelection(objectStateRef.current.elements, new Set([hit.id]));
           setSelectedIds((current) => {
             if (!event.shiftKey) return [...group];
             const next = new Set(current);
             const removing = [...group].every((id) => next.has(id));
-            group.forEach((id) => removing ? next.delete(id) : next.add(id));
+            group.forEach((id) => (removing ? next.delete(id) : next.add(id)));
             return [...next];
           }, hit.id);
           return false;
@@ -2453,12 +2600,17 @@ function ScreenshotOverlay(): React.JSX.Element {
         return false;
       }
 
-      if (!["rect", "ellipse", "diamond", "line", "arrow", "pen", "highlight", "mosaic"].includes(tool)) return false;
+      if (
+        !["rect", "ellipse", "diamond", "line", "arrow", "pen", "highlight", "mosaic"].includes(
+          tool,
+        )
+      )
+        return false;
       event.preventDefault();
-      const existingLinear = (tool === "line" || tool === "arrow")
-        && linearCreationRef.current?.tool === tool
-        ? linearCreationRef.current
-        : null;
+      const existingLinear =
+        (tool === "line" || tool === "arrow") && linearCreationRef.current?.tool === tool
+          ? linearCreationRef.current
+          : null;
       const gesture: ActiveAnnotationGesture = {
         ...(existingLinear
           ? {
@@ -2571,20 +2723,32 @@ function ScreenshotOverlay(): React.JSX.Element {
       const point = toLocal(event);
       const marqueeGesture = marqueeRef.current;
       if (marqueeGesture?.pointerId === owner.id) {
-        const next = normalizeRect(marqueeGesture.start.x, marqueeGesture.start.y, point.x, point.y);
+        const next = normalizeRect(
+          marqueeGesture.start.x,
+          marqueeGesture.start.y,
+          point.x,
+          point.y,
+        );
         setMarquee(next);
         const selected = new Set(marqueeGesture.baseline);
-        elementsInsideSelection(objectStateRef.current.elements, next).forEach((id) => selected.add(id));
+        elementsInsideSelection(objectStateRef.current.elements, next).forEach((id) =>
+          selected.add(id),
+        );
         setSelectedIds([...selected]);
         return;
       }
       const eraseGesture = eraserRef.current;
       if (eraseGesture?.pointerId === owner.id) {
-        const hit = [...eraseGesture.baseline].reverse().find((element) =>
-          !eraseGesture.deleted.has(element.id) && sceneElementContains(element, point));
+        const hit = [...eraseGesture.baseline]
+          .reverse()
+          .find(
+            (element) =>
+              !eraseGesture.deleted.has(element.id) && sceneElementContains(element, point),
+          );
         if (hit) {
-          expandGroupSelection(eraseGesture.baseline, new Set([hit.id]))
-            .forEach((id) => eraseGesture.deleted.add(id));
+          expandGroupSelection(eraseGesture.baseline, new Set([hit.id])).forEach((id) =>
+            eraseGesture.deleted.add(id),
+          );
           setSceneElements(deleteSceneSelection(eraseGesture.baseline, eraseGesture.deleted));
           setSelectedIds([]);
         }
@@ -2602,7 +2766,9 @@ function ScreenshotOverlay(): React.JSX.Element {
       appendGesturePoint(gesture, point);
       if (!gesture.changed) return;
       if (gesture.tool === "arrow" || gesture.tool === "line") {
-        setBindingTargetId(bindingAtPoint(objectStateRef.current.elements, point, gesture.id)?.elementId ?? null);
+        setBindingTargetId(
+          bindingAtPoint(objectStateRef.current.elements, point, gesture.id)?.elementId ?? null,
+        );
       }
 
       queueAnnotationPreview(scale);
@@ -2627,8 +2793,10 @@ function ScreenshotOverlay(): React.JSX.Element {
       if (!shouldHandlePointer(gesture, owner.id)) return;
       flushAnnotationPreview();
       cancelAnnotationPreview();
-      if ((gesture.tool === "line" || gesture.tool === "arrow")
-        && (!gesture.changed || (gesture.multiClick && !gesture.completeOnFinish))) {
+      if (
+        (gesture.tool === "line" || gesture.tool === "arrow") &&
+        (!gesture.changed || (gesture.multiClick && !gesture.completeOnFinish))
+      ) {
         gesture.multiClick = true;
         gesture.changed = gesture.points.length > 1;
         linearCreationRef.current = gesture;
@@ -2647,17 +2815,22 @@ function ScreenshotOverlay(): React.JSX.Element {
       setBindingTargetId(null);
       // A drag too short to produce a shape leaves the canvas untouched.
       if (resolveAnnotationGesture(gesture, false).commit && isPaintableAnnotation(preview)) {
-        const committed = (preview.kind === "arrow" || preview.kind === "line") && !gesture.disableBinding
-          ? {
-              ...preview,
-              startBinding: bindingAtPoint(objectStateRef.current.elements, preview.points[0], preview.id),
-              endBinding: bindingAtPoint(
-                objectStateRef.current.elements,
-                preview.points[preview.points.length - 1],
-                preview.id,
-              ),
-            }
-          : preview;
+        const committed =
+          (preview.kind === "arrow" || preview.kind === "line") && !gesture.disableBinding
+            ? {
+                ...preview,
+                startBinding: bindingAtPoint(
+                  objectStateRef.current.elements,
+                  preview.points[0],
+                  preview.id,
+                ),
+                endBinding: bindingAtPoint(
+                  objectStateRef.current.elements,
+                  preview.points[preview.points.length - 1],
+                  preview.id,
+                ),
+              }
+            : preview;
         pushCurrentObjects();
         setRasterAnnotations([...gesture.baseline, committed]);
         setSelectedIds([committed.id], committed.id);
@@ -2668,7 +2841,16 @@ function ScreenshotOverlay(): React.JSX.Element {
         if (!continuousDraw && committed.style.arrowStyle !== "label") setTool("select");
       }
     },
-    [cancelAnnotationPreview, commitObjectMutation, continuousDraw, flushAnnotationPreview, pushCurrentObjects, selection?.width, setSelectedIds, setTool],
+    [
+      cancelAnnotationPreview,
+      commitObjectMutation,
+      continuousDraw,
+      flushAnnotationPreview,
+      pushCurrentObjects,
+      selection?.width,
+      setSelectedIds,
+      setTool,
+    ],
   );
 
   const cancelNativeCanvasInput = useCallback(
@@ -2808,15 +2990,15 @@ function ScreenshotOverlay(): React.JSX.Element {
   }, [editorStatus, phase]);
 
   const shotViewportHeight = displayHeight;
-  const editorCrop: ExcalidrawCrop | null = selection && fullImageRef.current
-    ? selectionToImageCrop(selection, fullImageRef.current)
-    : null;
+  const editorCrop: ExcalidrawCrop | null =
+    selection && fullImageRef.current
+      ? selectionToImageCrop(selection, fullImageRef.current)
+      : null;
 
   const selectedStyleTool = tool === "select" ? editorSelection.tool : tool;
   const optionsTool = isExcalidrawStyleTool(selectedStyleTool) ? selectedStyleTool : null;
-  const secondarySize = optionsTool && secondaryToolbarSize.width > 0
-    ? secondaryToolbarSize
-    : undefined;
+  const secondarySize =
+    optionsTool && secondaryToolbarSize.width > 0 ? secondaryToolbarSize : undefined;
   const toolbarLayout =
     selection && phase === "editing" && primaryToolbarSize.width > 0
       ? calculateToolbarLayout(selection, viewportSize, primaryToolbarSize, secondarySize)
@@ -2854,29 +3036,50 @@ function ScreenshotOverlay(): React.JSX.Element {
     textStyle,
     numberStyle,
   };
-  const displayedToolSettings: ToolSettings = editorSelection.count > 0
-    ? {
-        ...toolSettings,
-        ...(editorSelection.strokeColor === undefined ? {} : { strokeColor: editorSelection.strokeColor }),
-        ...(editorSelection.strokeWidth === undefined ? {} : { strokeWidth: editorSelection.strokeWidth }),
-        ...(editorSelection.tool === "pen" && editorSelection.strokeWidth !== undefined
-          ? { penWidth: editorSelection.strokeWidth }
-          : {}),
-        ...(editorSelection.lineStyle === undefined ? {} : { lineStyle: editorSelection.lineStyle }),
-        ...(editorSelection.fillColor === undefined ? {} : { fillColor: editorSelection.fillColor }),
-        ...(editorSelection.fillStyle === undefined ? {} : { fillStyle: editorSelection.fillStyle }),
-        ...(editorSelection.roughness === undefined ? {} : { roughness: editorSelection.roughness }),
-        ...(editorSelection.roundness === undefined ? {} : { roundness: editorSelection.roundness }),
-        ...(editorSelection.opacity === undefined ? {} : { opacity: editorSelection.opacity }),
-        mixedProperties: editorSelection.mixedProperties ?? [],
-        ...(editorSelection.arrowStyle === undefined ? {} : { arrowStyle: editorSelection.arrowStyle }),
-        ...(editorSelection.startArrowhead === undefined
-          ? {}
-          : { startArrowhead: editorSelection.startArrowhead }),
-        ...(editorSelection.endArrowhead === undefined ? {} : { endArrowhead: editorSelection.endArrowhead }),
-        ...(editorSelection.textStyle === undefined ? {} : { textStyle: editorSelection.textStyle }),
-      }
-    : toolSettings;
+  const displayedToolSettings: ToolSettings =
+    editorSelection.count > 0
+      ? {
+          ...toolSettings,
+          ...(editorSelection.strokeColor === undefined
+            ? {}
+            : { strokeColor: editorSelection.strokeColor }),
+          ...(editorSelection.strokeWidth === undefined
+            ? {}
+            : { strokeWidth: editorSelection.strokeWidth }),
+          ...(editorSelection.tool === "pen" && editorSelection.strokeWidth !== undefined
+            ? { penWidth: editorSelection.strokeWidth }
+            : {}),
+          ...(editorSelection.lineStyle === undefined
+            ? {}
+            : { lineStyle: editorSelection.lineStyle }),
+          ...(editorSelection.fillColor === undefined
+            ? {}
+            : { fillColor: editorSelection.fillColor }),
+          ...(editorSelection.fillStyle === undefined
+            ? {}
+            : { fillStyle: editorSelection.fillStyle }),
+          ...(editorSelection.roughness === undefined
+            ? {}
+            : { roughness: editorSelection.roughness }),
+          ...(editorSelection.roundness === undefined
+            ? {}
+            : { roundness: editorSelection.roundness }),
+          ...(editorSelection.opacity === undefined ? {} : { opacity: editorSelection.opacity }),
+          mixedProperties: editorSelection.mixedProperties ?? [],
+          ...(editorSelection.arrowStyle === undefined
+            ? {}
+            : { arrowStyle: editorSelection.arrowStyle }),
+          ...(editorSelection.startArrowhead === undefined
+            ? {}
+            : { startArrowhead: editorSelection.startArrowhead }),
+          ...(editorSelection.endArrowhead === undefined
+            ? {}
+            : { endArrowhead: editorSelection.endArrowhead }),
+          ...(editorSelection.textStyle === undefined
+            ? {}
+            : { textStyle: editorSelection.textStyle }),
+        }
+      : toolSettings;
   const updateToolSettings = (
     initialChanges: Partial<ToolSettings>,
     styleTool: AnnotTool = tool,
@@ -2923,17 +3126,21 @@ function ScreenshotOverlay(): React.JSX.Element {
         width: changes.outline.width * annotationScale,
       };
     }
-    if (
-      changes.lineStyle !== undefined &&
-      selectedRaster &&
-      selectedRaster.kind !== "mosaic"
-    )
+    if (changes.lineStyle !== undefined && selectedRaster && selectedRaster.kind !== "mosaic")
       rasterStylePatch.lineStyle = changes.lineStyle;
     if (changes.arrowStyle !== undefined && selectedRaster?.kind === "arrow")
       rasterStylePatch.arrowStyle = changes.arrowStyle;
-    if (changes.fillStyle !== undefined && selectedRaster && isFrameAnnotationKind(selectedRaster.kind))
+    if (
+      changes.fillStyle !== undefined &&
+      selectedRaster &&
+      isFrameAnnotationKind(selectedRaster.kind)
+    )
       rasterStylePatch.fillStyle = changes.fillStyle;
-    if (changes.fillColor !== undefined && selectedRaster && isFrameAnnotationKind(selectedRaster.kind))
+    if (
+      changes.fillColor !== undefined &&
+      selectedRaster &&
+      isFrameAnnotationKind(selectedRaster.kind)
+    )
       rasterStylePatch.backgroundColor = changes.fillColor;
     if (changes.roughness !== undefined && selectedRaster && selectedRaster.kind !== "mosaic")
       rasterStylePatch.roughness = changes.roughness;
@@ -2995,35 +3202,51 @@ function ScreenshotOverlay(): React.JSX.Element {
     if (immediateObjectMutation) beginObjectMutation();
     if (selectedIds.length > 1) {
       const selectedSet = new Set(selectedIds);
-      setSceneElements((previous) => previous.map((element) => {
-        if (!selectedSet.has(element.id)) return element;
-        if (element.type === "raster" && selectedRaster) {
-          const compatible = element.value.kind === selectedRaster.kind
-            || (isFrameAnnotationKind(element.value.kind) && isFrameAnnotationKind(selectedRaster.kind));
-          if (!compatible) return element;
-          const value = changes.shapeKind !== undefined && isFrameAnnotationKind(element.value.kind)
-            ? convertFrameAnnotation(element.value, changes.shapeKind)
-            : element.value;
-          return sceneElement({
-            ...value,
-            style: { ...value.style, ...rasterStylePatch },
-            version: (value.version ?? 0) + 1,
-          });
-        }
-        if (element.type === "text" && changes.textStyle) {
-          return sceneElement({ ...element.value, ...changes.textStyle, version: (element.value.version ?? 0) + 1 });
-        }
-        if (element.type === "number" && changes.numberStyle) {
-          return sceneElement({ ...element.value, style: { ...changes.numberStyle }, version: (element.value.version ?? 0) + 1 });
-        }
-        return element;
-      }));
+      setSceneElements((previous) =>
+        previous.map((element) => {
+          if (!selectedSet.has(element.id)) return element;
+          if (element.type === "raster" && selectedRaster) {
+            const compatible =
+              element.value.kind === selectedRaster.kind ||
+              (isFrameAnnotationKind(element.value.kind) &&
+                isFrameAnnotationKind(selectedRaster.kind));
+            if (!compatible) return element;
+            const value =
+              changes.shapeKind !== undefined && isFrameAnnotationKind(element.value.kind)
+                ? convertFrameAnnotation(element.value, changes.shapeKind)
+                : element.value;
+            return sceneElement({
+              ...value,
+              style: { ...value.style, ...rasterStylePatch },
+              version: (value.version ?? 0) + 1,
+            });
+          }
+          if (element.type === "text" && changes.textStyle) {
+            return sceneElement({
+              ...element.value,
+              ...changes.textStyle,
+              version: (element.value.version ?? 0) + 1,
+            });
+          }
+          if (element.type === "number" && changes.numberStyle) {
+            return sceneElement({
+              ...element.value,
+              style: { ...changes.numberStyle },
+              version: (element.value.version ?? 0) + 1,
+            });
+          }
+          return element;
+        }),
+      );
     }
-    const styleSource = selectedRaster?.kind ??
-      (selectedText ? "text" : selectedNumber ? "number" : styleTool);
+    const styleSource =
+      selectedRaster?.kind ?? (selectedText ? "text" : selectedNumber ? "number" : styleTool);
     const visualTool = visualToolFor(styleSource);
-    const usesSharedColor = isFrameAnnotationKind(styleSource) ||
-      styleSource === "line" || styleSource === "arrow" || styleSource === "pen" ||
+    const usesSharedColor =
+      isFrameAnnotationKind(styleSource) ||
+      styleSource === "line" ||
+      styleSource === "arrow" ||
+      styleSource === "pen" ||
       styleSource === "text";
     if (changes.strokeColor !== undefined) {
       if (usesSharedColor) {
@@ -3146,9 +3369,17 @@ function ScreenshotOverlay(): React.JSX.Element {
         "取色复制格式保存失败",
       );
     }
-    const styleKey = isFrameAnnotationKind(styleSource) ? "shape"
-      : styleSource === "line" || styleSource === "arrow" || styleSource === "pen" || styleSource === "highlight" || styleSource === "text" || styleSource === "number" || styleSource === "mosaic"
-        ? styleSource : null;
+    const styleKey = isFrameAnnotationKind(styleSource)
+      ? "shape"
+      : styleSource === "line" ||
+          styleSource === "arrow" ||
+          styleSource === "pen" ||
+          styleSource === "highlight" ||
+          styleSource === "text" ||
+          styleSource === "number" ||
+          styleSource === "mosaic"
+        ? styleSource
+        : null;
     if (persist && styleKey) {
       const current = annotationStyles[styleKey];
       const next = {
@@ -3165,18 +3396,32 @@ function ScreenshotOverlay(): React.JSX.Element {
           ...(changes.fillColor !== undefined ? { background_color: changes.fillColor } : {}),
           ...(changes.roughness !== undefined ? { roughness: changes.roughness } : {}),
           ...(changes.opacity !== undefined ? { opacity: changes.opacity / 100 } : {}),
-          ...(changes.arrowStyle !== undefined ? { arrow_type: normalizeArrowStyle(changes.arrowStyle) } : {}),
-          ...(changes.startArrowhead !== undefined ? { start_arrowhead: changes.startArrowhead } : {}),
+          ...(changes.arrowStyle !== undefined
+            ? { arrow_type: normalizeArrowStyle(changes.arrowStyle) }
+            : {}),
+          ...(changes.startArrowhead !== undefined
+            ? { start_arrowhead: changes.startArrowhead }
+            : {}),
           ...(changes.endArrowhead !== undefined ? { end_arrowhead: changes.endArrowhead } : {}),
           ...(changes.highlightOpacity !== undefined ? { opacity: changes.highlightOpacity } : {}),
           ...(changes.mosaicBlock !== undefined ? { block_size: changes.mosaicBlock } : {}),
-          ...(changes.textStyle !== undefined ? { stroke_color: changes.textStyle.color, font_size: changes.textStyle.fontSize } : {}),
-          ...(changes.numberStyle !== undefined ? { stroke_color: changes.numberStyle.textColor, background_color: changes.numberStyle.backgroundColor, marker_size: changes.numberStyle.size } : {}),
-          ...(changes.outline !== undefined ? {
-            outline_enabled: changes.outline.enabled,
-            outline_color: changes.outline.color,
-            outline_width: changes.outline.width,
-          } : {}),
+          ...(changes.textStyle !== undefined
+            ? { stroke_color: changes.textStyle.color, font_size: changes.textStyle.fontSize }
+            : {}),
+          ...(changes.numberStyle !== undefined
+            ? {
+                stroke_color: changes.numberStyle.textColor,
+                background_color: changes.numberStyle.backgroundColor,
+                marker_size: changes.numberStyle.size,
+              }
+            : {}),
+          ...(changes.outline !== undefined
+            ? {
+                outline_enabled: changes.outline.enabled,
+                outline_color: changes.outline.color,
+                outline_width: changes.outline.width,
+              }
+            : {}),
         },
       };
       if (changes.strokeColor !== undefined && usesSharedColor) {
@@ -3230,9 +3475,11 @@ function ScreenshotOverlay(): React.JSX.Element {
                 captureKey={`capture-${captureGenerationRef.current}`}
                 crop={editorCrop}
                 strokeColor={strokeColor}
-                strokeWidth={tool === "pen" || (tool === "select" && editorSelection.tool === "pen")
-                  ? penWidth
-                  : strokeWidth}
+                strokeWidth={
+                  tool === "pen" || (tool === "select" && editorSelection.tool === "pen")
+                    ? penWidth
+                    : strokeWidth
+                }
                 fillColor={fillColor}
                 fillStyle={fillStyle}
                 lineStyle={lineStyle}
@@ -3272,9 +3519,11 @@ function ScreenshotOverlay(): React.JSX.Element {
               <span
                 key={`${guide.axis}-${guide.value}-${index}`}
                 className={`scene-snap-guide scene-snap-guide--${guide.axis}`}
-                style={guide.axis === "x"
-                  ? { left: guide.value / scaleX }
-                  : { top: guide.value / scaleY }}
+                style={
+                  guide.axis === "x"
+                    ? { left: guide.value / scaleX }
+                    : { top: guide.value / scaleY }
+                }
               />
             );
           })}
@@ -3284,7 +3533,9 @@ function ScreenshotOverlay(): React.JSX.Element {
             const scaleY = canvas ? canvas.height / Math.max(1, displayHeight) : scaleX;
             const bounds = annotationBounds(annotation);
             const interactive =
-              tool === "select" || tool === "eraser" || tool === annotation.kind ||
+              tool === "select" ||
+              tool === "eraser" ||
+              tool === annotation.kind ||
               (isFrameAnnotationKind(tool) && isFrameAnnotationKind(annotation.kind));
             const selected = interactive && selectedIds.includes(annotation.id);
             return (
@@ -3311,16 +3562,19 @@ function ScreenshotOverlay(): React.JSX.Element {
                   }
                   event.currentTarget.setPointerCapture(event.pointerId);
                   const annotationGroup = annotation.groupId ?? null;
-                  const ids = annotationGroup && activeGroupId === annotationGroup
-                    ? new Set([annotation.id])
-                    : expandGroupSelection(sceneElements, new Set([annotation.id]));
-                  const dragIds = tool === "select" && selectedIds.includes(annotation.id)
-                    ? new Set(selectedIds) : ids;
+                  const ids =
+                    annotationGroup && activeGroupId === annotationGroup
+                      ? new Set([annotation.id])
+                      : expandGroupSelection(sceneElements, new Set([annotation.id]));
+                  const dragIds =
+                    tool === "select" && selectedIds.includes(annotation.id)
+                      ? new Set(selectedIds)
+                      : ids;
                   if (tool === "select" && event.shiftKey) {
                     setSelectedIds((current) => {
                       const next = new Set(current);
                       const removing = [...ids].every((id) => next.has(id));
-                      ids.forEach((id) => removing ? next.delete(id) : next.add(id));
+                      ids.forEach((id) => (removing ? next.delete(id) : next.add(id)));
                       return [...next];
                     }, annotation.id);
                   } else setSelectedIds([...dragIds], annotation.id);
@@ -3405,14 +3659,19 @@ function ScreenshotOverlay(): React.JSX.Element {
                     setSelectedIds([annotation.id], annotation.id);
                     return;
                   }
-                  if ((annotation.kind === "line" || annotation.kind === "arrow") && annotation.style.arrowStyle !== "label") {
+                  if (
+                    (annotation.kind === "line" || annotation.kind === "arrow") &&
+                    annotation.style.arrowStyle !== "label"
+                  ) {
                     cancelObjectMutation();
                     setSelectedIds([annotation.id], annotation.id);
                     setLinearEditId(annotation.id);
                     return;
                   }
                   if (isFrameAnnotationKind(annotation.kind)) {
-                    const contained = textObjects.find((item) => item.containerId === annotation.id);
+                    const contained = textObjects.find(
+                      (item) => item.containerId === annotation.id,
+                    );
                     if (contained) {
                       openTextObjectEditor(contained);
                       return;
@@ -3434,7 +3693,8 @@ function ScreenshotOverlay(): React.JSX.Element {
                     setTextDraft("");
                     return;
                   }
-                  if (annotation.kind !== "arrow" || annotation.style.arrowStyle !== "label") return;
+                  if (annotation.kind !== "arrow" || annotation.style.arrowStyle !== "label")
+                    return;
                   cancelObjectMutation();
                   setArrowLabelDraft(annotation.style.arrowLabel ?? "");
                   setArrowLabelEditor({
@@ -3444,7 +3704,8 @@ function ScreenshotOverlay(): React.JSX.Element {
                   });
                 }}
               >
-                {selected && tool !== "select" &&
+                {selected &&
+                  tool !== "select" &&
                   (["nw", "ne", "sw", "se"] as ResizeHandle[]).map((handle) => (
                     <span
                       key={handle}
@@ -3470,61 +3731,63 @@ function ScreenshotOverlay(): React.JSX.Element {
               </div>
             );
           })}
-          {linearEditId && (() => {
-            const annotation = rasterAnnotations.find((item) => item.id === linearEditId);
-            const canvas = shotRef.current;
-            if (!annotation || !canvas) return null;
-            const scaleX = canvas.width / Math.max(1, selection.width);
-            const scaleY = canvas.height / Math.max(1, displayHeight);
-            return annotation.points.map((point, index) => (
-              <span
-                key={`${annotation.id}-node-${index}`}
-                className="linear-node"
-                style={{ left: point.x / scaleX, top: point.y / scaleY }}
-                title="拖动节点；Ctrl 拖动端点临时禁用绑定"
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                  linearNodeRef.current = {
-                    pointerId: event.pointerId,
-                    id: annotation.id,
-                    index,
-                    origin: cloneRasterAnnotations([annotation])[0],
-                    changed: false,
-                  };
-                  beginObjectMutation();
-                }}
-              />
-            ));
-          })()}
-          {linearEditId && (() => {
-            const annotation = rasterAnnotations.find((item) => item.id === linearEditId);
-            const canvas = shotRef.current;
-            if (!annotation || !canvas) return null;
-            const scaleX = canvas.width / Math.max(1, selection.width);
-            const scaleY = canvas.height / Math.max(1, displayHeight);
-            return annotation.points.map((point, index) => (
-              <span
-                key={`${annotation.id}-node-${index}`}
-                className="linear-node-handle"
-                style={{ left: point.x / scaleX, top: point.y / scaleY }}
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                  linearNodeRef.current = {
-                    pointerId: event.pointerId,
-                    id: annotation.id,
-                    index,
-                    origin: cloneRasterAnnotations([annotation])[0],
-                    changed: false,
-                  };
-                  beginObjectMutation();
-                }}
-              />
-            ));
-          })()}
+          {linearEditId &&
+            (() => {
+              const annotation = rasterAnnotations.find((item) => item.id === linearEditId);
+              const canvas = shotRef.current;
+              if (!annotation || !canvas) return null;
+              const scaleX = canvas.width / Math.max(1, selection.width);
+              const scaleY = canvas.height / Math.max(1, displayHeight);
+              return annotation.points.map((point, index) => (
+                <span
+                  key={`${annotation.id}-node-${index}`}
+                  className="linear-node"
+                  style={{ left: point.x / scaleX, top: point.y / scaleY }}
+                  title="拖动节点；Ctrl 拖动端点临时禁用绑定"
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    linearNodeRef.current = {
+                      pointerId: event.pointerId,
+                      id: annotation.id,
+                      index,
+                      origin: cloneRasterAnnotations([annotation])[0],
+                      changed: false,
+                    };
+                    beginObjectMutation();
+                  }}
+                />
+              ));
+            })()}
+          {linearEditId &&
+            (() => {
+              const annotation = rasterAnnotations.find((item) => item.id === linearEditId);
+              const canvas = shotRef.current;
+              if (!annotation || !canvas) return null;
+              const scaleX = canvas.width / Math.max(1, selection.width);
+              const scaleY = canvas.height / Math.max(1, displayHeight);
+              return annotation.points.map((point, index) => (
+                <span
+                  key={`${annotation.id}-node-${index}`}
+                  className="linear-node-handle"
+                  style={{ left: point.x / scaleX, top: point.y / scaleY }}
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    linearNodeRef.current = {
+                      pointerId: event.pointerId,
+                      id: annotation.id,
+                      index,
+                      origin: cloneRasterAnnotations([annotation])[0],
+                      changed: false,
+                    };
+                    beginObjectMutation();
+                  }}
+                />
+              ));
+            })()}
           {arrowLabelEditor &&
             (() => {
               const annotation = rasterAnnotations.find((item) => item.id === arrowLabelEditor.id);
@@ -3599,16 +3862,17 @@ function ScreenshotOverlay(): React.JSX.Element {
                   event.preventDefault();
                   event.stopPropagation();
                   event.currentTarget.setPointerCapture(event.pointerId);
-                  const ids = obj.groupId && activeGroupId === obj.groupId
-                    ? new Set([obj.id])
-                    : expandGroupSelection(sceneElements, new Set([obj.id]));
-                  const dragIds = tool === "select" && selectedIds.includes(obj.id)
-                    ? new Set(selectedIds) : ids;
+                  const ids =
+                    obj.groupId && activeGroupId === obj.groupId
+                      ? new Set([obj.id])
+                      : expandGroupSelection(sceneElements, new Set([obj.id]));
+                  const dragIds =
+                    tool === "select" && selectedIds.includes(obj.id) ? new Set(selectedIds) : ids;
                   if (tool === "select" && event.shiftKey) {
                     setSelectedIds((current) => {
                       const next = new Set(current);
                       const removing = [...ids].every((id) => next.has(id));
-                      ids.forEach((id) => removing ? next.delete(id) : next.add(id));
+                      ids.forEach((id) => (removing ? next.delete(id) : next.add(id)));
                       return [...next];
                     }, obj.id);
                   } else setSelectedIds([...dragIds], obj.id);
@@ -3627,10 +3891,14 @@ function ScreenshotOverlay(): React.JSX.Element {
                     const groupBounds = getSceneSelectionBounds(sceneElements, dragIds);
                     if (groupBounds && !event.shiftKey) {
                       sceneTransformRef.current = {
-                        pointerId: event.pointerId, mode: "move",
-                        startX: event.clientX, startY: event.clientY,
-                        baseline: cloneSceneElements(sceneElements), selectedIds: dragIds,
-                        bounds: groupBounds, changed: false,
+                        pointerId: event.pointerId,
+                        mode: "move",
+                        startX: event.clientX,
+                        startY: event.clientY,
+                        baseline: cloneSceneElements(sceneElements),
+                        selectedIds: dragIds,
+                        bounds: groupBounds,
+                        changed: false,
                       };
                       beginObjectMutation();
                     }
@@ -3661,7 +3929,8 @@ function ScreenshotOverlay(): React.JSX.Element {
                 }}
               >
                 {obj.text}
-                {selectedTextId === obj.id && tool !== "select" &&
+                {selectedTextId === obj.id &&
+                  tool !== "select" &&
                   textObjectsInteractive &&
                   TEXT_RESIZE_HANDLES.map((handle) => (
                     <span
@@ -3721,16 +3990,17 @@ function ScreenshotOverlay(): React.JSX.Element {
                   event.preventDefault();
                   event.stopPropagation();
                   event.currentTarget.setPointerCapture(event.pointerId);
-                  const ids = item.groupId && activeGroupId === item.groupId
-                    ? new Set([item.id])
-                    : expandGroupSelection(sceneElements, new Set([item.id]));
-                  const dragIds = tool === "select" && selectedIds.includes(item.id)
-                    ? new Set(selectedIds) : ids;
+                  const ids =
+                    item.groupId && activeGroupId === item.groupId
+                      ? new Set([item.id])
+                      : expandGroupSelection(sceneElements, new Set([item.id]));
+                  const dragIds =
+                    tool === "select" && selectedIds.includes(item.id) ? new Set(selectedIds) : ids;
                   if (tool === "select" && event.shiftKey) {
                     setSelectedIds((current) => {
                       const next = new Set(current);
                       const removing = [...ids].every((id) => next.has(id));
-                      ids.forEach((id) => removing ? next.delete(id) : next.add(id));
+                      ids.forEach((id) => (removing ? next.delete(id) : next.add(id)));
                       return [...next];
                     }, item.id);
                   } else setSelectedIds([...dragIds], item.id);
@@ -3739,10 +4009,14 @@ function ScreenshotOverlay(): React.JSX.Element {
                     const groupBounds = getSceneSelectionBounds(sceneElements, dragIds);
                     if (groupBounds && !event.shiftKey) {
                       sceneTransformRef.current = {
-                        pointerId: event.pointerId, mode: "move",
-                        startX: event.clientX, startY: event.clientY,
-                        baseline: cloneSceneElements(sceneElements), selectedIds: dragIds,
-                        bounds: groupBounds, changed: false,
+                        pointerId: event.pointerId,
+                        mode: "move",
+                        startX: event.clientX,
+                        startY: event.clientY,
+                        baseline: cloneSceneElements(sceneElements),
+                        selectedIds: dragIds,
+                        bounds: groupBounds,
+                        changed: false,
                       };
                       beginObjectMutation();
                     }
@@ -3757,9 +4031,7 @@ function ScreenshotOverlay(): React.JSX.Element {
                     originCanvasY: item.canvasY,
                     radius:
                       Math.max(12, (item.style.size * displayScale) / 2) +
-                      (item.style.outline.enabled
-                        ? item.style.outline.width * displayScale
-                        : 0),
+                      (item.style.outline.enabled ? item.style.outline.width * displayScale : 0),
                     changed: false,
                   };
                   beginObjectMutation();
@@ -3776,54 +4048,56 @@ function ScreenshotOverlay(): React.JSX.Element {
               </div>
             );
           })}
-          {tool === "select" && selectedIds.length > 0 && (() => {
-            const canvas = shotRef.current;
-            const ids = new Set(selectedIds);
-            const bounds = getSceneSelectionBounds(sceneElements, ids);
-            if (!canvas || !bounds) return null;
-            const scaleX = canvas.width / Math.max(1, selection.width);
-            const scaleY = canvas.height / Math.max(1, displayHeight);
-            const begin = (event: React.PointerEvent, mode: "move" | "rotate" | ResizeHandle) => {
-              event.preventDefault();
-              event.stopPropagation();
-              event.currentTarget.setPointerCapture(event.pointerId);
-              sceneTransformRef.current = {
-                pointerId: event.pointerId,
-                mode,
-                startX: event.clientX,
-                startY: event.clientY,
-                baseline: cloneSceneElements(sceneElements),
-                selectedIds: ids,
-                bounds,
-                changed: false,
+          {tool === "select" &&
+            selectedIds.length > 0 &&
+            (() => {
+              const canvas = shotRef.current;
+              const ids = new Set(selectedIds);
+              const bounds = getSceneSelectionBounds(sceneElements, ids);
+              if (!canvas || !bounds) return null;
+              const scaleX = canvas.width / Math.max(1, selection.width);
+              const scaleY = canvas.height / Math.max(1, displayHeight);
+              const begin = (event: React.PointerEvent, mode: "move" | "rotate" | ResizeHandle) => {
+                event.preventDefault();
+                event.stopPropagation();
+                event.currentTarget.setPointerCapture(event.pointerId);
+                sceneTransformRef.current = {
+                  pointerId: event.pointerId,
+                  mode,
+                  startX: event.clientX,
+                  startY: event.clientY,
+                  baseline: cloneSceneElements(sceneElements),
+                  selectedIds: ids,
+                  bounds,
+                  changed: false,
+                };
+                beginObjectMutation();
               };
-              beginObjectMutation();
-            };
-            return (
-              <div
-                className="scene-selection"
-                style={{
-                  left: bounds.x / scaleX,
-                  top: bounds.y / scaleY,
-                  width: Math.max(1, bounds.width / scaleX),
-                  height: Math.max(1, bounds.height / scaleY),
-                }}
-              >
-                {RESIZE_HANDLES.map((handle) => (
+              return (
+                <div
+                  className="scene-selection"
+                  style={{
+                    left: bounds.x / scaleX,
+                    top: bounds.y / scaleY,
+                    width: Math.max(1, bounds.width / scaleX),
+                    height: Math.max(1, bounds.height / scaleY),
+                  }}
+                >
+                  {RESIZE_HANDLES.map((handle) => (
+                    <span
+                      key={handle}
+                      className={`scene-selection__handle scene-selection__handle--${handle}`}
+                      onPointerDown={(event) => begin(event, handle)}
+                    />
+                  ))}
                   <span
-                    key={handle}
-                    className={`scene-selection__handle scene-selection__handle--${handle}`}
-                    onPointerDown={(event) => begin(event, handle)}
+                    className="scene-selection__rotate"
+                    title="旋转（Shift 按 15°）"
+                    onPointerDown={(event) => begin(event, "rotate")}
                   />
-                ))}
-                <span
-                  className="scene-selection__rotate"
-                  title="旋转（Shift 按 15°）"
-                  onPointerDown={(event) => begin(event, "rotate")}
-                />
-              </div>
-            );
-          })()}
+                </div>
+              );
+            })()}
           {textEditor &&
             (() => {
               const canvas = shotRef.current;
@@ -3978,11 +4252,16 @@ function ScreenshotOverlay(): React.JSX.Element {
       {error && <div className="overlay-hint-bar overlay-hint-bar--error">{error}</div>}
 
       {phase === "editing" && (ocrRunning || ocrPanel.result || ocrPanel.error) && (
-        <div className="ocr-result-panel ocr-result-panel--text" onMouseDown={(event) => event.stopPropagation()}>
+        <div
+          className="ocr-result-panel ocr-result-panel--text"
+          onMouseDown={(event) => event.stopPropagation()}
+        >
           <div className="ocr-result-panel__header">
             <strong>{t.ocr.title}</strong>
             {ocrPanel.elapsedMs !== null && (
-              <span className="ocr-result-panel__elapsed">{t.ocr.completedIn(ocrPanel.elapsedMs)}</span>
+              <span className="ocr-result-panel__elapsed">
+                {t.ocr.completedIn(ocrPanel.elapsedMs)}
+              </span>
             )}
             <button
               type="button"
@@ -4000,10 +4279,14 @@ function ScreenshotOverlay(): React.JSX.Element {
             ) : ocrPanel.error ? (
               <div className="ocr-result-panel__state ocr-result-panel__state--error">
                 <p>{ocrPanel.error}</p>
-                <button type="button" onClick={runOcr}>{t.ocr.retry}</button>
+                <button type="button" onClick={runOcr}>
+                  {t.ocr.retry}
+                </button>
               </div>
             ) : ocrPanel.result?.text.trim() ? (
-              <pre className="ocr-result-panel__text" tabIndex={0}>{ocrPanel.result.text}</pre>
+              <pre className="ocr-result-panel__text" tabIndex={0}>
+                {ocrPanel.result.text}
+              </pre>
             ) : (
               <p className="ocr-result-panel__state">{t.ocr.noTextFound}</p>
             )}
@@ -4030,7 +4313,13 @@ function ScreenshotOverlay(): React.JSX.Element {
         <div className="ocr-result-panel" onMouseDown={(event) => event.stopPropagation()}>
           <div className="ocr-result-panel__header">
             <strong>二维码识别</strong>
-            <button type="button" onClick={() => setQrContents(null)}>
+            <button
+              type="button"
+              onClick={() => {
+                setQrCopyState(null);
+                setQrContents(null);
+              }}
+            >
               {t.ocr.close}
             </button>
           </div>
@@ -4040,8 +4329,17 @@ function ScreenshotOverlay(): React.JSX.Element {
             qrContents.map((content) => (
               <div key={content} className="ocr-result-panel__actions">
                 <code>{content}</code>
-                <button type="button" onClick={() => void window.api.copyText(content)}>
-                  复制
+                {qrCopyState?.content === content && qrCopyState.state === "failed" && (
+                  <span className="ocr-result-panel__copy-error">复制失败，请重试。</span>
+                )}
+                <button
+                  type="button"
+                  disabled={qrCopyState?.content === content && qrCopyState.state === "copied"}
+                  onClick={() => void copyQrContent(content)}
+                >
+                  {qrCopyState?.content === content && qrCopyState.state === "copied"
+                    ? "已复制"
+                    : "复制"}
                 </button>
                 {/^https?:\/\//i.test(content) && (
                   <button type="button" onClick={() => void window.api.openUrl(content)}>
@@ -4124,27 +4422,7 @@ function ScreenshotOverlay(): React.JSX.Element {
             onOcr={runOcr}
             onQr={() => {
               if (!selection || !shotReady || ocrRunning) return;
-              const generation = qrRequest.current.next();
-              void (async () => {
-                let imageId: string | null = null;
-                try {
-                  const png = await exportOcrPng();
-                  if (!qrRequest.current.isCurrent(generation)) return;
-                  imageId = await window.api.uploadImage(png);
-                  if (!qrRequest.current.isCurrent(generation)) {
-                    await window.api.releaseImage(imageId);
-                    return;
-                  }
-                  const result = await window.api.decodeQrSelection(imageId);
-                  imageId = null;
-                  if (qrRequest.current.isCurrent(generation)) setQrContents(result.contents);
-                } catch (err) {
-                  if (imageId) await window.api.releaseImage(imageId).catch(() => undefined);
-                  if (qrRequest.current.isCurrent(generation)) {
-                    setError(err instanceof Error ? err.message : "二维码识别失败");
-                  }
-                }
-              })();
+              decodeQr();
             }}
             onCancel={cancelOverlay}
             onConfirm={() => {
@@ -4181,7 +4459,7 @@ function ScreenshotOverlay(): React.JSX.Element {
         </>
       )}
 
-      {(busy || editorStatus === "loading" && phase === "editing") && (
+      {(busy || (editorStatus === "loading" && phase === "editing")) && (
         <div className="overlay-status">{busy ? t.hints.working : "标注工具加载中…"}</div>
       )}
     </div>

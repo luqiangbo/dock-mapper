@@ -819,10 +819,38 @@ $compact-radius: 10px;
   place-items: center;
 }
 
+.historyPreviewButton {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  cursor: zoom-in;
+  border: 0;
+  background: transparent;
+}
+
+.historyPreviewButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .historyImage {
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+
+.historyOriginalImage {
+  display: block;
+  max-width: 100%;
+  max-height: min(74vh, 900px);
+  margin: 0 auto;
+  object-fit: contain;
+}
+
+.historyPreviewLoading {
+  display: grid;
+  min-height: min(52vh, 520px);
+  place-items: center;
 }
 
 .historyImageFallback,

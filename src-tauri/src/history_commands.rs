@@ -46,12 +46,24 @@ pub async fn create_screenshot_history(
     state: State<'_, AppState>,
     result_image_id: String,
 ) -> Result<history::ScreenshotHistorySummary, String> {
-    let result = state.images.get(&result_image_id)?;
-    let history = Arc::clone(&state.history);
-    let summary = run_history_task(move || history.create(&result)).await?;
-    app.state::<AppState>().images.remove(&result_image_id);
-    let _ = app.emit("screenshot-history-changed", ());
-    Ok(summary)
+    let result = match state.images.get(&result_image_id) {
+        Ok(image) => {
+            let history = Arc::clone(&state.history);
+            run_history_task(move || history.create(&image)).await
+        }
+        Err(error) => Err(error),
+    };
+    match result {
+        Ok(summary) => {
+            app.state::<AppState>().images.remove(&result_image_id);
+            let _ = app.emit("screenshot-history-changed", ());
+            Ok(summary)
+        }
+        Err(error) => {
+            let _ = app.emit("screenshot-history-write-failed", &error);
+            Err(error)
+        }
+    }
 }
 
 #[tauri::command]

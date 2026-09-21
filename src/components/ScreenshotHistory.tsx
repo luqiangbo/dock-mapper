@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   CopyOutlined,
+  CameraOutlined,
   DeleteOutlined,
   PushpinOutlined,
   ReloadOutlined,
@@ -10,12 +11,14 @@ import {
 } from "@ant-design/icons";
 import {
   App as AntApp,
+  Alert,
   Button,
   Empty,
   Grid,
   Image,
   InputNumber,
   Masonry,
+  Modal,
   Popconfirm,
   Select,
   Spin,
@@ -23,7 +26,7 @@ import {
   Typography,
 } from "antd";
 import type { ScreenshotHistorySummary } from "../screenshots/screenshot/api";
-import { errorMessage, historyApi, MAIN_EVENTS } from "../api/commands";
+import { errorMessage, historyApi, MAIN_EVENTS, screenshotSettingsApi } from "../api/commands";
 import {
   loadScreenshotHistoryView,
   saveScreenshotHistoryView,
@@ -52,6 +55,8 @@ function HistoryImage({ id }: { id: string }) {
   const [thumbnailUrl, setThumbnailUrl] = useState("");
   const [originalUrl, setOriginalUrl] = useState("");
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewAttempt, setPreviewAttempt] = useState(0);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -80,9 +85,7 @@ function HistoryImage({ id }: { id: string }) {
       .thumbnail(id)
       .then((payload) => {
         if (disposed) return;
-        objectUrl = URL.createObjectURL(
-          new Blob([payload], { type: "image/png" }),
-        );
+        objectUrl = URL.createObjectURL(new Blob([payload], { type: "image/png" }));
         thumbnailUrlRef.current = objectUrl;
         setThumbnailUrl(objectUrl);
       })
@@ -99,21 +102,35 @@ function HistoryImage({ id }: { id: string }) {
   useEffect(() => {
     if (!previewOpen || originalUrlRef.current) return;
     let disposed = false;
+    setPreviewError(null);
     void historyApi
       .image(id)
       .then((payload) => {
         if (disposed) return;
-        const objectUrl = URL.createObjectURL(
-          new Blob([payload], { type: "image/png" }),
-        );
+        const objectUrl = URL.createObjectURL(new Blob([payload], { type: "image/png" }));
         originalUrlRef.current = objectUrl;
         setOriginalUrl(objectUrl);
       })
-      .catch(() => undefined);
+      .catch((error) => {
+        if (!disposed) setPreviewError(errorMessage(error));
+      });
     return () => {
       disposed = true;
     };
-  }, [id, previewOpen]);
+  }, [id, previewAttempt, previewOpen]);
+
+  const setPreviewVisibility = useCallback((open: boolean) => {
+    setPreviewOpen(open);
+    if (open || !originalUrlRef.current) return;
+    URL.revokeObjectURL(originalUrlRef.current);
+    originalUrlRef.current = "";
+    setOriginalUrl("");
+  }, []);
+
+  const retryPreview = useCallback(() => {
+    setPreviewError(null);
+    setPreviewAttempt((attempt) => attempt + 1);
+  }, []);
 
   useEffect(
     () => () => {
@@ -128,24 +145,62 @@ function HistoryImage({ id }: { id: string }) {
       {failed ? (
         <div className={styles.historyImageFallback}>图片不可用</div>
       ) : !thumbnailUrl ? (
-        nearViewport ? <Spin size="small" /> : null
+        nearViewport ? (
+          <Spin size="small" />
+        ) : null
       ) : (
-        <Image
-          src={thumbnailUrl}
-          alt="历史截图"
-          className={styles.historyImage}
-          onError={() => {
-            if (thumbnailUrlRef.current) URL.revokeObjectURL(thumbnailUrlRef.current);
-            thumbnailUrlRef.current = "";
-            setThumbnailUrl("");
-            setFailed(true);
-          }}
-          preview={{
-            src: originalUrl || thumbnailUrl,
-            onOpenChange: setPreviewOpen,
-          }}
-        />
+        <button
+          type="button"
+          className={styles.historyPreviewButton}
+          aria-label="查看截图原图"
+          onClick={() => setPreviewVisibility(true)}
+        >
+          <Image
+            src={thumbnailUrl}
+            alt="历史截图"
+            className={styles.historyImage}
+            preview={false}
+            onError={() => {
+              if (thumbnailUrlRef.current) URL.revokeObjectURL(thumbnailUrlRef.current);
+              thumbnailUrlRef.current = "";
+              setThumbnailUrl("");
+              setFailed(true);
+            }}
+          />
+        </button>
       )}
+      <Modal
+        title="截图原图"
+        open={previewOpen}
+        footer={null}
+        width="min(92vw, 1280px)"
+        onCancel={() => setPreviewVisibility(false)}
+      >
+        {previewError ? (
+          <Alert
+            type="error"
+            showIcon
+            message="原图加载失败"
+            description={previewError}
+            action={
+              <Button size="small" onClick={retryPreview}>
+                重试
+              </Button>
+            }
+          />
+        ) : originalUrl ? (
+          <Image
+            src={originalUrl}
+            alt="截图原图"
+            preview={false}
+            className={styles.historyOriginalImage}
+          />
+        ) : (
+          <div className={styles.historyPreviewLoading}>
+            <Spin tip="正在加载原图…" />
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
@@ -156,6 +211,8 @@ export default function ScreenshotHistory() {
   const [entries, setEntries] = useState<ScreenshotHistorySummary[]>([]);
   const [view, setView] = useState(loadScreenshotHistoryView);
   const [loading, setLoading] = useState(true);
+  const [writeError, setWriteError] = useState<string | null>(null);
+  const [startingCapture, setStartingCapture] = useState(false);
   const [working, setWorking] = useState<{ id: string; action: HistoryAction } | null>(null);
   const workingRef = useRef(false);
   const refreshGenerationRef = useRef(0);
@@ -181,6 +238,13 @@ export default function ScreenshotHistory() {
   const visibleColumnCount = responsiveHistoryColumnCount(view.columns, screens);
 
   useEffect(() => saveScreenshotHistoryView(view), [view]);
+
+  useEffect(() => {
+    const error = window.sessionStorage.getItem("dockmapper.history-write-error");
+    if (!error) return;
+    window.sessionStorage.removeItem("dockmapper.history-write-error");
+    setWriteError(error);
+  }, []);
 
   const refresh = useCallback(async () => {
     const generation = ++refreshGenerationRef.current;
@@ -240,6 +304,17 @@ export default function ScreenshotHistory() {
     }
   };
 
+  const startCapture = async () => {
+    setStartingCapture(true);
+    try {
+      await screenshotSettingsApi.start();
+    } catch (error) {
+      notification.error({ message: "启动截图失败", description: errorMessage(error) });
+    } finally {
+      setStartingCapture(false);
+    }
+  };
+
   return (
     <div className={styles.historyPanel}>
       <div className={styles.historyHeader}>
@@ -286,6 +361,15 @@ export default function ScreenshotHistory() {
             {visibleEntries.length} 条
           </Text>
           <Button
+            type="primary"
+            icon={<CameraOutlined />}
+            loading={startingCapture}
+            disabled={working !== null}
+            onClick={() => void startCapture()}
+          >
+            开始截图
+          </Button>
+          <Button
             icon={<ReloadOutlined />}
             loading={loading}
             disabled={working !== null}
@@ -295,6 +379,17 @@ export default function ScreenshotHistory() {
           </Button>
         </div>
       </div>
+
+      {writeError && (
+        <Alert
+          type="warning"
+          showIcon
+          closable
+          message="有一张截图未保存到历史"
+          description={writeError}
+          onClose={() => setWriteError(null)}
+        />
+      )}
 
       {loading && entries.length === 0 ? (
         <div className={styles.historyEmpty}>
@@ -336,16 +431,10 @@ export default function ScreenshotHistory() {
                     loading={working?.id === entry.id && working.action === "copy"}
                     disabled={
                       loading ||
-                      (working !== null &&
-                        (working.id !== entry.id || working.action !== "copy"))
+                      (working !== null && (working.id !== entry.id || working.action !== "copy"))
                     }
                     onClick={() =>
-                      void run(
-                        entry.id,
-                        "copy",
-                        () => historyApi.copy(entry.id),
-                        "截图已复制",
-                      )
+                      void run(entry.id, "copy", () => historyApi.copy(entry.id), "截图已复制")
                     }
                   />
                 </Tooltip>
@@ -358,8 +447,7 @@ export default function ScreenshotHistory() {
                     loading={working?.id === entry.id && working.action === "pin"}
                     disabled={
                       loading ||
-                      (working !== null &&
-                        (working.id !== entry.id || working.action !== "pin"))
+                      (working !== null && (working.id !== entry.id || working.action !== "pin"))
                     }
                     onClick={() =>
                       void run(
@@ -389,10 +477,7 @@ export default function ScreenshotHistory() {
                         entry.id,
                         "favorite",
                         async () => {
-                          const updated = await historyApi.favorite(
-                            entry.id,
-                            !entry.favorite,
-                          );
+                          const updated = await historyApi.favorite(entry.id, !entry.favorite);
                           setEntries((current) =>
                             current.map((item) => (item.id === updated.id ? updated : item)),
                           );
