@@ -55,6 +55,23 @@ impl Default for WidgetMetricConfig {
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AlertConfig {
+    pub cpu_percent: Option<u8>,
+    pub memory_percent: Option<u8>,
+    pub battery_below_percent: Option<u8>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WidgetPreset {
+    pub name: String,
+    pub metrics: Vec<WidgetMetricConfig>,
+    pub refresh_interval_secs: u8,
+    pub speed_unit: SpeedUnit,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WidgetConfig {
@@ -66,6 +83,8 @@ pub struct WidgetConfig {
     /// now always used and normalization clears any legacy explicit value.
     pub network_interface: Option<String>,
     pub speed_unit: SpeedUnit,
+    pub alerts: AlertConfig,
+    pub presets: Vec<WidgetPreset>,
 }
 
 impl Default for WidgetConfig {
@@ -83,12 +102,38 @@ impl Default for WidgetConfig {
             refresh_interval_secs: 1,
             network_interface: None,
             speed_unit: SpeedUnit::Auto,
+            alerts: AlertConfig::default(),
+            presets: Vec::new(),
         }
     }
 }
 
 impl WidgetConfig {
     pub fn normalize(&mut self) {
+        for threshold in [
+            &mut self.alerts.cpu_percent,
+            &mut self.alerts.memory_percent,
+            &mut self.alerts.battery_below_percent,
+        ] {
+            *threshold = threshold.and_then(|value| (value > 0).then_some(value.min(100)));
+        }
+        let mut names = std::collections::HashSet::new();
+        self.presets.retain_mut(|preset| {
+            preset.name = preset.name.trim().chars().take(24).collect();
+            !preset.name.is_empty() && names.insert(preset.name.to_lowercase())
+        });
+        self.presets.truncate(8);
+        for preset in &mut self.presets {
+            let mut normalized = WidgetConfig {
+                metrics: preset.metrics.clone(),
+                refresh_interval_secs: preset.refresh_interval_secs,
+                speed_unit: preset.speed_unit,
+                ..WidgetConfig::default()
+            };
+            normalized.normalize();
+            preset.metrics = normalized.metrics;
+            preset.refresh_interval_secs = normalized.refresh_interval_secs;
+        }
         self.refresh_interval_secs = match self.refresh_interval_secs {
             1 | 2 | 3 | 5 => self.refresh_interval_secs,
             0 => 1,
@@ -160,11 +205,14 @@ pub fn refresh_widget_position(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<taskbar::WidgetLayoutBudget, String> {
+    let started = std::time::Instant::now();
     let request = *state
         .widget_layout
         .lock()
         .map_err(|_| "挂件布局状态已损坏".to_string())?;
-    Ok(taskbar::refresh_widget_position(&app, request))
+    let budget = taskbar::refresh_widget_position(&app, request);
+    tracing::debug!(target: "dock_mapper::taskbar", elapsed_ms = started.elapsed().as_millis(), "Widget position refresh completed");
+    Ok(budget)
 }
 
 #[tauri::command]
@@ -368,5 +416,18 @@ mod tests {
         assert_eq!(config.refresh_interval_secs, 3);
         assert_eq!(config.network_interface, None);
         assert_eq!(config.speed_unit, SpeedUnit::Mb);
+    }
+
+    #[test]
+    fn alert_thresholds_and_layout_presets_survive_config_normalization() {
+        let mut config: WidgetConfig = serde_json::from_str(r#"{
+            "alerts": {"cpu_percent": 85, "memory_percent": 90, "battery_below_percent": 20},
+            "presets": [{"name": "办公", "metrics": [{"kind": "cpu", "enabled": true, "usage_scheme": "ring"}], "refresh_interval_secs": 3, "speed_unit": "mb"}]
+        }"#).unwrap();
+        config.normalize();
+        let value = serde_json::to_value(config).unwrap();
+        assert_eq!(value["alerts"]["cpu_percent"], 85);
+        assert_eq!(value["presets"][0]["name"], "办公");
+        assert_eq!(value["presets"][0]["metrics"][0]["kind"], "cpu");
     }
 }

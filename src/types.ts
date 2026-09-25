@@ -98,6 +98,21 @@ export interface WidgetConfig {
   refresh_interval_secs: number;
   network_interface: string | null;
   speed_unit: SpeedUnit;
+  alerts: WidgetAlertConfig;
+  presets: WidgetPreset[];
+}
+
+export interface WidgetAlertConfig {
+  cpu_percent: number | null;
+  memory_percent: number | null;
+  battery_below_percent: number | null;
+}
+
+export interface WidgetPreset {
+  name: string;
+  metrics: WidgetMetricConfig[];
+  refresh_interval_secs: number;
+  speed_unit: SpeedUnit;
 }
 
 export interface WidgetMetricConfig {

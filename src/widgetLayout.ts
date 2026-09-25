@@ -1,8 +1,27 @@
+import type { WidgetMetricKind } from "./types";
+
 export interface WidgetResponsiveLayout {
   compact: boolean;
   visibleCount: number;
   hiddenCount: number;
   showOverflow: boolean;
+}
+
+export interface WidgetLayoutReport {
+  visibleKinds: WidgetMetricKind[];
+  hiddenKinds: WidgetMetricKind[];
+  compact: boolean;
+  visible: boolean;
+}
+
+export function describeWidgetLayout(enabledKinds: readonly WidgetMetricKind[], layout: WidgetResponsiveLayout, visible: boolean): WidgetLayoutReport {
+  const visibleCount = visible ? layout.visibleCount : 0;
+  return {
+    visibleKinds: enabledKinds.slice(0, visibleCount),
+    hiddenKinds: enabledKinds.slice(visibleCount),
+    compact: layout.compact,
+    visible,
+  };
 }
 
 function occupiedWidth(widths: readonly number[], padding: number, gap: number): number {

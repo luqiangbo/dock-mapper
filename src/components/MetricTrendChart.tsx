@@ -64,7 +64,7 @@ export default function MetricTrendChart({
     const lineColor = resolved === "dark" ? "rgba(191,209,255,.15)" : "rgba(95,107,130,.16)";
     const option: ChartOption = {
       animation: false,
-      aria: { enabled: true, description: `${title}，最近五分钟动态折线图` },
+      aria: { enabled: true, description: `${title}动态折线图` },
       color: series.map((item) => item.color),
       grid: { left: 12, right: 12, top: 34, bottom: 8, containLabel: true },
       legend: { top: 0, right: 0, textStyle: { color: textColor, fontSize: 11 } },
@@ -96,11 +96,21 @@ export default function MetricTrendChart({
         smooth: 0.22,
         lineStyle: { width: 2 },
         areaStyle: { opacity: 0.06 },
-        data: samples.map((sample) => [sample.timestamp, sample[item.key]]),
       })),
     };
-    chart.setOption(option, { notMerge: true });
-  }, [percent, resolved, samples, series, title]);
+    chart.setOption(option);
+  }, [percent, resolved, series, title]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    chart.setOption({
+      series: series.map((item) => ({
+        name: item.name,
+        data: samples.map((sample) => [sample.timestamp, sample[item.key]]),
+      })),
+    });
+  }, [samples, series]);
 
   return <div ref={containerRef} className={styles.trendChart} role="img" aria-label={title} />;
 }

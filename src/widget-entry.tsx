@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactDOM from "react-dom/client";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { CaretDownFilled, CaretUpFilled } from "@ant-design/icons";
 import { Battery, Cpu, MemoryStick } from "lucide-react";
 import type {
@@ -11,7 +11,8 @@ import type {
   WidgetMetricKind,
 } from "./types";
 import { formatSpeedParts } from "./utils/format";
-import { calculateWidgetResponsiveLayout } from "./widgetLayout";
+import { calculateWidgetResponsiveLayout, describeWidgetLayout, type WidgetLayoutReport } from "./widgetLayout";
+import { useTelemetryFreshness } from "./utils/telemetryFreshness";
 import { invokeCommand } from "./api/ipc";
 import type { WidgetLayoutBudget } from "./api/screenshotTypes";
 import "./widget.scss";
@@ -26,6 +27,8 @@ const FALLBACK_CONFIG: WidgetConfig = {
   refresh_interval_secs: 1,
   network_interface: null,
   speed_unit: "auto",
+  alerts: { cpu_percent: null, memory_percent: null, battery_below_percent: null },
+  presets: [],
 };
 
 interface WidgetMeasurements {
@@ -39,6 +42,14 @@ const INITIAL_BUDGET: WidgetLayoutBudget = {
   allocatedWidth: 180,
   constrained: false,
   visible: true,
+};
+const MEASUREMENT_STATUS: SysStatus = {
+  upload_speed: 99_999_999,
+  download_speed: 99_999_999,
+  memory_usage: 100,
+  network_available: true,
+  cpu_usage: 100,
+  battery: { percentage: 100, charging: false },
 };
 
 function memoryColor(usage: number): string {
@@ -194,12 +205,10 @@ function sameMeasurements(a: WidgetMeasurements, b: WidgetMeasurements): boolean
 }
 
 function TaskbarWidget() {
-  const [status, setStatus] = useState<SysStatus>({
-    upload_speed: 0,
-    download_speed: 0,
-    memory_usage: 0,
-    network_available: true,
-  });
+  const [status, setStatus] = useState<SysStatus | null>(null);
+  const [lastSampleAt, setLastSampleAt] = useState<number | null>(null);
+  const freshness = useTelemetryFreshness(lastSampleAt);
+  const liveStatus = freshness === "live" ? status : null;
   const [config, setConfig] = useState<WidgetConfig>(FALLBACK_CONFIG);
   const [budget, setBudget] = useState<WidgetLayoutBudget>(INITIAL_BUDGET);
   const [measurements, setMeasurements] = useState<WidgetMeasurements>({
@@ -218,18 +227,19 @@ function TaskbarWidget() {
   const lastRequestKey = useRef<string | null>(null);
   const syncInFlight = useRef(false);
   const disposed = useRef(false);
+  const layoutReportRef = useRef<WidgetLayoutReport>({ visibleKinds: [], hiddenKinds: [], compact: false, visible: false });
 
-  const upload = status.network_available
-    ? formatSpeedParts(status.upload_speed, config.speed_unit)
+  const upload = liveStatus?.network_available
+    ? formatSpeedParts(liveStatus.upload_speed, config.speed_unit)
     : { value: "—", unit: "" };
-  const download = status.network_available
-    ? formatSpeedParts(status.download_speed, config.speed_unit)
+  const download = liveStatus?.network_available
+    ? formatSpeedParts(liveStatus.download_speed, config.speed_unit)
     : { value: "—", unit: "" };
   const enabled = config.metrics
     .filter((metric) => metric.enabled)
     .filter((metric) => {
-      if (metric.kind === "battery") return status.battery != null;
-      if (metric.kind === "cpu") return status.cpu_usage != null;
+      if (metric.kind === "battery") return status?.battery != null || status === null;
+      if (metric.kind === "cpu") return status?.cpu_usage != null || status === null;
       return true;
     });
   const enabledKey = enabled.map((metric) => `${metric.kind}:${metric.usage_scheme}`).join("|");
@@ -278,9 +288,13 @@ function TaskbarWidget() {
 
     const statusListener = listen<SysStatus>("sys-status-update", (event) => {
       setStatus(event.payload);
+      setLastSampleAt(Date.now());
     });
     const configListener = listen<WidgetConfig>("widget-config-changed", (event) => {
       setConfig(event.payload);
+    });
+    const layoutRequestListener = listen("widget-layout-request", () => {
+      void emit("widget-layout-report", layoutReportRef.current).catch((error) => console.error("挂件布局上报失败", error));
     });
     const refreshPosition = (): void => {
       void invokeCommand("refresh_widget_position")
@@ -290,7 +304,9 @@ function TaskbarWidget() {
         .catch((error) => console.error("任务栏挂件位置刷新失败", error));
     };
     refreshPosition();
-    const positionTimer = window.setInterval(refreshPosition, 2000);
+    window.addEventListener("resize", refreshPosition);
+    window.addEventListener("focus", refreshPosition);
+    const positionTimer = window.setInterval(refreshPosition, 10_000);
 
     return () => {
       disposed.current = true;
@@ -301,6 +317,9 @@ function TaskbarWidget() {
       pendingRequest.current = null;
       void statusListener.then((unlisten) => unlisten());
       void configListener.then((unlisten) => unlisten());
+      void layoutRequestListener.then((unlisten) => unlisten()).catch((error) => console.error("挂件布局请求监听失败", error));
+      window.removeEventListener("resize", refreshPosition);
+      window.removeEventListener("focus", refreshPosition);
       window.clearInterval(positionTimer);
     };
   }, []);
@@ -359,16 +378,31 @@ function TaskbarWidget() {
           showOverflow: false,
         };
   const visibleMetrics = enabled.slice(0, responsive.visibleCount);
+  const report = describeWidgetLayout(enabled.map((metric) => metric.kind), responsive, budget.visible);
+  layoutReportRef.current = report;
+
+  useEffect(() => {
+    void emit("widget-layout-report", layoutReportRef.current).catch((error) => console.error("挂件布局上报失败", error));
+  }, [enabledKey, responsive.compact, responsive.visibleCount, budget.visible]);
 
   const renderMetric = (metric: WidgetMetricConfig): React.JSX.Element => (
-    <MetricContent
-      key={metric.kind}
-      metric={metric}
-      status={status}
-      upload={upload}
-      download={download}
-    />
+    liveStatus ? <MetricContent key={metric.kind} metric={metric} status={liveStatus} upload={upload} download={download} />
+      : <span key={metric.kind} className="widget-empty" aria-label={freshness === "stale" ? "数据已过期" : "等待采样"}>—</span>
   );
+  const measurementRows = useMemo(() => {
+    const speed = formatSpeedParts(MEASUREMENT_STATUS.upload_speed, config.speed_unit);
+    const metricContent = (metric: WidgetMetricConfig) => (
+      <MetricContent key={metric.kind} metric={metric} status={MEASUREMENT_STATUS} upload={speed} download={speed} />
+    );
+    return <>
+      <div ref={normalMeasureRef} className="widget-container widget-measure-row">
+        {enabled.map((metric, index) => <div key={metric.kind} ref={(node) => { normalItemRefs.current[index] = node; }} className="widget-metric">{metricContent(metric)}</div>)}
+      </div>
+      <div ref={compactMeasureRef} className="widget-container widget-measure-row is-compact">
+        {enabled.map((metric, index) => <div key={metric.kind} ref={(node) => { compactItemRefs.current[index] = node; }} className="widget-metric">{metricContent(metric)}</div>)}
+      </div>
+    </>;
+  }, [config.speed_unit, enabledKey]);
 
   return (
     <>
@@ -399,32 +433,7 @@ function TaskbarWidget() {
       </div>
 
       <div className="widget-measurements" aria-hidden="true">
-        <div ref={normalMeasureRef} className="widget-container widget-measure-row">
-          {enabled.map((metric, index) => (
-            <div
-              key={metric.kind}
-              ref={(node) => {
-                normalItemRefs.current[index] = node;
-              }}
-              className="widget-metric"
-            >
-              {renderMetric(metric)}
-            </div>
-          ))}
-        </div>
-        <div ref={compactMeasureRef} className="widget-container widget-measure-row is-compact">
-          {enabled.map((metric, index) => (
-            <div
-              key={metric.kind}
-              ref={(node) => {
-                compactItemRefs.current[index] = node;
-              }}
-              className="widget-metric"
-            >
-              {renderMetric(metric)}
-            </div>
-          ))}
-        </div>
+        {measurementRows}
       </div>
     </>
   );

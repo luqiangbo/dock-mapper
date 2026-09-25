@@ -58,6 +58,7 @@ pub fn start_sys_monitor(app: AppHandle) {
         let mut baseline = NetworkBaseline::default();
         let mut previous_tick = Instant::now();
         let mut last_list_refresh = Instant::now();
+        let mut last_hidden_main_emit: Option<Instant> = None;
 
         loop {
             let current = settings.borrow().clone();
@@ -102,7 +103,7 @@ pub fn start_sys_monitor(app: AppHandle) {
             };
 
             let widget_visible = emit_if_visible(&app, "taskbar_widget", payload.clone());
-            let main_visible = emit_if_visible(&app, "main", payload);
+            let main_visible = emit_to_main(&app, payload, now, &mut last_hidden_main_emit);
             let interval = if widget_visible || main_visible {
                 current.interval_secs.into()
             } else {
@@ -208,9 +209,56 @@ fn emit_if_visible(app: &AppHandle, label: &str, payload: SysStatusPayload) -> b
     true
 }
 
+fn emit_to_main(
+    app: &AppHandle,
+    payload: SysStatusPayload,
+    now: Instant,
+    last_hidden_emit: &mut Option<Instant>,
+) -> bool {
+    let Some(window) = app.get_webview_window("main") else {
+        return false;
+    };
+    let visible = window.is_visible().unwrap_or(false);
+    if should_emit_main_telemetry(visible, *last_hidden_emit, now) {
+        if let Err(error) = window.emit("sys-status-update", payload) {
+            tracing::warn!(target: "dock_mapper::monitor", %error, "main window telemetry delivery failed");
+        }
+        if !visible {
+            *last_hidden_emit = Some(now);
+        }
+    }
+    visible
+}
+
+fn should_emit_main_telemetry(
+    visible: bool,
+    last_hidden_emit: Option<Instant>,
+    now: Instant,
+) -> bool {
+    visible
+        || last_hidden_emit.is_none_or(|last| now.duration_since(last) >= Duration::from_secs(10))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hidden_main_keeps_collecting_samples_at_low_frequency() {
+        let now = Instant::now();
+        assert!(should_emit_main_telemetry(false, None, now));
+        assert!(!should_emit_main_telemetry(
+            false,
+            Some(now),
+            now + Duration::from_secs(9)
+        ));
+        assert!(should_emit_main_telemetry(
+            false,
+            Some(now),
+            now + Duration::from_secs(10)
+        ));
+        assert!(should_emit_main_telemetry(true, Some(now), now));
+    }
 
     #[test]
     fn monitor_interval_is_clamped_and_shutdown_is_observable() {

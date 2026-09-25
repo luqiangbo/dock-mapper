@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Alert, App as AntApp, Button, Card, Col, Grid, Row, Spin, Typography } from "antd";
+import { Alert, App as AntApp, Button, Card, Col, Grid, Row, Segmented, Space, Spin, Typography } from "antd";
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
@@ -16,6 +16,9 @@ import { errorMessage, keyMappingApi, MAIN_EVENTS, runtimeApi, screenshotSetting
 import { formatSpeed } from "../utils/format";
 import MetricTrendChart from "./MetricTrendChart";
 import type { DashboardSample } from "./dashboardTelemetry";
+import { selectTelemetryArchive, type TrendRange } from "./telemetryArchive";
+import type { TelemetryFreshness } from "../utils/telemetryFreshness";
+import type { AlertEntry } from "./telemetryAlerts";
 import styles from "./components.module.scss";
 
 const { Text, Title } = Typography;
@@ -30,7 +33,11 @@ const RESOURCE_SERIES = [
 
 interface Props {
   status: SysStatus | null;
+  freshness: TelemetryFreshness;
   samples: DashboardSample[];
+  archive: DashboardSample[];
+  alerts: AlertEntry[];
+  onMarkAlertsRead: () => void;
   onNavigate: (page: "keymapper" | "screenshot" | "widget", tab?: "history" | "settings") => void;
 }
 
@@ -40,7 +47,7 @@ function MetricCard({ icon, label, value }: { icon: ReactNode; label: string; va
   </Card>;
 }
 
-export default function Dashboard({ status, samples, onNavigate }: Props) {
+export default function Dashboard({ status, freshness, samples, archive, alerts, onMarkAlertsRead, onNavigate }: Props) {
   const screens = Grid.useBreakpoint();
   const gutter: [number, number] = [screens.lg ? 16 : 12, 12];
   const [mapStatus, setMapStatus] = useState<ScancodeMapStatus | null>(null);
@@ -48,6 +55,10 @@ export default function Dashboard({ status, samples, onNavigate }: Props) {
   const [mapError, setMapError] = useState<string | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
   const [startingCapture, setStartingCapture] = useState(false);
+  const [showAllAlerts, setShowAllAlerts] = useState(false);
+  const [trendRange, setTrendRange] = useState<TrendRange>("live");
+  const trendSamples = useMemo(() => trendRange === "live" ? samples : selectTelemetryArchive(archive, trendRange, Date.now()), [archive, samples, trendRange]);
+  const trendLabel = trendRange === "live" ? "最近 5 分钟" : trendRange === "hour" ? "最近 1 小时" : "最近 24 小时";
   const { notification } = AntApp.useApp();
 
   const refreshMapStatus = useCallback(async () => {
@@ -88,8 +99,10 @@ export default function Dashboard({ status, samples, onNavigate }: Props) {
   return <div className={styles.page}>
     <section className={styles.dashboardHero}>
       <div><Text type="secondary">本机实时概览</Text><Title level={3}>运行状态一目了然</Title></div>
-      <span className={styles.liveBadge}><i />{status ? "实时更新" : "等待采样"}</span>
+      <span className={styles.liveBadge}><i />{freshness === "live" ? "实时更新" : freshness === "stale" ? "数据已过期" : "等待采样"}</span>
     </section>
+
+    {freshness === "stale" && <Alert type="warning" showIcon message="系统数据暂停更新" description="当前数值已隐藏，请检查挂件或重新打开主窗口。" />}
 
     <Row gutter={gutter}>
       <Col xs={24} sm={12} lg={6}><MetricCard icon={<ArrowUpOutlined />} label={!status ? "实时上传" : status.network_available ? "实时上传" : "上传（网卡不可用）"} value={status?.network_available ? formatSpeed(status.upload_speed) : "—"} /></Col>
@@ -99,12 +112,23 @@ export default function Dashboard({ status, samples, onNavigate }: Props) {
       {status?.battery && <Col xs={24} sm={12} lg={6}><MetricCard icon={<DashboardOutlined />} label={status.battery.charging ? "电池（充电中）" : "电池"} value={`${status.battery.percentage.toFixed(0)}%`} /></Col>}
     </Row>
 
+    <Card className={styles.surfaceCard} title={`本地提醒 · ${alerts.filter((item) => !item.read).length} 条未读`} extra={<Space>{alerts.length > 5 && <Button size="small" onClick={() => setShowAllAlerts((value) => !value)}>{showAllAlerts ? "收起" : "查看全部"}</Button>}<Button size="small" disabled={!alerts.some((item) => !item.read)} onClick={onMarkAlertsRead}>全部标为已读</Button></Space>}>
+      {alerts.length === 0 ? <Text type="secondary">暂无提醒；可在挂件设置中启用指标阈值。</Text> : (showAllAlerts ? alerts : alerts.slice(-5)).slice().reverse().map((alert) => (
+        <div key={alert.id} className={styles.dashboardStatusRow}>
+          <span>{alert.read ? "" : "● "}{alert.kind === "cpu" ? "CPU" : alert.kind === "memory" ? "内存" : "电池"} {alert.value.toFixed(0)}% · 阈值 {alert.threshold}%</span>
+          <Text type="secondary">{new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(alert.createdAt)}</Text>
+        </div>
+      ))}
+    </Card>
+
+    <Segmented<TrendRange> value={trendRange} onChange={setTrendRange} options={[{ label: "5 分钟", value: "live" }, { label: "1 小时", value: "hour" }, { label: "24 小时", value: "day" }]} aria-label="趋势时间范围" />
+    {trendRange !== "live" && <Text type="secondary">应用运行时按分钟保存在本机；退出后的时段显示断点。</Text>}
     <Row gutter={gutter}>
-      <Col xs={24} lg={12}><Card className={styles.surfaceCard} title="网络趋势 · 最近 5 分钟">
-        {samples.length < 2 ? <div className={styles.chartEmpty}><Spin size="small" /><Text type="secondary">正在等待更多网络采样…</Text></div> : <MetricTrendChart title="网络趋势" samples={samples} series={NETWORK_SERIES} />}
+      <Col xs={24} lg={12}><Card className={styles.surfaceCard} title={`网络趋势 · ${trendLabel}`}>
+        {trendSamples.length < 2 ? <div className={styles.chartEmpty}>{trendRange === "live" && <Spin size="small" />}<Text type="secondary">该时间范围暂无足够采样</Text></div> : <MetricTrendChart title={`${trendLabel}网络趋势`} samples={trendSamples} series={NETWORK_SERIES} />}
       </Card></Col>
-      <Col xs={24} lg={12}><Card className={styles.surfaceCard} title="资源趋势 · 最近 5 分钟">
-        {samples.length < 2 ? <div className={styles.chartEmpty}><Spin size="small" /><Text type="secondary">正在等待更多资源采样…</Text></div> : <MetricTrendChart title="资源趋势" samples={samples} series={RESOURCE_SERIES} percent />}
+      <Col xs={24} lg={12}><Card className={styles.surfaceCard} title={`资源趋势 · ${trendLabel}`}>
+        {trendSamples.length < 2 ? <div className={styles.chartEmpty}>{trendRange === "live" && <Spin size="small" />}<Text type="secondary">该时间范围暂无足够采样</Text></div> : <MetricTrendChart title={`${trendLabel}资源趋势`} samples={trendSamples} series={RESOURCE_SERIES} percent />}
       </Card></Col>
     </Row>
 

@@ -30,4 +30,22 @@ mod tests {
 
         assert_eq!(registered, declared);
     }
+
+    #[test]
+    fn widget_space_status_can_be_requested_and_reported_by_both_windows() {
+        for (name, source) in [
+            ("主窗口", include_str!("../capabilities/main.json")),
+            ("任务栏挂件", include_str!("../capabilities/widget.json")),
+        ] {
+            let capability: serde_json::Value =
+                serde_json::from_str(source).expect("parse capability");
+            let permissions = capability["permissions"].as_array().expect("permissions");
+            assert!(
+                permissions
+                    .iter()
+                    .any(|permission| permission == "core:event:allow-emit"),
+                "{name}必须允许发送布局事件"
+            );
+        }
+    }
 }

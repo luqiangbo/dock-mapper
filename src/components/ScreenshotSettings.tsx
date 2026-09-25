@@ -28,6 +28,7 @@ import {
   type ScreenshotShortcutField,
 } from "./screenshotSettingsSave";
 import { useQueuedAutosave } from "../hooks/useQueuedAutosave";
+import { takeDetachedAutosaveError, waitForPendingAutosave } from "../hooks/queuedAutosave";
 
 const { Text } = Typography;
 interface ScreenshotSettingsProps {
@@ -76,6 +77,7 @@ export default function ScreenshotSettings({
     invalidate: invalidateSave,
     isCurrent: isSaveCurrent,
   } = useQueuedAutosave({
+    key: "screenshot-settings",
     delayMs: 0,
     save: screenshotSettingsApi.update,
     onSavingChange: setSaving,
@@ -89,6 +91,10 @@ export default function ScreenshotSettings({
     onError: (error, { latest }) => {
       if (latest) setSaveError(errorMessage(error));
     },
+    onDetachedError: (error) => notification.error({
+      message: "截图设置未保存",
+      description: errorMessage(error),
+    }),
   });
 
   const load = useCallback(async () => {
@@ -96,11 +102,14 @@ export default function ScreenshotSettings({
     setLoading(true);
     setSaveError(null);
     try {
+      await waitForPendingAutosave("screenshot-settings");
       const [config, statuses] = await Promise.all([
         screenshotSettingsApi.get(),
         screenshotSettingsApi.shortcutStatuses(),
       ]);
       if (!isSaveCurrent(revision)) return;
+      const pendingError = takeDetachedAutosaveError("screenshot-settings");
+      if (pendingError) setSaveError(errorMessage(pendingError));
       setSaved(config);
       form.setFieldsValue(config);
       setShortcutStatuses(statuses);

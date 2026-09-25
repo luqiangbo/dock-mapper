@@ -8,6 +8,7 @@
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
+    "core:event:allow-emit",
     "core:app:allow-version",
     "core:window:allow-close",
     "core:window:allow-minimize",

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { emit, listen } from "@tauri-apps/api/event";
 import {
   Alert,
   App as AntApp,
@@ -8,6 +8,9 @@ import {
   Col,
   Form,
   Grid,
+  Input,
+  InputNumber,
+  Popconfirm,
   Row,
   Select,
   Spin,
@@ -28,6 +31,10 @@ import { formatSpeedParts } from "../utils/format";
 import styles from "./components.module.scss";
 import { errorMessage, MAIN_EVENTS, widgetApi } from "../api/commands";
 import { useQueuedAutosave } from "../hooks/useQueuedAutosave";
+import { takeDetachedAutosaveError, waitForPendingAutosave } from "../hooks/queuedAutosave";
+import { useTelemetryFreshness } from "../utils/telemetryFreshness";
+import type { WidgetLayoutReport } from "../widgetLayout";
+import { applyWidgetPreset, deleteWidgetPreset, saveCurrentWidgetPreset } from "./widgetPresets";
 
 const { Text } = Typography;
 const AUTO_SAVE_DELAY_MS = 400;
@@ -40,13 +47,6 @@ const USAGE_SCHEME_OPTIONS: Array<{
   { value: "ring", label: "圆环" },
   { value: "gauge", label: "刻度" },
 ];
-const EMPTY_STATUS: SysStatus = {
-  upload_speed: 0,
-  download_speed: 0,
-  memory_usage: 0,
-  network_available: true,
-};
-
 type WidgetMetricRow = WidgetMetricConfig & {
   index: number;
   visibleIndex: number;
@@ -65,7 +65,8 @@ function metricIcon(kind: Exclude<WidgetMetricKind, "network">): ReactNode {
   return <MemoryStick size={13} />;
 }
 
-function WidgetPreview({ config, status }: { config: WidgetConfig; status: SysStatus }) {
+function WidgetPreview({ config, status }: { config: WidgetConfig; status: SysStatus | null }) {
+  if (!status) return <div className={styles.widgetPreview} aria-label="任务栏挂件实时预览"><Text type="secondary">等待最新系统采样…</Text></div>;
   const upload = status.network_available
     ? formatSpeedParts(status.upload_speed, config.speed_unit)
     : { value: "—", unit: "" };
@@ -127,7 +128,15 @@ export default function WidgetSettings() {
   const [form] = Form.useForm<WidgetConfig>();
   const [config, setConfig] = useState<WidgetConfig | null>(null);
   const [savedConfig, setSavedConfig] = useState<WidgetConfig | null>(null);
-  const [status, setStatus] = useState<SysStatus>(EMPTY_STATUS);
+  const [status, setStatus] = useState<SysStatus | null>(null);
+  const [lastSampleAt, setLastSampleAt] = useState<number | null>(null);
+  const freshness = useTelemetryFreshness(lastSampleAt);
+  const [layoutReport, setLayoutReport] = useState<WidgetLayoutReport | null>(null);
+  const [layoutError, setLayoutError] = useState<string | null>(null);
+  const layoutTimeout = useRef<number | null>(null);
+  const requestLayoutRef = useRef<(() => Promise<void>) | null>(null);
+  const [presetName, setPresetName] = useState("");
+  const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -138,6 +147,7 @@ export default function WidgetSettings() {
     invalidate: invalidateSave,
     isCurrent: isSaveCurrent,
   } = useQueuedAutosave({
+    key: "widget-settings",
     delayMs: AUTO_SAVE_DELAY_MS,
     save: widgetApi.update,
     onSavingChange: setSaving,
@@ -151,6 +161,10 @@ export default function WidgetSettings() {
     onError: (error, { latest }) => {
       if (latest) setSaveError(errorMessage(error));
     },
+    onDetachedError: (error) => notification.error({
+      message: "挂件设置未保存",
+      description: errorMessage(error),
+    }),
   });
 
   const load = useCallback(async () => {
@@ -158,8 +172,11 @@ export default function WidgetSettings() {
     setLoading(true);
     setLoadError(null);
     try {
+      await waitForPendingAutosave("widget-settings");
       const next = await widgetApi.config();
       if (!isSaveCurrent(revision)) return;
+      const pendingError = takeDetachedAutosaveError("widget-settings");
+      if (pendingError) setSaveError(errorMessage(pendingError));
       setConfig(next);
       setSavedConfig(next);
       form.setFieldsValue(next);
@@ -177,7 +194,7 @@ export default function WidgetSettings() {
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void listen<SysStatus>(MAIN_EVENTS.systemStatus, (event) => setStatus(event.payload))
+    void listen<SysStatus>(MAIN_EVENTS.systemStatus, (event) => { setStatus(event.payload); setLastSampleAt(Date.now()); })
       .then((dispose) => {
         if (disposed) dispose();
         else unlisten = dispose;
@@ -191,6 +208,44 @@ export default function WidgetSettings() {
     return () => {
       disposed = true;
       unlisten?.();
+    };
+  }, [notification]);
+
+  useEffect(() => {
+    let disposed = false;
+    let off: (() => void) | undefined;
+    const requestLayout = () => {
+      if (layoutTimeout.current !== null) window.clearTimeout(layoutTimeout.current);
+      layoutTimeout.current = window.setTimeout(() => {
+        layoutTimeout.current = null;
+        setLayoutError("任务栏挂件未返回空间状态");
+      }, 3_000);
+      return emit("widget-layout-request");
+    };
+    requestLayoutRef.current = requestLayout;
+    void listen<WidgetLayoutReport>("widget-layout-report", ({ payload }) => {
+      if (layoutTimeout.current !== null) window.clearTimeout(layoutTimeout.current);
+      layoutTimeout.current = null;
+      setLayoutError(null);
+      setLayoutReport(payload);
+    })
+      .then((unlisten) => {
+        if (disposed) { unlisten(); return; }
+        off = unlisten;
+        return requestLayout();
+      })
+      .catch((error) => {
+        if (layoutTimeout.current !== null) window.clearTimeout(layoutTimeout.current);
+        layoutTimeout.current = null;
+        setLayoutError(errorMessage(error));
+        notification.warning({ message: "挂件空间状态读取失败", description: errorMessage(error) });
+      });
+    return () => {
+      disposed = true;
+      requestLayoutRef.current = null;
+      off?.();
+      if (layoutTimeout.current !== null) window.clearTimeout(layoutTimeout.current);
+      layoutTimeout.current = null;
     };
   }, [notification]);
 
@@ -245,7 +300,7 @@ export default function WidgetSettings() {
     });
   };
   const visibleMetricIndexes = config.metrics.flatMap((metric, index) =>
-    metric.kind === "battery" && status.battery === null ? [] : [index],
+    metric.kind === "battery" && status?.battery === null ? [] : [index],
   );
   const enabledCount = visibleMetricIndexes.filter((index) => config.metrics[index].enabled).length;
   const moveMetric = (index: number, direction: -1 | 1) => {
@@ -331,6 +386,13 @@ export default function WidgetSettings() {
       : dirty
         ? "等待自动保存…"
         : "已自动保存";
+  const currentPreset = config.presets.find((preset) => preset.name === selectedPreset);
+  const savePreset = () => {
+    const next = saveCurrentWidgetPreset(config, presetName);
+    if (next === config) return;
+    scheduleSave(next);
+    setSelectedPreset(next.presets[next.presets.length - 1]?.name ?? null);
+  };
 
   return (
     <Form form={form} layout="vertical" className={`${styles.page} ${styles.settingsForm}`}>
@@ -349,7 +411,12 @@ export default function WidgetSettings() {
               {saveLabel.replace("…", "")}
             </Tag>
           </div>
-          <WidgetPreview config={config} status={status} />
+          <WidgetPreview config={config} status={freshness === "live" ? status : null} />
+          <Text type="secondary">{freshness === "stale" ? "系统采样已过期。" : ""}{layoutError ? `挂件空间状态读取失败：${layoutError}。` : !layoutReport ? "正在读取任务栏可用空间…" : !layoutReport.visible ? "任务栏空间不足，挂件当前不可见。" : layoutReport.hiddenKinds.length ? `当前显示：${layoutReport.visibleKinds.map((kind) => METRIC_LABELS[kind]).join("、")}；空间不足已收起：${layoutReport.hiddenKinds.map((kind) => METRIC_LABELS[kind]).join("、")}。可将重要指标上移。` : `当前全部显示${layoutReport.compact ? "（紧凑布局）" : ""}。`}</Text>
+          {layoutError && <Button size="small" onClick={() => {
+            setLayoutError(null);
+            void requestLayoutRef.current?.().catch((error) => setLayoutError(errorMessage(error)));
+          }}>重试读取空间状态</Button>}
           <Table
             className={styles.table}
             rowKey="kind"
@@ -360,7 +427,7 @@ export default function WidgetSettings() {
             scroll={{ x: 560 }}
             locale={{ emptyText: <Text type="secondary">暂无可配置指标</Text> }}
           />
-          {status.battery === null && <Tag color="default">当前设备未检测到电池</Tag>}
+          {freshness === "live" && status?.battery === null && <Tag color="default">当前设备未检测到电池</Tag>}
           <Row gutter={[screens.lg ? 12 : 8, 8]}>
             <Col xs={24} md={12}>
               <div className={styles.widgetOptionCard}>
@@ -399,6 +466,30 @@ export default function WidgetSettings() {
               </div>
             </Col>
           </Row>
+          <div className={styles.widgetOptionCard}>
+            <div className={styles.settingCopy}>
+              <Text strong>本地指标提醒</Text>
+              <span className={styles.description}>主窗口收到连续 3 次越界采样后提醒；同一指标至少间隔 10 分钟。留空为关闭。</span>
+            </div>
+            <Row gutter={[8, 8]}>
+              <Col><InputNumber aria-label="CPU 超过百分比提醒" min={1} max={100} value={config.alerts.cpu_percent} placeholder="CPU %" onChange={(value) => scheduleSave({ ...config, alerts: { ...config.alerts, cpu_percent: value } })} /></Col>
+              <Col><InputNumber aria-label="内存超过百分比提醒" min={1} max={100} value={config.alerts.memory_percent} placeholder="内存 %" onChange={(value) => scheduleSave({ ...config, alerts: { ...config.alerts, memory_percent: value } })} /></Col>
+              <Col><InputNumber aria-label="电池低于百分比提醒" min={1} max={100} value={config.alerts.battery_below_percent} placeholder="电池 %" onChange={(value) => scheduleSave({ ...config, alerts: { ...config.alerts, battery_below_percent: value } })} /></Col>
+            </Row>
+          </div>
+          <div className={styles.widgetOptionCard}>
+            <div className={styles.settingCopy}>
+              <Text strong>挂件布局预设</Text>
+              <span className={styles.description}>保存当前指标顺序、样式、采样间隔与网速单位，最多 8 组。</span>
+            </div>
+            <Row gutter={[8, 8]} align="middle">
+              <Col><Input aria-label="新预设名称" value={presetName} maxLength={24} placeholder="预设名称…" onChange={(event) => setPresetName(event.target.value)} /></Col>
+              <Col><Button disabled={!presetName.trim() || (config.presets.length >= 8 && !config.presets.some((preset) => preset.name === presetName.trim()))} onClick={savePreset}>{config.presets.some((preset) => preset.name === presetName.trim()) ? "更新预设" : "保存当前布局"}</Button></Col>
+              <Col><Select aria-label="选择布局预设" style={{ minWidth: 140 }} placeholder="选择预设" value={selectedPreset} onChange={setSelectedPreset} options={config.presets.map((preset) => ({ value: preset.name, label: preset.name }))} /></Col>
+              <Col><Button disabled={!currentPreset} onClick={() => { const next = selectedPreset && applyWidgetPreset(config, selectedPreset); if (next) scheduleSave(next); }}>应用预设</Button></Col>
+              <Col><Popconfirm title="删除这个布局预设？" onConfirm={() => { if (!selectedPreset) return; scheduleSave(deleteWidgetPreset(config, selectedPreset)); setSelectedPreset(null); }}><Button danger disabled={!currentPreset}>删除预设</Button></Popconfirm></Col>
+            </Row>
+          </div>
           {saveError && (
             <Alert
               type="error"

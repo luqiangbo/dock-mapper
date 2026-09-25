@@ -24,6 +24,7 @@ import type {
 } from "../types";
 import styles from "./components.module.scss";
 import { useQueuedAutosave } from "../hooks/useQueuedAutosave";
+import { takeDetachedAutosaveError, waitForPendingAutosave } from "../hooks/queuedAutosave";
 
 const { Text, Title } = Typography;
 
@@ -98,6 +99,7 @@ export default function KeyVisualizerSettings() {
     invalidate: invalidateSave,
     isCurrent: isSaveCurrent,
   } = useQueuedAutosave({
+    key: "key-visualizer-settings",
     delayMs: 450,
     save: async (next: KeyVisualizerConfig) => {
       ownSaveInFlight.current = true;
@@ -124,6 +126,10 @@ export default function KeyVisualizerSettings() {
     onError: (reason, { latest }) => {
       if (latest) setError(errorMessage(reason));
     },
+    onDetachedError: (reason) => notification.error({
+      message: "按键展示设置未保存",
+      description: errorMessage(reason),
+    }),
   });
 
   const load = useCallback(async () => {
@@ -131,11 +137,14 @@ export default function KeyVisualizerSettings() {
     setLoading(true);
     setError(null);
     try {
+      await waitForPendingAutosave("key-visualizer-settings");
       const [config, nextStatus] = await Promise.all([
         keyVisualizerApi.config(),
         keyVisualizerApi.status(),
       ]);
       if (!isSaveCurrent(revision)) return;
+      const pendingError = takeDetachedAutosaveError("key-visualizer-settings");
+      if (pendingError) setError(errorMessage(pendingError));
       setSaved(config);
       form.setFieldsValue(config);
       setStatus(nextStatus);

@@ -8,7 +8,7 @@ export interface DashboardSample {
   upload: number | null;
   download: number | null;
   cpu: number | null;
-  memory: number;
+  memory: number | null;
 }
 
 export function appendDashboardSample(

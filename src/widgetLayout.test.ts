@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateWidgetResponsiveLayout } from "./widgetLayout";
+import { calculateWidgetResponsiveLayout, describeWidgetLayout } from "./widgetLayout";
 
 describe("taskbar widget responsive layout", () => {
   const normal = [112, 48, 32, 48];
@@ -39,5 +39,11 @@ describe("taskbar widget responsive layout", () => {
       hiddenCount: 3,
       showOverflow: false,
     });
+  });
+
+  it("reports exactly which configured indicators are hidden by taskbar space", () => {
+    expect(describeWidgetLayout(["network", "cpu", "memory"], {
+      compact: true, visibleCount: 1, hiddenCount: 2, showOverflow: true,
+    }, true)).toEqual({ visibleKinds: ["network"], hiddenKinds: ["cpu", "memory"], compact: true, visible: true });
   });
 });
