@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 
 const args = process.argv.slice(2);
@@ -55,29 +54,9 @@ const nextCargo = cargoText.replace(cargoVersionPattern, (_match, prefix, _curre
   `${prefix}${version}${suffix}`,
 );
 
-function refreshCargoLock() {
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      "cargo",
-      ["update", "--manifest-path", cargoPath, "--package", "dock-mapper"],
-      {
-        cwd: process.cwd(),
-        stdio: ["ignore", "ignore", "inherit"],
-        windowsHide: true,
-      },
-    );
-
-    child.on("error", reject);
-    child.on("exit", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`cargo update 失败，退出码：${code}`));
-    });
-  });
-}
-
 try {
   await writeFile(cargoPath, nextCargo);
-  await refreshCargoLock();
+  await writeFile(lockPath, lockText.replace(lockVersionPattern, (_match, prefix, _current, suffix) => `${prefix}${version}${suffix}`));
 
   const refreshedLock = await readFile(lockPath, "utf8");
   const refreshedLockMatch = refreshedLock.match(lockVersionPattern);

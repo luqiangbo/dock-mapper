@@ -70,7 +70,10 @@ export default function GeneralSettings() {
       .finally(() => setMinimizeLoading(false));
     void getVersion()
       .then(setVersion)
-      .catch(() => setVersion("未知"));
+      .catch((error) => {
+        setVersion("未知");
+        notification.error({ message: "读取版本失败", description: errorMessage(error) });
+      });
     form.setFieldValue("accentColor", accentColor);
   }, [accentColor, form, notification]);
 
@@ -221,8 +224,17 @@ export default function GeneralSettings() {
               <div className={styles.settingsGroup}>
                 <div className={styles.settingRow}>
                   <div className={styles.settingCopy}>
-                    <Text strong>DockMapper {version}</Text>
+                    <Text strong>DockMapper {__DOCKMAPPER_BUILD__.releaseVersion ? `v${version}` : `开发版 · ${version}`}</Text>
                     <span className={styles.description}>Windows 11 桌面工具</span>
+                    {__DOCKMAPPER_BUILD__.commit ? (
+                      <Button type="link" size="small" onClick={() => {
+                        void openUrl(`${REPOSITORY_URL}/commit/${__DOCKMAPPER_BUILD__.commit}`).catch((error) =>
+                          notification.error({ message: "打开提交失败", description: errorMessage(error) }),
+                        );
+                      }}>
+                        提交 {__DOCKMAPPER_BUILD__.commit.slice(0, 7)}
+                      </Button>
+                    ) : <span className={styles.description}>提交未知</span>}
                   </div>
                   <Button onClick={() => void openUrl(REPOSITORY_URL)}>GitHub</Button>
                 </div>

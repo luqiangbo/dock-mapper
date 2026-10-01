@@ -1,4 +1,5 @@
 declare module "*.scss";
+declare const __DOCKMAPPER_BUILD__: Readonly<{ releaseVersion: string; commit: string }>;
 declare module "*.css";
 
 declare module "*.png" {

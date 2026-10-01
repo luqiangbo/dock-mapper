@@ -64,10 +64,10 @@ OCR 模型初始化和性能测试默认忽略，避免日常验证加载模型�
 
 ## 发布
 
-三处版本由统一命令同步：
+main 提交经检查后自动生成日期版本，例如 v2026.1002.1，只发布最新候选。
+版本与提交号绑定，失败重跑复用草稿；本地构建显示开发状态，CI 仅同步构建
+工作区的 Cargo 主包与锁文件版本，不提交版本修改、不升级依赖。
 
-```powershell
-pnpm version:sync 1.1.0
-```
-
-GitHub Actions 负责校验、构建 Draft Release、验证签名、正式发布及 Winget 更新。完整步骤见 [发布与 Winget 指南](winget-publish-guide.md)，桌面人工验证见 [桌面冒烟测试清单](desktop-smoke-test.md)。
+GitHub Actions 负责 PR 检查、构建 Draft Release、校验产物、正式发布及独立 Winget 更新。
+分支保护需在 GitHub 配置。完整步骤见 [发布与 Winget 指南](winget-publish-guide.md)，
+桌面人工验证见 [桌面冒烟测试清单](desktop-smoke-test.md)。

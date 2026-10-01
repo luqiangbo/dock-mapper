@@ -39,33 +39,46 @@ $publicKey = (Get-Content -Raw "$env:USERPROFILE\.tauri\dockmapper.key.pub").Tri
 在仓库 `Settings → General → Releases` 启用 immutable releases。该设置会在 Draft
 正式发布后锁定 tag 与 Release assets。
 
-## 发布新版本
+## 自动发布与版本
 
-`src-tauri/Cargo.toml` 是唯一版本来源。输入一次新版本，脚本会同步 Cargo 主包并
-刷新 `Cargo.lock`：
+每次 main 提交自动检查，只发布最新候选，无需修改版本、提交 bump 或推送 tag。
+版本统一为 v2026.1002.1（年.月日.当日修订号）；日期取目标提交的 committer 时间，
+按 Asia/Shanghai 换算。同日编号从 1 开始，失败和过期草稿允许留下空缺。
+版本和短提交号显示在“更新与关于”，提交号可打开对应 GitHub 提交。
 
-```powershell
-$version = Read-Host "Version (x.y.z)"
-pnpm version:sync $version
-git add src-tauri/Cargo.toml src-tauri/Cargo.lock
-git commit -m "chore: bump version to $version"
-git tag "v$version"
-git push origin main
-git push origin "v$version"
-```
+CI 串行分配编号，tag 指向完整源码 SHA，草稿说明保存提交绑定。失败重跑复用
+该提交的草稿及编号；创建 tag 后意外中断，也能恢复未绑定草稿的 tag。
+正式发布后的重跑跳过构建，不覆盖安装包。版本只写入 CI 工作区的 Cargo 主包
+和锁文件中本项目条目，不运行 cargo update，不升级依赖，也不提交回 main。
+本地构建显示“开发版”，仓库 Cargo 版本不是下一次发布的版本。
 
-CI 按顺序执行：
+流程：PR 检查 → main 检查 → 最新提交校验 → 分配/恢复草稿 → 构建前再次校验
+→ NSIS 与 Updater 签名 → 安装包、更新清单、SHA-256 和源码绑定校验
+→ 发布前再次校验 → 正式 Release → 独立 Winget 提交。
+更新清单必须指向该版本安装包；build-info.json 保存版本、完整提交号及产物摘要。
+Windows Authenticode 证书可选，配置时必须通过验证；Updater 签名私钥必需。
+安装包构建仅在 GitHub 发布任务执行，本地不运行全量构建。
 
-1. `validate`：校验 tag、Cargo 主包与锁文件版本一致，执行前端和 Rust 质量检查。
-2. `publish-release`：下载并校验固定 SHA-256 的微软 VC++ x64 运行库，将其打包进
-   NSIS；安装时仅在系统运行库低于 `14.51.36247` 时升级；创建 Draft、构建
-   安装器、校验 Updater 签名与可选 Authenticode 签名，然后正式发布。
-3. `submit-winget`：使用已冻结安装器的 URL 生成清单，注入
-   `Microsoft.VCRedist.2015+.x64` 依赖后提交；该 job 可单独重跑，不会重新构建或
-   覆盖安装器。
+连续提交会淘汰尚未发布的旧候选，GitHub concurrency 只保留一个等待任务，
+不承诺中间提交均发布。发布开始后不取消正在执行的任务。旧候选留下草稿，
+不会替换正式更新入口。提交日期若导致版本低于已有正式版，流程明确失败。
 
-失败时修复问题并发布一个新的补丁版本，例如 `v1.0.7`。不要删除或复用
-`v1.0.6`。
+## 合并保护和失败处理
+
+在 Settings → Rules → Rulesets 为 main 创建规则，要求 Pull Request，禁止强推，
+添加本仓库 Checks 工作流的 **Quality gate** 为必需检查；先运行一次 PR 检查，
+再从 GitHub 展示的检查名称中选择。要求分支在合并前保持最新，避免测试旧基线。
+保护规则是 GitHub 设置，提交 YAML 不会自动启用；本轮不启用 merge queue。
+
+临时网络故障：Actions → 对应运行 → Re-run failed jobs。它仍使用原提交 SHA。
+代码错误：修复 PR 或 revert PR 合并到 main，自动生成新的候选。
+发布前失败：上一正式版继续可下载和更新，不自动回退 main。
+发布后错误：发布更高版本的修复或回退内容，不删除、移动或覆盖旧版本。
+Winget 失败：只重跑 Submit Winget update，不重新构建应用。
+Release 支持 workflow_dispatch 手动补跑当前 main；旧提交使用原运行的重跑。
+
+当前 npm / Rust Tauri 版本不匹配属于单独的启动/发布前置问题，需另外修复；
+自动版本流程不会升级依赖。首次正式发布必须验证签名与旧版升级。
 
 ## Winget 审核
 

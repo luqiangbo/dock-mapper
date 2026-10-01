@@ -1,0 +1,38 @@
+name: Checks
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality gate
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/setup@v1
+        with:
+          runtime: node@22
+          cache: true
+          install: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: windows-x86_64
+      - run: pnpm install --frozen-lockfile
+      - name: Frontend types and behavior
+        shell: pwsh
+        run: |
+          pnpm typecheck
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test .github/scripts/release-version.test.mjs .github/scripts/release-api.test.mjs
+      - name: Rust core behavior
+        working-directory: src-tauri
+        run: cargo test -- --skip model

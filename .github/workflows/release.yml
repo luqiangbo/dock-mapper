@@ -2,98 +2,62 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
-
-concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   validate:
-    name: Validate
-    runs-on: windows-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: pnpm/setup@v1
-        with:
-          runtime: node@22
-          cache: true
-          install: false
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-          targets: x86_64-pc-windows-msvc
-
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-          key: windows-x86_64
-
-      - name: Validate tag and source versions
-        id: version
-        shell: pwsh
-        run: |
-          $version = "${{ github.ref_name }}".TrimStart("v")
-          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
-            throw "Invalid release tag: ${{ github.ref_name }}"
-          }
-          node .github/scripts/sync-version.mjs --check $version
-          "version=$version" >> $env:GITHUB_OUTPUT
-
-      - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Frontend quality checks
-        shell: pwsh
-        run: |
-          pnpm typecheck
-          pnpm lint
-          pnpm test
-          pnpm build
-
-      - name: Rust quality checks
-        working-directory: src-tauri
-        shell: pwsh
-        run: |
-          cargo fmt --all -- --check
-          cargo clippy --all-targets -- -D warnings
-          cargo test
+    name: Required checks
+    uses: ./.github/workflows/checks.yml
 
   publish-release:
     name: Build, verify and publish immutable release
     needs: validate
     runs-on: windows-latest
+    concurrency:
+      group: dockmapper-release
+      cancel-in-progress: false
     permissions:
       contents: write
+    outputs:
+      version: ${{ steps.prepare.outputs.version }}
+      tag: ${{ steps.prepare.outputs.tag }}
+      published: ${{ steps.publish.outputs.published || steps.prepare.outputs.published }}
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v6
-
+        with:
+          ref: ${{ github.sha }}
       - uses: pnpm/setup@v1
         with:
           runtime: node@22
           cache: true
           install: false
-
+      - name: Allocate or resume release
+        id: prepare
+        run: node .github/scripts/release.mjs prepare
+      - name: Synchronize build version
+        if: steps.prepare.outputs.build == 'true'
+        env:
+          VERSION: ${{ steps.prepare.outputs.version }}
+        run: node .github/scripts/sync-version.mjs "$env:VERSION"
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.prepare.outputs.build == 'true'
         with:
           targets: x86_64-pc-windows-msvc
-
       - uses: swatinem/rust-cache@v2
+        if: steps.prepare.outputs.build == 'true'
         with:
           workspaces: src-tauri
           key: windows-x86_64
-
       - run: pnpm install --frozen-lockfile
-
+        if: steps.prepare.outputs.build == 'true'
       - name: Import Windows signing certificate
+        if: steps.prepare.outputs.build == 'true'
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
@@ -106,74 +70,81 @@ jobs:
           New-Item -ItemType Directory -Path certificate -Force | Out-Null
           Set-Content -Path certificate/certificate.txt -Value $env:WINDOWS_CERTIFICATE
           certutil -decode certificate/certificate.txt certificate/certificate.pfx
+          if ($LASTEXITCODE -ne 0) { throw "Certificate decode failed" }
           Remove-Item -Path certificate/certificate.txt
           Import-PfxCertificate `
             -FilePath certificate/certificate.pfx `
             -CertStoreLocation Cert:\CurrentUser\My `
             -Password (ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force)
 
+
+      - name: Check latest main before build
+        id: latest
+        if: steps.prepare.outputs.build == 'true'
+        run: node .github/scripts/release.mjs check
+      - name: Check updater signing configuration
+        if: steps.latest.outputs.build == 'true'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw "TAURI_SIGNING_PRIVATE_KEY is required for releases" }
       - name: Build and upload draft release
-        id: tauri
+        if: steps.latest.outputs.build == 'true'
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          DOCKMAPPER_RELEASE_VERSION: ${{ steps.prepare.outputs.version }}
+          DOCKMAPPER_COMMIT: ${{ github.sha }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: DockMapper ${{ github.ref_name }}
+          releaseId: ${{ steps.prepare.outputs.release_id }}
+          tagName: ${{ steps.prepare.outputs.tag }}
           releaseDraft: true
           prerelease: false
           args: --bundles nsis
           uploadUpdaterJson: true
           updaterJsonPreferNsis: true
-          releaseBody: |
-            ## 安装
+          uploadUpdaterSignatures: true
 
-            ```powershell
-            winget install luqiangbo.DockMapper
-            ```
-
-            也可下载 `DockMapper_${{ needs.validate.outputs.version }}_x64-setup.exe`。
-
-            [查看本版本提交](https://github.com/luqiangbo/dock-mapper/commits/${{ github.ref_name }})
-
-      - name: Verify release assets
+      - name: Verify assets and attach build provenance
+        if: steps.latest.outputs.build == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          TAG_NAME: ${{ github.ref_name }}
+          TAG_NAME: ${{ steps.prepare.outputs.tag }}
+          VERSION: ${{ steps.prepare.outputs.version }}
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path release-assets -Force | Out-Null
-          gh release download $env:TAG_NAME --dir release-assets
-
-          $installer = Get-ChildItem release-assets -Filter "*_x64-setup.exe" | Select-Object -First 1
-          if (-not $installer) { throw "NSIS installer is missing" }
-
+          gh release download $env:TAG_NAME --dir release-assets --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Asset download failed" }
+          $installerName = "DockMapper_$($env:VERSION)_x64-setup.exe"
+          $installer = Get-Item (Join-Path release-assets $installerName)
+          if ($installer.Length -eq 0) { throw "Installer is empty" }
+          $binary = Get-Item src-tauri/target/release/dock-mapper.exe
+          $resource = $binary.VersionInfo
+          $binaryVersion = "$($resource.FileMajorPart).$($resource.FileMinorPart).$($resource.FileBuildPart)"
+          if ($binaryVersion -ne $env:VERSION) { throw "Built executable version mismatch: $binaryVersion" }
           $updater = Get-Content release-assets/latest.json -Raw | ConvertFrom-Json
-          $platforms = $updater.platforms.PSObject.Properties
-          if (-not $platforms -or $platforms.Count -eq 0) { throw "latest.json has no platforms" }
-          foreach ($platform in $platforms) {
-            if (-not $platform.Value.signature) {
-              throw "Updater signature is missing for $($platform.Name)"
-            }
-          }
-
+          if ($updater.version.TrimStart('v') -ne $env:VERSION) { throw "Updater version mismatch" }
           $signature = Get-AuthenticodeSignature $installer.FullName
-          if ($env:WINDOWS_CERTIFICATE -and $signature.Status -ne "Valid") {
-            throw "Authenticode signature is invalid: $($signature.Status)"
+          if ($env:WINDOWS_CERTIFICATE -and $signature.Status -ne 'Valid') { throw "Invalid Authenticode signature" }
+          $checksums = @{}
+          foreach ($name in @($installerName, 'latest.json')) {
+            $checksums[$name] = (Get-FileHash (Join-Path release-assets $name) -Algorithm SHA256).Hash.ToLowerInvariant()
           }
-          Write-Host "Installer SHA-256: $((Get-FileHash $installer.FullName -Algorithm SHA256).Hash)"
-
-      - name: Publish verified release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release edit "${{ github.ref_name }}" --draft=false
+          @{version=$env:VERSION; sha=$env:GITHUB_SHA; sha256=$checksums} | ConvertTo-Json -Depth 3 | Set-Content release-assets/build-info.json -Encoding utf8NoBOM
+          gh release upload $env:TAG_NAME release-assets/build-info.json --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Provenance upload failed" }
+      - name: Publish latest verified candidate
+        id: publish
+        if: steps.latest.outputs.build == 'true'
+        run: node .github/scripts/release.mjs publish
 
   submit-winget:
     name: Submit Winget update
-    needs: [validate, publish-release]
+    needs: publish-release
+    if: needs.publish-release.outputs.published == 'true'
     runs-on: windows-latest
     permissions:
       contents: read
@@ -181,8 +152,8 @@ jobs:
       - name: Submit manifest
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ github.ref_name }}
-          VERSION: ${{ needs.validate.outputs.version }}
+          TAG_NAME: ${{ needs.publish-release.outputs.tag }}
+          VERSION: ${{ needs.publish-release.outputs.version }}
           WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_TOKEN }}
         shell: pwsh
         run: |
