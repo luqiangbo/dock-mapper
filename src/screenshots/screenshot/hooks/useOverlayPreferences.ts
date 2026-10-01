@@ -1,5 +1,7 @@
+import { listen } from "@tauri-apps/api/event";
+import { defaultScreenshotTools, normalizeScreenshotTools } from "../../../utils/screenshotTools";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { paletteApi } from "../../../api/commands";
+import { MAIN_EVENTS, paletteApi } from "../../../api/commands";
 import type {
   AnnotationOutlineConfig,
   ColorPaletteConfig,
@@ -21,9 +23,13 @@ export function useOverlayPreferences({ onError }: OverlayPreferencesOptions) {
   const paletteTail = useRef<Promise<void>>(Promise.resolve());
   const palettePending = useRef(0);
   const configRef = useRef<ScreenshotConfig | null>(null);
+  const toolbarRevision = useRef(0);
   const configTail = useRef<Promise<void>>(Promise.resolve());
   const configRevision = useRef(0);
   const configPending = useRef(0);
+  const styleRevision = useRef(0);
+  const [styleSaveFailed, setStyleSaveFailed] = useState(false);
+  const [styleSaveAttempted, setStyleSaveAttempted] = useState(false);
   const [palette, setPalette] = useState<ColorPaletteConfig>({ recent: [], favorites: [] });
   const [paletteBusy, setPaletteBusy] = useState(false);
   const [pickerFormat, setPickerFormat] = useState<ScreenshotConfig["color_copy_format"]>("hex");
@@ -37,6 +43,7 @@ export function useOverlayPreferences({ onError }: OverlayPreferencesOptions) {
     cloneAnnotationStyles(DEFAULT_ANNOTATION_STYLES),
   );
   const [captureSizeUnit, setCaptureSizeUnit] = useState<CaptureSizeUnit>("px");
+  const [toolbarTools, setToolbarTools] = useState(defaultScreenshotTools);
   const [configSaving, setConfigSaving] = useState(false);
 
   useEffect(() => {
@@ -103,6 +110,7 @@ export function useOverlayPreferences({ onError }: OverlayPreferencesOptions) {
           setAnnotationOutline(next.annotation_outline);
           setAnnotationStyles(cloneAnnotationStyles(next.annotation_styles));
           setCaptureSizeUnit(next.capture_size_unit);
+          setToolbarTools(normalizeScreenshotTools(next.toolbar_tools));
         }
       });
       configTail.current = mutation.then(
@@ -128,6 +136,9 @@ export function useOverlayPreferences({ onError }: OverlayPreferencesOptions) {
   const updateAnnotationStyles = useCallback(
     async (styles: ScreenshotAnnotationStyles, failureMessage: string): Promise<boolean> => {
       const revision = ++configRevision.current;
+      const currentStyleRevision = ++styleRevision.current;
+      setStyleSaveAttempted(true);
+      setStyleSaveFailed(false);
       configPending.current += 1;
       setConfigSaving(true);
       // Style changes remain usable in the current capture even if the atomic
@@ -142,6 +153,7 @@ export function useOverlayPreferences({ onError }: OverlayPreferencesOptions) {
         if (mounted.current && revision === configRevision.current) {
           setAnnotationStyles(cloneAnnotationStyles(next));
         }
+        if (mounted.current && currentStyleRevision === styleRevision.current) setStyleSaveFailed(false);
       });
       configTail.current = mutation.then(
         () => undefined,
@@ -151,7 +163,8 @@ export function useOverlayPreferences({ onError }: OverlayPreferencesOptions) {
         await mutation;
         return true;
       } catch (cause) {
-        if (mounted.current) {
+        if (mounted.current && currentStyleRevision === styleRevision.current) {
+          setStyleSaveFailed(true);
           onError(`${failureMessage}：${cause instanceof Error ? cause.message : String(cause)}`);
         }
         return false;
@@ -233,16 +246,25 @@ export function useOverlayPreferences({ onError }: OverlayPreferencesOptions) {
 
   useEffect(() => {
     const revision = configRevision.current;
+    const toolbarReadRevision = toolbarRevision.current;
     void window.api
       .getScreenshotConfig()
       .then((config) => {
         if (!mounted.current || revision !== configRevision.current) return;
-        configRef.current = config;
+        configRef.current =
+          toolbarReadRevision === toolbarRevision.current
+            ? config
+            : {
+                ...config,
+                toolbar_tools: configRef.current?.toolbar_tools ?? config.toolbar_tools,
+              };
         setPickerFormat(config.color_copy_format);
         setAnnotationColor(config.annotation_color);
         setAnnotationOutline(config.annotation_outline);
         setAnnotationStyles(cloneAnnotationStyles(config.annotation_styles));
         setCaptureSizeUnit(config.capture_size_unit);
+        if (toolbarReadRevision === toolbarRevision.current)
+          setToolbarTools(normalizeScreenshotTools(config.toolbar_tools));
       })
       .catch((cause) => {
         if (mounted.current) {
@@ -252,7 +274,42 @@ export function useOverlayPreferences({ onError }: OverlayPreferencesOptions) {
     void reloadPalette();
   }, [onError, reloadPalette]);
 
+  useEffect(() => {
+    let disposed = false;
+    let off: (() => void) | undefined;
+    let request = 0;
+    const receive = (config: ScreenshotConfig) => {
+      if (disposed) return;
+      toolbarRevision.current += 1;
+      configRef.current = { ...(configRef.current ?? config), toolbar_tools: config.toolbar_tools };
+      setToolbarTools(normalizeScreenshotTools(config.toolbar_tools));
+    };
+    void listen<ScreenshotConfig>(MAIN_EVENTS.screenshotConfigChanged, ({ payload }) => {
+      request += 1;
+      receive(payload);
+    })
+      .then(async (unlisten) => {
+        if (disposed) {
+          unlisten();
+          return;
+        }
+        off = unlisten;
+        const observed = request;
+        const config = await window.api.getScreenshotConfig();
+        if (observed === request) receive(config);
+      })
+      .catch((cause) => {
+        if (!disposed) onError("常用工具配置读取或监听失败：" + String(cause));
+      });
+    return () => {
+      disposed = true;
+      off?.();
+    };
+  }, [onError]);
+
   return {
+    styleSaveFailed,
+    styleSaveAttempted,
     palette,
     paletteBusy,
     pickerFormat,
@@ -260,6 +317,7 @@ export function useOverlayPreferences({ onError }: OverlayPreferencesOptions) {
     annotationOutline,
     annotationStyles,
     captureSizeUnit,
+    toolbarTools,
     configSaving,
     reloadPalette,
     mutatePalette,

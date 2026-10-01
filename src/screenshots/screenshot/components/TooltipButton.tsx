@@ -8,6 +8,7 @@ interface TooltipButtonProps {
   danger?: boolean;
   success?: boolean;
   loading?: boolean;
+  text?: string;
   onClick?: () => void;
   children: ReactNode;
 }
@@ -19,6 +20,7 @@ function TooltipButton({
   danger,
   success,
   loading,
+  text,
   onClick,
   children,
 }: TooltipButtonProps): React.JSX.Element {
@@ -29,12 +31,15 @@ function TooltipButton({
         size="small"
         danger={danger}
         loading={loading}
-        className={`tb-btn${active ? " is-active" : ""}${success ? " is-confirm" : ""}`}
+        className={`tb-btn${text ? " tb-btn--label" : ""}${active ? " is-active" : ""}${success ? " is-confirm" : ""}`}
         aria-label={label}
+        aria-pressed={active === undefined ? undefined : active}
         disabled={disabled}
         onClick={onClick}
         icon={children}
-      />
+      >
+        {text}
+      </Button>
     </Tooltip>
   );
 }

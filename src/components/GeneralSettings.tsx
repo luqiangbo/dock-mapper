@@ -9,7 +9,6 @@ import {
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
 import {
-  Alert,
   App as AntApp,
   Button,
   Card,
@@ -19,11 +18,13 @@ import {
   Grid,
   Row,
   Spin,
+  Space,
   Switch,
   Typography,
 } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { useTheme } from "../ThemeContext";
+import { DEFAULT_ACCENT_COLOR } from "../themePalette";
 import styles from "./components.module.scss";
 import { errorMessage, generalSettingsApi } from "../api/commands";
 
@@ -32,7 +33,11 @@ const REPOSITORY_URL = "https://github.com/luqiangbo/dock-mapper";
 
 export default function GeneralSettings() {
   const screens = Grid.useBreakpoint();
-  const [form] = Form.useForm<{ autoStart: boolean; minimizeToTray: boolean; accentColor: string }>();
+  const [form] = Form.useForm<{
+    autoStart: boolean;
+    minimizeToTray: boolean;
+    accentColor: string;
+  }>();
   const [autoStart, setAutoStart] = useState(false);
   const [autoStartLoading, setAutoStartLoading] = useState(true);
   const [minimizeToTray, setMinimizeToTray] = useState(true);
@@ -45,14 +50,20 @@ export default function GeneralSettings() {
 
   useEffect(() => {
     void isAutostartEnabled()
-      .then((value) => { setAutoStart(value); form.setFieldValue("autoStart", value); })
+      .then((value) => {
+        setAutoStart(value);
+        form.setFieldValue("autoStart", value);
+      })
       .catch((error) =>
         notification.error({ message: "读取开机启动状态失败", description: errorMessage(error) }),
       )
       .finally(() => setAutoStartLoading(false));
     void generalSettingsApi
       .minimizeToTray()
-      .then((value) => { setMinimizeToTray(value); form.setFieldValue("minimizeToTray", value); })
+      .then((value) => {
+        setMinimizeToTray(value);
+        form.setFieldValue("minimizeToTray", value);
+      })
       .catch((error) =>
         notification.error({ message: "读取托盘设置失败", description: errorMessage(error) }),
       )
@@ -184,15 +195,22 @@ export default function GeneralSettings() {
                 <div className={styles.settingRow}>
                   <div className={styles.settingCopy}>
                     <Text strong>主题色</Text>
-                    <span className={styles.description}>自定义按钮、选中状态和交互反馈的强调色</span>
+                    <span className={styles.description}>
+                      自定义按钮、选中状态和交互反馈的强调色
+                    </span>
                   </div>
-                  <Form.Item noStyle name="accentColor">
-                    <ColorPicker
-                      value={accentColor}
-                      showText
-                      onChangeComplete={(color) => setAccentColor(color.toHexString())}
-                    />
-                  </Form.Item>
+                  <Space wrap size={8}>
+                    <Form.Item noStyle name="accentColor">
+                      <ColorPicker
+                        value={accentColor}
+                        showText
+                        onChangeComplete={(color) => setAccentColor(color.toHexString())}
+                      />
+                    </Form.Item>
+                    <Button disabled={accentColor.toLowerCase() === DEFAULT_ACCENT_COLOR} onClick={() => setAccentColor(DEFAULT_ACCENT_COLOR)}>
+                      恢复默认
+                    </Button>
+                  </Space>
                 </div>
               </div>
             </Card>
@@ -204,14 +222,14 @@ export default function GeneralSettings() {
                 <div className={styles.settingRow}>
                   <div className={styles.settingCopy}>
                     <Text strong>DockMapper {version}</Text>
-                    <span className={styles.description}>Tauri 2 + React · Windows 11 x64</span>
+                    <span className={styles.description}>Windows 11 桌面工具</span>
                   </div>
                   <Button onClick={() => void openUrl(REPOSITORY_URL)}>GitHub</Button>
                 </div>
                 <div className={styles.settingRow}>
                   <div className={styles.settingCopy}>
                     <Text strong>软件更新</Text>
-                    <span className={styles.description}>从签名的 GitHub Release 检查更新</span>
+                    <span className={styles.description}>检查新版本并安装更新</span>
                   </div>
                   <Button
                     icon={<ReloadOutlined />}
@@ -225,14 +243,6 @@ export default function GeneralSettings() {
             </Card>
           </Col>
 
-          <Col xs={24}>
-            <Alert
-              type="info"
-              showIcon
-              message="管理员权限说明"
-              description="应用或恢复系统按键映射时会按需请求 Windows UAC；主应用始终保持普通用户权限。"
-            />
-          </Col>
         </Row>
       </Form>
     </div>

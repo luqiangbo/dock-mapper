@@ -9,17 +9,16 @@ $compact-radius: 10px;
   min-width: 0;
   margin: 0;
   flex-direction: column;
-  gap: clamp(8px, 1vw, 12px);
+  gap: 16px;
 }
 
 .overviewPanel {
   padding: 16px;
-  @include glass.surface(var(--glass-surface), 16px);
+  @include glass.surface(var(--glass-surface), 10px);
 }
 
 .dashboardHero {
   display: flex;
-  align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
   padding: 4px 2px;
@@ -27,6 +26,8 @@ $compact-radius: 10px;
   h3 {
     margin: 2px 0 0;
   }
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .liveBadge {
@@ -110,8 +111,8 @@ $compact-radius: 10px;
 .glassCard,
 .surfaceCard {
   overflow: hidden;
-  @include glass.surface(var(--glass-surface), 14px);
-  border-radius: 14px !important;
+  @include glass.surface(var(--glass-surface), 10px);
+  border-radius: 10px !important;
   background: var(--glass-surface) !important;
 
   :global(.ant-card-body) {
@@ -130,16 +131,18 @@ $compact-radius: 10px;
   display: grid;
   place-items: center;
   border: 1px solid var(--glass-border);
-  color: var(--accent);
-  background: var(--accent-soft);
+  color: var(--text-secondary);
+  background: var(--surface-muted);
 }
 
 .metricIcon {
-  width: 44px;
-  height: 44px;
   flex: 0 0 44px;
-  border-radius: 12px;
-  font-size: 21px;
+  width: 32px;
+  height: 32px;
+  flex-basis: 32px;
+  border: 0;
+  border-radius: 6px;
+  font-size: 18px;
 }
 
 .metricValue {
@@ -147,6 +150,8 @@ $compact-radius: 10px;
   margin-top: 3px;
   font: 650 21px/1.2 var(--font-mono);
   font-variant-numeric: tabular-nums;
+  font-family: inherit;
+  font-weight: 600;
 }
 
 .sectionHeader,
@@ -225,10 +230,10 @@ $compact-radius: 10px;
   align-items: center;
   gap: 6px;
   padding: 7px 4px;
-  border: 1px solid rgb(255 255 255 / 10%);
+  border: 1px solid var(--glass-border);
   border-radius: 10px;
-  color: #fff;
-  background: #17191f;
+  color: var(--text-primary);
+  background: var(--surface-muted);
   font: 12px/1.1 var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
@@ -280,7 +285,7 @@ $compact-radius: 10px;
     width: 3px;
     height: 12px;
     border-radius: 2px;
-    background: rgb(255 255 255 / 18%);
+    background: var(--glass-border);
   }
 
   i[data-active="true"] {
@@ -292,18 +297,19 @@ $compact-radius: 10px;
   display: grid;
   min-width: 0;
   min-height: 66px;
-  grid-template-columns: minmax(0, 1fr) 140px;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  padding: 14px;
-  border: 1px solid var(--glass-border);
-  border-radius: 12px;
-  background: var(--glass-control);
 
   :global(.ant-select) {
     width: 140px;
     min-width: 140px;
   }
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  border-bottom: 1px solid var(--glass-border);
+  padding: 12px 0;
 }
 
 .adminNotice {
@@ -390,12 +396,14 @@ $compact-radius: 10px;
 }
 
 .settingRow {
-  min-height: 46px;
   padding: 6px 0;
 
   & + & {
     border-top: 1px solid var(--glass-border);
   }
+  min-height: 56px;
+  padding-block: 12px;
+  border-bottom: 1px solid var(--glass-border);
 }
 
 .settingCopy {
@@ -593,6 +601,8 @@ $compact-radius: 10px;
   h4 {
     margin: 0 0 2px;
   }
+  margin-bottom: 20px;
+  flex-wrap: wrap;
 }
 
 .visualizerHeaderActions {
@@ -625,14 +635,16 @@ $compact-radius: 10px;
   min-height: 52px;
   justify-content: space-between;
   gap: 14px;
-  padding: 8px 10px;
-  border: 1px solid var(--glass-border);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--glass-surface) 70%, transparent);
 
   > div:first-child {
     min-width: 0;
   }
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  border-bottom: 1px solid var(--glass-border);
+  padding: 12px 0;
+  align-items: flex-start;
 }
 
 .visualizerMetric {
@@ -641,14 +653,16 @@ $compact-radius: 10px;
   justify-content: space-between;
   gap: 10px;
   padding: 6px 8px 6px 10px;
-  border: 1px solid var(--glass-border);
-  border-radius: 10px;
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--glass-surface) 70%, transparent);
 
   :global(.ant-input-number) {
     width: 112px;
   }
+  flex-wrap: wrap;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding-inline: 0;
 }
 
 .visualizerFooter {
@@ -686,7 +700,7 @@ $compact-radius: 10px;
 
 .field {
   :global(.ant-select-selector) {
-    @include glass.control(8px);
+    @include glass.control(6px);
   }
 }
 
@@ -708,6 +722,21 @@ $compact-radius: 10px;
   display: flex;
   align-items: center;
   gap: 8px;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  justify-content: flex-end;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+  position: static;
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+  background: transparent;
+  backdrop-filter: none;
+  border-top: 1px solid var(--glass-border);
+  padding: 4px 8px;
 }
 
 .actionRow {
@@ -728,11 +757,13 @@ $compact-radius: 10px;
 }
 
 .historyHeader {
-  align-items: flex-start;
   flex-wrap: wrap;
   justify-content: space-between;
   padding: 12px 14px;
-  @include glass.surface(var(--glass-surface), 14px);
+  @include glass.surface(var(--glass-surface), 10px);
+  align-items: stretch;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .historyHeading {
@@ -744,12 +775,14 @@ $compact-radius: 10px;
 }
 
 .historyToolbar {
-  display: flex;
-  flex: 1 1 620px;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
   align-items: center;
-  justify-content: flex-end;
-  gap: 8px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--glass-border);
+  justify-content: flex-start;
 }
 
 .historyControl {
@@ -768,6 +801,7 @@ $compact-radius: 10px;
   min-width: 42px;
   text-align: right;
   white-space: nowrap;
+  margin-left: auto;
 }
 
 .historyMasonry {
@@ -778,9 +812,8 @@ $compact-radius: 10px;
   position: relative;
   min-width: 0;
   overflow: hidden;
-  border-radius: 14px;
   outline: none;
-  @include glass.surface(var(--glass-surface), 14px);
+  @include glass.surface(var(--glass-surface), 10px);
 
   &:focus-visible {
     box-shadow: inset 0 0 0 2px var(--accent);
@@ -795,16 +828,18 @@ $compact-radius: 10px;
 
   &:hover .historyMeta,
   &:focus-within .historyMeta {
-    opacity: 0.68;
+    opacity: 1;
     transform: translateY(0);
   }
+  background: var(--surface-base);
+  border-radius: 10px;
 }
 
 .historyPreview {
   display: grid;
   place-items: center;
   overflow: hidden;
-  background: color-mix(in srgb, var(--glass-surface) 72%, #000 28%);
+  background: var(--surface-muted);
 
   :global(.ant-image) {
     width: 100%;
@@ -862,7 +897,6 @@ $compact-radius: 10px;
 }
 
 .historyMeta {
-  position: absolute;
   top: 0;
   right: 0;
   left: 0;
@@ -870,18 +904,9 @@ $compact-radius: 10px;
   display: flex;
   min-width: 0;
   flex-direction: column;
-  padding: 6px 9px;
   pointer-events: none;
   color: var(--text-secondary);
-  font-size: 10px;
   line-height: 1.3;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--glass-surface) 86%, transparent),
-    transparent
-  );
-  opacity: 0;
-  transform: translateY(-6px);
   transition:
     opacity 140ms ease,
     transform 140ms ease;
@@ -892,23 +917,12 @@ $compact-radius: 10px;
     color: inherit;
     font-size: inherit;
   }
-}
-
-.historyActions {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  justify-content: flex-end;
-  padding: 5px 8px;
-  pointer-events: none;
-  background: color-mix(in srgb, var(--glass-surface) 88%, transparent);
-  backdrop-filter: blur(10px);
-  opacity: 0;
-  transform: translateY(6px);
-  transition:
-    opacity 140ms ease,
-    transform 140ms ease;
+  position: static;
+  opacity: 1;
+  transform: none;
+  background: transparent;
+  font-size: 12px;
+  padding: 8px 12px;
 }
 
 @media (hover: none) {
@@ -938,7 +952,6 @@ $compact-radius: 10px;
     align-items: flex-start;
     flex-direction: column;
   }
-
 }
 
 @media (max-width: 680px) {
@@ -997,5 +1010,246 @@ $compact-radius: 10px;
     background: Canvas !important;
     color: CanvasText !important;
     backdrop-filter: none;
+  }
+}
+
+/* Configuration pages use rows and separators; material stays in the shell. */
+
+.settingRow:last-child {
+  border-bottom: 0;
+}
+
+.historyTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.previewLayout {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  align-items: start;
+}
+.previewPane {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.configurationPane {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.visualizerPreview {
+  min-height: 104px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  border-radius: 10px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  overflow: hidden;
+}
+.visualizerPreview span {
+  overflow-wrap: anywhere;
+  line-height: 1.2;
+}
+@media (max-width: 999px) {
+  .previewLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .previewPane {
+    position: static;
+  }
+}
+@media (max-width: 799px) {
+  .toolbar,
+  .sectionHeader {
+    flex-wrap: wrap;
+  }
+  .historyToolbar {
+    gap: 8px;
+  }
+  .historyControl {
+    flex: 1 1 120px;
+  }
+  .historyControl :global(.ant-select),
+  .historyControl :global(.ant-input-number) {
+    width: 100% !important;
+  }
+}
+
+.previewPane .widgetPreview {
+  flex-wrap: wrap;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.visualizerOption > div:last-child {
+  flex: 0 0 auto;
+}
+.widgetOptionCard > :global(.ant-row) {
+  grid-column: 1 / -1;
+}
+
+.visualizerPreviewKeys {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+}
+.metricList {
+  width: 100%;
+}
+.metricListHeading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  font-weight: 600;
+  span {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 400;
+  }
+}
+.metricSettingRow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--glass-border);
+}
+.metricName {
+  flex: 1 1 70px;
+}
+.metricDragHandle {
+  touch-action: none;
+  cursor: grab !important;
+}
+.metricDragging {
+  opacity: 0.6;
+}
+.metricDropTarget::after {
+  position: absolute;
+  inset: -1px 0 auto;
+  height: 2px;
+  background: var(--accent);
+  content: "";
+}
+.metricDropTargetAfter::after {
+  inset: auto 0 -1px;
+}
+.historyOpening {
+  display: block;
+  padding: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.screenshotToolsSection {
+  border-top: 1px solid var(--glass-border);
+  padding-top: 12px;
+}
+.screenshotToolsHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.screenshotToolsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: 6px;
+}
+.screenshotToolChip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 2px 6px 2px 2px;
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  :global(.ant-checkbox-wrapper) {
+    flex: 1;
+    min-width: 0;
+  }
+  :global(.ant-checkbox-label) {
+    padding-inline: 6px 0;
+  }
+}
+.screenshotToolLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  svg {
+    color: var(--text-secondary);
+    flex: none;
+  }
+}
+.screenshotToolDrop {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.screenshotToolbarPreview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  > span:first-child {
+    font-size: 12px;
+    padding-right: 4px;
+  }
+  > span {
+    display: inline-flex;
+    align-items: center;
+    min-height: 20px;
+  }
+}
+.settingsForm :global(.ant-form-item).screenshotToolbarField {
+  margin-bottom: 12px;
+}
+.metricScheme {
+  width: 140px;
+  color: var(--text-secondary);
+}
+.metricMoveActions {
+  display: flex;
+  gap: 4px;
+}
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+@media (max-width: 799px) {
+  .metricSettingRow {
+    gap: 8px;
+  }
+  .metricSettingRow .metricScheme {
+    flex: 1 1 120px;
+    min-width: 100px;
   }
 }

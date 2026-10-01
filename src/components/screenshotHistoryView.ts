@@ -4,6 +4,17 @@ export const SCREENSHOT_HISTORY_VIEW_KEY = "dock-mapper:screenshot-history-view"
 
 export type HistorySort = "newest" | "oldest" | "favorite";
 export type HistoryFilter = "all" | "favorite";
+export function screenshotHistoryPhase(
+  loading: boolean,
+  error: string | null,
+  total: number,
+  visible: number,
+) {
+  if (total > 0) return visible > 0 ? "ready" : "filtered";
+  if (loading) return "loading";
+  if (error) return "error";
+  return "empty";
+}
 
 export interface ScreenshotHistoryView {
   sort: HistorySort;
@@ -46,8 +57,8 @@ export function parseScreenshotHistoryView(value: string | null): ScreenshotHist
         parsed.columns >= 1 &&
         parsed.columns <= 10
           ? parsed.columns
-          : LEGACY_DENSITY_COLUMNS[String(parsed.density)] ??
-            DEFAULT_SCREENSHOT_HISTORY_VIEW.columns,
+          : (LEGACY_DENSITY_COLUMNS[String(parsed.density)] ??
+            DEFAULT_SCREENSHOT_HISTORY_VIEW.columns),
     };
   } catch {
     return { ...DEFAULT_SCREENSHOT_HISTORY_VIEW };

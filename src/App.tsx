@@ -14,21 +14,10 @@ import {
   SettingOutlined,
   SunOutlined,
 } from "@ant-design/icons";
-import Dashboard from "./components/Dashboard";
-import KeyMapper from "./components/KeyMapper";
-import WidgetSettings from "./components/WidgetSettings";
-import KeyVisualizerSettings from "./components/KeyVisualizerSettings";
-import GeneralSettings from "./components/GeneralSettings";
-import ScreenshotSettings from "./components/ScreenshotSettings";
 import { useTheme } from "./ThemeContext";
 import appIcon from "./assets/app-icon.png";
 import styles from "./App.module.scss";
-import { MAIN_EVENTS, widgetApi } from "./api/commands";
-import type { SysStatus } from "./types";
-import { appendDashboardSample, type DashboardSample } from "./components/dashboardTelemetry";
-import { appendTelemetryArchive, loadTelemetryArchive, saveTelemetryArchive } from "./components/telemetryArchive";
-import { useTelemetryFreshness } from "./utils/telemetryFreshness";
-import { evaluateTelemetryAlerts, initialAlertState, loadAlertInbox, saveAlertInbox, type AlertEntry, type AlertRules } from "./components/telemetryAlerts";
+import { MAIN_EVENTS } from "./api/commands";
 import {
   loadSidebarWidth,
   saveSidebarWidth,
@@ -36,17 +25,29 @@ import {
   SIDEBAR_MIN_WIDTH,
 } from "./utils/sidebarPreferences";
 
+import DeferredPage from "./components/DeferredPage";
+import TelemetryCollector from "./components/TelemetryCollector";
+import {
+  loadNavigationPreferences,
+  saveNavigationPreferences,
+  isMainNavigation,
+  type PageKey,
+  type ScreenshotTabKey,
+  type MainNavigation,
+} from "./utils/navigationPreferences";
+import { useCompactNavigation } from "./hooks/useCompactNavigation";
+const LOADERS = {
+  dashboard: () => import("./components/ConnectedDashboard"),
+  keymapper: () => import("./components/KeyMapper"),
+  keyvisualizer: () => import("./components/KeyVisualizerSettings"),
+  screenshot: () => import("./components/ScreenshotSettings"),
+  widget: () => import("./components/WidgetSettings"),
+  settings: () => import("./components/GeneralSettings"),
+};
+
 const { Header, Content } = Layout;
 const { Text, Title } = Typography;
 const REPOSITORY_URL = "https://github.com/luqiangbo/dock-mapper";
-type PageKey = "dashboard" | "keymapper" | "keyvisualizer" | "screenshot" | "widget" | "settings";
-type ScreenshotTabKey = "history" | "settings";
-
-interface MainNavigation {
-  page: PageKey;
-  tab?: ScreenshotTabKey;
-}
-
 interface PageItem {
   key: PageKey;
   label: string;
@@ -61,79 +62,36 @@ const PAGES: PageItem[] = [
   { key: "widget", label: "挂件设置", icon: <MenuOutlined /> },
   { key: "settings", label: "全局设置", icon: <SettingOutlined /> },
 ];
+const menuItem = ({ key, label, icon }: PageItem) => ({ key, label, icon });
 
 export default function App() {
   const { notification } = AntApp.useApp();
   const screens = Grid.useBreakpoint();
-  const compactNavigation = !screens.md;
-  const [activePage, setActivePage] = useState<PageKey>("dashboard");
-  const [screenshotTab, setScreenshotTab] = useState<ScreenshotTabKey>("history");
+  const compactNavigation = useCompactNavigation();
+  const [initialNavigation] = useState(loadNavigationPreferences);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [activePage, setActivePage] = useState<PageKey>(initialNavigation.page);
+  const [screenshotTab, setScreenshotTab] = useState<ScreenshotTabKey>(initialNavigation.tab);
   const [siderWidth, setSiderWidth] = useState(loadSidebarWidth);
-  const [sysStatus, setSysStatus] = useState<SysStatus | null>(null);
-  const [lastSampleAt, setLastSampleAt] = useState<number | null>(null);
-  const [dashboardSamples, setDashboardSamples] = useState<DashboardSample[]>([]);
-  const [telemetryArchive, setTelemetryArchive] = useState<DashboardSample[]>(loadTelemetryArchive);
-  const archiveRef = useRef(telemetryArchive);
-  const archiveSavedAtRef = useRef(0);
-  const [alerts, setAlerts] = useState<AlertEntry[]>(loadAlertInbox);
-  const alertsRef = useRef(alerts);
-  const alertStateRef = useRef(initialAlertState(alerts));
-  const alertRulesRef = useRef<AlertRules>({ cpu_percent: null, memory_percent: null, battery_below_percent: null });
-  const freshness = useTelemetryFreshness(lastSampleAt);
   const { resolved, setMode } = useTheme();
-
-  useEffect(() => {
-    let disposed = false;
-    let off: (() => void) | undefined;
-    void widgetApi.config().then((config) => {
-      if (!disposed) alertRulesRef.current = config.alerts;
-    }).catch((error) => notification.warning({ message: "提醒规则读取失败", description: String(error) }));
-    void listen<{ alerts: AlertRules }>("widget-config-changed", ({ payload }) => {
-      if (JSON.stringify(alertRulesRef.current) !== JSON.stringify(payload.alerts)) {
-        alertStateRef.current = {
-          counts: initialAlertState().counts,
-          lastAlertAt: alertStateRef.current.lastAlertAt,
-        };
-      }
-      alertRulesRef.current = payload.alerts;
-    }).then((unlisten) => {
-      if (disposed) unlisten(); else off = unlisten;
-    }).catch((error) => notification.warning({ message: "提醒规则监听失败", description: String(error) }));
-    return () => { disposed = true; off?.(); };
-  }, [notification]);
 
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
     void listen<MainNavigation>(MAIN_EVENTS.navigate, ({ payload }) => {
+      if (!isMainNavigation(payload)) return;
       if (payload.page === "screenshot") {
         setScreenshotTab(payload.tab ?? "history");
       }
       setActivePage(payload.page);
-    }).then((off) => {
-      if (disposed) off();
-      else unlisten = off;
-    });
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, []);
-
-  useEffect(() => {
-    let disposed = false;
-    let unlisten: (() => void) | undefined;
-    void listen<string>(MAIN_EVENTS.historyWriteFailed, ({ payload }) => {
-      window.sessionStorage.setItem("dockmapper.history-write-error", payload);
-      notification.warning({
-        message: "截图操作已完成，但未保存到历史",
-        description: payload,
-        duration: 8,
-      });
-    }).then((off) => {
-      if (disposed) off();
-      else unlisten = off;
-    });
+    })
+      .then((off) => {
+        if (disposed) off();
+        else unlisten = off;
+      })
+      .catch((error) =>
+        notification.error({ message: "页面导航监听失败", description: String(error) }),
+      );
     return () => {
       disposed = true;
       unlisten?.();
@@ -143,41 +101,28 @@ export default function App() {
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void listen<SysStatus>(MAIN_EVENTS.systemStatus, ({ payload }) => {
-      const now = Date.now();
-      const evaluated = evaluateTelemetryAlerts(alertStateRef.current, alertRulesRef.current, payload, now);
-      alertStateRef.current = evaluated.state;
-      if (evaluated.alerts.length) {
-        const nextAlerts = [...alertsRef.current, ...evaluated.alerts].slice(-50);
-        alertsRef.current = nextAlerts;
-        setAlerts(nextAlerts);
-        try { saveAlertInbox(nextAlerts); }
-        catch (error) { notification.warning({ message: "提醒记录保存失败", description: String(error) }); }
-        for (const alert of evaluated.alerts) notification.warning({ message: "系统指标超过提醒阈值", description: `${alert.kind === "cpu" ? "CPU" : alert.kind === "memory" ? "内存" : "电池"} ${alert.value.toFixed(0)}%` });
+    void listen<string>(MAIN_EVENTS.historyWriteFailed, ({ payload }) => {
+      try {
+        window.sessionStorage.setItem("dockmapper.history-write-error", payload);
+      } catch (error) {
+        console.error("历史写入错误暂存失败", error);
       }
-      setLastSampleAt(now);
-      setSysStatus(payload);
-      setDashboardSamples((samples) => appendDashboardSample(samples, payload));
-      const nextArchive = appendTelemetryArchive(archiveRef.current, payload, now);
-      archiveRef.current = nextArchive;
-      setTelemetryArchive(nextArchive);
-      if (now - archiveSavedAtRef.current >= 60_000) {
-        try {
-          saveTelemetryArchive(nextArchive);
-          archiveSavedAtRef.current = now;
-        } catch (error) {
-          notification.warning({ message: "长期趋势保存失败", description: String(error) });
-          archiveSavedAtRef.current = now;
-        }
-      }
-    }).then((off) => {
-      if (disposed) off();
-      else unlisten = off;
-    });
+      notification.warning({
+        message: "截图操作已完成，但未保存到历史",
+        description: payload,
+        duration: 8,
+      });
+    })
+      .then((off) => {
+        if (disposed) off();
+        else unlisten = off;
+      })
+      .catch((error) =>
+        notification.warning({ message: "截图历史错误监听失败", description: String(error) }),
+      );
     return () => {
       disposed = true;
       unlisten?.();
-      try { saveTelemetryArchive(archiveRef.current); } catch { /* The active window already reported a save failure. */ }
     };
   }, [notification]);
 
@@ -186,149 +131,175 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [siderWidth]);
 
+  useEffect(() => {
+    contentRef.current?.scrollTo({ top: 0 });
+    try {
+      saveNavigationPreferences({ page: activePage, tab: screenshotTab });
+    } catch (error) {
+      notification.warning({ message: "页面偏好未保存", description: String(error) });
+    }
+  }, [activePage, screenshotTab, notification]);
+
   const currentPage = PAGES.find((page) => page.key === activePage) ?? PAGES[0];
   const page = useMemo(() => {
     switch (activePage) {
       case "keymapper":
-        return <KeyMapper />;
+        return <DeferredPage key="keymapper" load={LOADERS.keymapper} pageProps={{}} />;
       case "screenshot":
         return (
-          <ScreenshotSettings activeTab={screenshotTab} onActiveTabChange={setScreenshotTab} />
+          <DeferredPage
+            key="screenshot"
+            load={LOADERS.screenshot}
+            pageProps={{ activeTab: screenshotTab, onActiveTabChange: setScreenshotTab }}
+          />
         );
       case "widget":
-        return <WidgetSettings />;
+        return <DeferredPage key="widget" load={LOADERS.widget} pageProps={{}} />;
       case "keyvisualizer":
-        return <KeyVisualizerSettings />;
+        return <DeferredPage key="keyvisualizer" load={LOADERS.keyvisualizer} pageProps={{}} />;
       case "settings":
-        return <GeneralSettings />;
+        return <DeferredPage key="settings" load={LOADERS.settings} pageProps={{}} />;
       default:
         return (
-          <Dashboard
-            status={freshness === "live" ? sysStatus : null}
-            freshness={freshness}
-            samples={dashboardSamples}
-            archive={telemetryArchive}
-            alerts={alerts}
-            onMarkAlertsRead={() => {
-              const previous = alertsRef.current;
-              const next = previous.map((alert) => ({ ...alert, read: true }));
-              try {
-                saveAlertInbox(next);
-                alertsRef.current = next;
-                setAlerts(next);
-              }
-              catch (error) { notification.error({ message: "提醒状态保存失败", description: String(error) }); }
-            }}
-            onNavigate={(target, tab) => {
-              if (target === "screenshot" && tab) setScreenshotTab(tab);
-              setActivePage(target);
+          <DeferredPage
+            key="dashboard"
+            load={LOADERS.dashboard}
+            pageProps={{
+              onNavigate: (
+                target: "keymapper" | "screenshot" | "widget",
+                tab?: ScreenshotTabKey,
+              ) => {
+                if (target === "screenshot" && tab) setScreenshotTab(tab);
+                setActivePage(target);
+              },
             }}
           />
         );
     }
-  }, [activePage, alerts, dashboardSamples, freshness, notification, screenshotTab, sysStatus, telemetryArchive]);
+  }, [activePage, screenshotTab]);
 
   return (
-    <Splitter
-      className={styles.shell}
-      orientation="horizontal"
-      onResize={(sizes) => {
-        if (!compactNavigation && typeof sizes[0] === "number") setSiderWidth(sizes[0]);
-      }}
-    >
-      <Splitter.Panel
-        className={`${styles.siderPanel} ${compactNavigation ? styles.siderPanelCompact : ""}`}
-        size={compactNavigation ? 64 : siderWidth}
-        min={compactNavigation ? 64 : SIDEBAR_MIN_WIDTH}
-        max={compactNavigation ? 64 : SIDEBAR_MAX_WIDTH}
-        resizable={!compactNavigation}
+    <>
+      <TelemetryCollector />
+      <Splitter
+        className={styles.shell}
+        orientation="horizontal"
+        onResize={(sizes) => {
+          if (!compactNavigation && typeof sizes[0] === "number") setSiderWidth(sizes[0]);
+        }}
       >
-        <aside className={styles.sider}>
-          <div className={styles.brand}>
-            <span className={styles.brandMark} aria-hidden="true">
-              <img src={appIcon} alt="" />
-            </span>
-            {!compactNavigation && <Text strong>DockMapper</Text>}
-          </div>
-
-          <Menu
-            selectedKeys={[activePage]}
-            inlineCollapsed={compactNavigation}
-            onClick={({ key }) => setActivePage(key as PageKey)}
-            items={PAGES.map((item) => ({
-              key: item.key,
-              icon: item.icon,
-              label: item.label,
-            }))}
-            className={styles.nav}
-          />
-        </aside>
-      </Splitter.Panel>
-
-      <Splitter.Panel className={styles.workspacePanel} min={0}>
-        <Layout className={styles.workspace}>
-          <Header className={styles.header}>
-            <div className={styles.pageTitle}>
-              {currentPage.icon}
-              <Title level={5}>{currentPage.label}</Title>
+        <Splitter.Panel
+          className={`${styles.siderPanel} ${compactNavigation ? styles.siderPanelCompact : ""}`}
+          size={compactNavigation ? 64 : siderWidth}
+          min={compactNavigation ? 64 : SIDEBAR_MIN_WIDTH}
+          max={compactNavigation ? 64 : SIDEBAR_MAX_WIDTH}
+          resizable={!compactNavigation}
+        >
+          <aside className={styles.sider}>
+            <div className={styles.brand}>
+              <span className={styles.brandMark} aria-hidden="true">
+                <img src={appIcon} alt="" />
+              </span>
+              {!compactNavigation && <Text strong>DockMapper</Text>}
             </div>
-            <div className={styles.dragRegion} data-tauri-drag-region />
-            <div className={styles.headerActions}>
-              {screens.md && (
-                <Tooltip title="打开 GitHub">
+
+            <Menu
+              mode="inline"
+              selectedKeys={[activePage]}
+              inlineCollapsed={compactNavigation}
+              onClick={({ key }) => setActivePage(key as PageKey)}
+              items={[
+                {
+                  type: "group",
+                  label: compactNavigation ? null : "工具",
+                  children: PAGES.slice(0, 4).map(menuItem),
+                },
+                {
+                  type: "group",
+                  label: compactNavigation ? null : "配置",
+                  children: PAGES.slice(4, 5).map(menuItem),
+                },
+              ]}
+              className={styles.nav}
+            />
+            <Menu
+              mode="inline"
+              selectedKeys={[activePage]}
+              inlineCollapsed={compactNavigation}
+              onClick={() => setActivePage("settings")}
+              items={[menuItem(PAGES[5])]}
+              className={styles.bottomNav}
+            />
+          </aside>
+        </Splitter.Panel>
+
+        <Splitter.Panel className={styles.workspacePanel} min={0}>
+          <Layout className={styles.workspace}>
+            <Header className={styles.header}>
+              <div className={styles.pageTitle}>
+                {currentPage.icon}
+                <Title level={5}>{currentPage.label}</Title>
+              </div>
+              <div className={styles.dragRegion} data-tauri-drag-region />
+              <div className={styles.headerActions}>
+                {screens.md && (
+                  <Tooltip title="打开 GitHub">
+                    <Button
+                      aria-label="打开 GitHub"
+                      icon={<GithubOutlined />}
+                      type="text"
+                      onClick={() => void openUrl(REPOSITORY_URL)}
+                    />
+                  </Tooltip>
+                )}
+                <Tooltip title={resolved === "dark" ? "切换浅色" : "切换深色"}>
                   <Button
-                    aria-label="打开 GitHub"
-                    icon={<GithubOutlined />}
+                    aria-label="切换主题"
+                    icon={resolved === "dark" ? <SunOutlined /> : <MoonOutlined />}
                     type="text"
-                    onClick={() => void openUrl(REPOSITORY_URL)}
+                    onClick={() => setMode(resolved === "dark" ? "light" : "dark")}
                   />
                 </Tooltip>
-              )}
-              <Tooltip title={resolved === "dark" ? "切换浅色" : "切换深色"}>
-                <Button
-                  aria-label="切换主题"
-                  icon={resolved === "dark" ? <SunOutlined /> : <MoonOutlined />}
-                  type="text"
-                  onClick={() => setMode(resolved === "dark" ? "light" : "dark")}
-                />
-              </Tooltip>
-              <div className={styles.windowControls}>
-                <button
-                  type="button"
-                  aria-label="最小化窗口"
-                  title="最小化"
-                  onClick={() => void getCurrentWindow().minimize()}
-                >
-                  <svg viewBox="0 0 12 12" aria-hidden="true">
-                    <path d="M2.5 6h7" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  aria-label="最大化或还原窗口"
-                  title="最大化或还原"
-                  onClick={() => void getCurrentWindow().toggleMaximize()}
-                >
-                  <svg viewBox="0 0 12 12" aria-hidden="true">
-                    <rect x="2.5" y="2.5" width="7" height="7" rx="1" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  aria-label="关闭窗口"
-                  title="关闭"
-                  onClick={() => void getCurrentWindow().close()}
-                >
-                  <svg viewBox="0 0 12 12" aria-hidden="true">
-                    <path d="M3 3l6 6M9 3L3 9" />
-                  </svg>
-                </button>
+                <div className={styles.windowControls}>
+                  <button
+                    type="button"
+                    aria-label="最小化窗口"
+                    title="最小化"
+                    onClick={() => void getCurrentWindow().minimize()}
+                  >
+                    <svg viewBox="0 0 12 12" aria-hidden="true">
+                      <path d="M2.5 6h7" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="最大化或还原窗口"
+                    title="最大化或还原"
+                    onClick={() => void getCurrentWindow().toggleMaximize()}
+                  >
+                    <svg viewBox="0 0 12 12" aria-hidden="true">
+                      <rect x="2.5" y="2.5" width="7" height="7" rx="1" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="关闭窗口"
+                    title="关闭"
+                    onClick={() => void getCurrentWindow().close()}
+                  >
+                    <svg viewBox="0 0 12 12" aria-hidden="true">
+                      <path d="M3 3l6 6M9 3L3 9" />
+                    </svg>
+                  </button>
+                </div>
               </div>
-            </div>
-          </Header>
-          <Content className={styles.content}>{page}</Content>
-        </Layout>
-      </Splitter.Panel>
-    </Splitter>
+            </Header>
+            <Content ref={contentRef} className={styles.content}>
+              {page}
+            </Content>
+          </Layout>
+        </Splitter.Panel>
+      </Splitter>
+    </>
   );
 }

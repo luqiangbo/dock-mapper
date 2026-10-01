@@ -5,9 +5,9 @@
 }
 
 :root {
-  color-scheme: light dark;
-  --widget-text: #fff;
-  --widget-track: light-dark(rgb(35 44 66 / 18%), rgb(255 255 255 / 17%));
+  color-scheme: light;
+  --widget-text: var(--text-primary);
+  --widget-track: var(--glass-border);
 }
 
 html,
@@ -71,7 +71,7 @@ body,
   width: 12px;
   flex: 0 0 12px;
   place-items: center;
-  color: rgb(255 255 255 / 72%);
+  color: var(--text-secondary);
   font-size: 13px;
   line-height: 1;
 }
@@ -80,7 +80,7 @@ body,
   display: inline-grid;
   min-width: 40px;
   place-items: center;
-  color: rgb(255 255 255 / 68%);
+  color: var(--text-secondary);
 }
 
 .net-speed {
@@ -254,4 +254,13 @@ body,
     background: Canvas;
     backdrop-filter: none;
   }
+}
+
+.widget-container {
+  font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+.widget-container :focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
 }

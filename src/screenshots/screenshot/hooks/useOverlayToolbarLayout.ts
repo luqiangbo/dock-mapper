@@ -2,6 +2,9 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { shouldCompactToolbar, type ToolbarSize } from "../components/toolbarLayout";
 
 const EMPTY_SIZE: ToolbarSize = { width: 0, height: 0 };
+function keepSame(previous: ToolbarSize, next: ToolbarSize): ToolbarSize {
+  return previous.width === next.width && previous.height === next.height ? previous : next;
+}
 
 export function useOverlayToolbarLayout(active: boolean, tool: string | null) {
   const primaryRef = useRef<HTMLDivElement>(null);
@@ -39,35 +42,42 @@ export function useOverlayToolbarLayout(active: boolean, tool: string | null) {
       setSecondarySize(EMPTY_SIZE);
       return;
     }
+    let frame = 0;
     const measure = (): void => {
+      frame = 0;
       const width = window.innerWidth;
-      setViewportSize({ width, height: window.innerHeight });
+      setViewportSize((previous) => keepSame(previous, { width, height: window.innerHeight }));
       const primary = primaryRef.current;
       if (primary) {
         const rect = primary.getBoundingClientRect();
-        setPrimarySize({ width: rect.width, height: rect.height });
+        setPrimarySize((previous) =>
+          keepSame(previous, { width: rect.width, height: rect.height }),
+        );
         if (!compact) expandedWidth.current = Math.max(rect.width, primary.scrollWidth);
         const nextCompact = shouldCompactToolbar(width, expandedWidth.current || rect.width);
         if (nextCompact !== compact) setCompact(nextCompact);
       }
       const secondary = secondaryRef.current;
-      setSecondarySize(
-        secondary
-          ? {
-              width: secondary.getBoundingClientRect().width,
-              height: secondary.getBoundingClientRect().height,
-            }
-          : EMPTY_SIZE,
-      );
+      const nextSecondary = secondary
+        ? {
+            width: secondary.getBoundingClientRect().width,
+            height: secondary.getBoundingClientRect().height,
+          }
+        : EMPTY_SIZE;
+      setSecondarySize((previous) => keepSame(previous, nextSecondary));
     };
-    const observer = new ResizeObserver(measure);
+    const scheduleMeasure = () => {
+      if (!frame) frame = requestAnimationFrame(measure);
+    };
+    const observer = new ResizeObserver(scheduleMeasure);
     if (primaryRef.current) observer.observe(primaryRef.current);
     if (secondaryRef.current) observer.observe(secondaryRef.current);
-    window.addEventListener("resize", measure);
+    window.addEventListener("resize", scheduleMeasure);
     measure();
     return () => {
       observer.disconnect();
-      window.removeEventListener("resize", measure);
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", scheduleMeasure);
     };
   }, [active, compact, tool]);
 

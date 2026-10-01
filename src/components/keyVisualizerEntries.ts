@@ -104,5 +104,6 @@ export function removeExpiredKeyVisualizerEntries(
   entries: KeyVisualizerEntry[],
   now: number,
 ): KeyVisualizerEntry[] {
-  return entries.filter((entry) => now - entry.timestamp_ms < KEY_VISUALIZER_LIFETIME_MS);
+  const active = entries.filter((entry) => now - entry.timestamp_ms < KEY_VISUALIZER_LIFETIME_MS);
+  return active.length === entries.length ? entries : active;
 }

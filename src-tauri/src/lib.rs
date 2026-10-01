@@ -1,3 +1,4 @@
+mod history_preview;
 mod admin;
 mod app_commands;
 mod app_state;
@@ -91,6 +92,7 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(screenshot::create_state())
+        .manage(history_preview::PreviewState::default())
         .manage(visualizer_effects::VisualizerEffectsRuntime::default())
         .setup(|app| {
             app.manage(diagnostics::initialize(app.handle())?);
@@ -150,6 +152,8 @@ pub fn run() {
             key_mapping::restore_scancode_map,
             image_commands::upload_image,
             image_commands::release_image,
+            history_preview::open_screenshot_history_preview,
+            history_preview::get_screenshot_history_preview_session,
             history_commands::list_screenshot_history,
             history_commands::get_screenshot_history_image,
             history_commands::get_screenshot_history_thumbnail,

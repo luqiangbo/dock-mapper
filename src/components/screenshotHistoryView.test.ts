@@ -5,6 +5,7 @@ import {
   parseScreenshotHistoryView,
   responsiveHistoryColumnCount,
   selectScreenshotHistory,
+  screenshotHistoryPhase,
 } from "./screenshotHistoryView";
 
 const entries: ScreenshotHistorySummary[] = [
@@ -14,6 +15,16 @@ const entries: ScreenshotHistorySummary[] = [
 ];
 
 describe("screenshot history view", () => {
+  it("首次读取失败显示错误，重试后可进入空历史", () => {
+    expect(screenshotHistoryPhase(true, null, 0, 0)).toBe("loading");
+    expect(screenshotHistoryPhase(false, "读取失败", 0, 0)).toBe("error");
+    expect(screenshotHistoryPhase(false, null, 0, 0)).toBe("empty");
+  });
+  it("后台刷新与刷新失败保留已有截图，收藏筛选为空有独立状态", () => {
+    expect(screenshotHistoryPhase(true, null, 3, 3)).toBe("ready");
+    expect(screenshotHistoryPhase(false, "刷新失败", 3, 3)).toBe("ready");
+    expect(screenshotHistoryPhase(false, null, 3, 0)).toBe("filtered");
+  });
   it("sorts newest, oldest and favorites deterministically", () => {
     expect(
       selectScreenshotHistory(entries, { ...DEFAULT_SCREENSHOT_HISTORY_VIEW, sort: "newest" }).map(
@@ -26,9 +37,10 @@ describe("screenshot history view", () => {
       ),
     ).toEqual(["old", "favorite", "new"]);
     expect(
-      selectScreenshotHistory(entries, { ...DEFAULT_SCREENSHOT_HISTORY_VIEW, sort: "favorite" }).map(
-        ({ id }) => id,
-      ),
+      selectScreenshotHistory(entries, {
+        ...DEFAULT_SCREENSHOT_HISTORY_VIEW,
+        sort: "favorite",
+      }).map(({ id }) => id),
     ).toEqual(["favorite", "new", "old"]);
   });
 
@@ -44,9 +56,7 @@ describe("screenshot history view", () => {
 
   it("validates every stored preference and falls back after corruption", () => {
     expect(
-      parseScreenshotHistoryView(
-        JSON.stringify({ sort: "oldest", filter: "invalid", columns: 7 }),
-      ),
+      parseScreenshotHistoryView(JSON.stringify({ sort: "oldest", filter: "invalid", columns: 7 })),
     ).toEqual({ sort: "oldest", filter: "all", columns: 7 });
     expect(parseScreenshotHistoryView(JSON.stringify({ columns: 0 }))).toEqual(
       DEFAULT_SCREENSHOT_HISTORY_VIEW,

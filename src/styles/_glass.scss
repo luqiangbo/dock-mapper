@@ -10,7 +10,9 @@
   box-shadow:
     $shadow,
     inset 0 1px var(--glass-highlight);
-  backdrop-filter: blur($blur) saturate(135%);
+  @if $blur != var(--glass-blur) {
+    backdrop-filter: blur($blur) saturate(110%);
+  }
 
   @supports not (backdrop-filter: blur(1px)) {
     background: var(--surface-base);
@@ -28,12 +30,12 @@
     color 120ms ease;
 
   &:hover {
-    border-color: color-mix(in srgb, var(--accent) 34%, var(--glass-border));
-    background: color-mix(in srgb, var(--glass-control) 82%, var(--accent-soft));
+    border-color: var(--glass-border);
+    background: var(--glass-control-hover);
   }
 
   &:active {
-    background: color-mix(in srgb, var(--glass-control) 70%, var(--accent-soft));
+    background: var(--glass-control-active);
   }
 
   &:disabled,

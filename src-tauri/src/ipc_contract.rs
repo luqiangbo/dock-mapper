@@ -3,6 +3,38 @@ mod tests {
     use std::collections::BTreeSet;
 
     #[test]
+    fn history_preview_can_read_images_and_control_only_its_own_window() {
+        let preview: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/history-preview.json")).unwrap();
+        assert_eq!(preview["windows"], serde_json::json!(["history_preview"]));
+        let permissions = preview["permissions"].as_array().unwrap();
+        for required in [
+            "allow-get-screenshot-history-image",
+            "allow-get-screenshot-history-preview-session",
+            "core:window:allow-set-fullscreen",
+            "core:window:allow-is-fullscreen",
+            "core:window:allow-start-resize-dragging",
+        ] {
+            assert!(permissions.iter().any(|permission| permission == required));
+        }
+        for forbidden in [
+            "allow-delete-screenshot-history",
+            "allow-update-widget-config",
+            "allow-open-screenshot-history-preview",
+            "core:window:allow-is-visible",
+        ] {
+            assert!(!permissions.iter().any(|permission| permission == forbidden));
+        }
+        let main: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/main.json")).unwrap();
+        assert!(main["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|permission| permission == "allow-open-screenshot-history-preview"));
+    }
+
+    #[test]
     fn shared_contract_matches_registered_tauri_commands() {
         let source = include_str!("lib.rs");
         let handler = source

@@ -9,6 +9,7 @@ export default defineConfig({
       index: "./src/main-entry.tsx",
       screenshot: "./src/screenshot-entry.tsx",
       pin: "./src/pin-entry.tsx",
+      "history-preview": "./src/history-preview-entry.tsx",
       widget: "./src/widget-entry.tsx",
       "key-visualizer-effects": "./src/key-visualizer-effects-entry.tsx",
       "key-visualizer": "./src/key-visualizer-entry.tsx",
@@ -24,6 +25,7 @@ export default defineConfig({
         return "./key-visualizer.html";
       }
       if (entryName === "screenshot") return "./screenshot.html";
+      if (entryName === "history-preview") return "./history-preview.html";
       if (entryName === "pin") return "./pin.html";
       return "./index.html";
     },

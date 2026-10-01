@@ -1,7 +1,4 @@
-import type {
-  AnnotationToolStyleConfig,
-  ScreenshotAnnotationStyles,
-} from "../../../types";
+import type { AnnotationToolStyleConfig, ScreenshotAnnotationStyles } from "../../../types";
 
 export const DEFAULT_TOOL_STYLE: AnnotationToolStyleConfig = {
   stroke_color: "#e03131",
@@ -16,6 +13,8 @@ export const DEFAULT_TOOL_STYLE: AnnotationToolStyleConfig = {
   end_arrowhead: "arrow",
   pressure: true,
   block_size: 12,
+  mosaic_effect: "pixelate",
+  blur_radius: 12,
   font_size: 20,
   marker_size: 32,
   outline_enabled: true,
@@ -42,6 +41,17 @@ export function cloneAnnotationStyles(
   styles: ScreenshotAnnotationStyles,
 ): ScreenshotAnnotationStyles {
   return Object.fromEntries(
-    Object.entries(styles).map(([key, value]) => [key, { ...value }]),
+    Object.entries(styles).map(([key, value]) => [
+      key,
+      {
+        ...DEFAULT_TOOL_STYLE,
+        ...value,
+        mosaic_effect: value.mosaic_effect === "blur" ? "blur" : "pixelate",
+        blur_radius: Math.max(
+          2,
+          Math.min(32, Math.round(Number.isFinite(value.blur_radius) ? value.blur_radius : 12)),
+        ),
+      },
+    ]),
   ) as unknown as ScreenshotAnnotationStyles;
 }

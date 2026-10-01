@@ -18,7 +18,6 @@ import {
   Image,
   InputNumber,
   Masonry,
-  Modal,
   Popconfirm,
   Select,
   Spin,
@@ -32,10 +31,14 @@ import {
   saveScreenshotHistoryView,
   selectScreenshotHistory,
   responsiveHistoryColumnCount,
+  screenshotHistoryPhase,
   type HistoryFilter,
   type HistorySort,
 } from "./screenshotHistoryView";
 import styles from "./components.module.scss";
+import { createRequestQueue } from "../utils/requestQueue";
+
+const thumbnailRequests = createRequestQueue(4);
 
 const { Text } = Typography;
 
@@ -50,14 +53,12 @@ type HistoryAction = "copy" | "pin" | "favorite" | "delete";
 function HistoryImage({ id }: { id: string }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const thumbnailUrlRef = useRef("");
-  const originalUrlRef = useRef("");
+  const { notification } = AntApp.useApp();
+  const [opening, setOpening] = useState(false);
   const [nearViewport, setNearViewport] = useState(false);
   const [thumbnailUrl, setThumbnailUrl] = useState("");
-  const [originalUrl, setOriginalUrl] = useState("");
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-  const [previewAttempt, setPreviewAttempt] = useState(0);
   const [failed, setFailed] = useState(false);
+  const [thumbnailAttempt, setThumbnailAttempt] = useState(0);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -81,8 +82,10 @@ function HistoryImage({ id }: { id: string }) {
     if (!nearViewport) return;
     let disposed = false;
     let objectUrl = "";
-    void historyApi
-      .thumbnail(id)
+    const controller = new AbortController();
+    setFailed(false);
+    void thumbnailRequests
+      .run(() => historyApi.thumbnail(id), controller.signal)
       .then((payload) => {
         if (disposed) return;
         objectUrl = URL.createObjectURL(new Blob([payload], { type: "image/png" }));
@@ -94,56 +97,21 @@ function HistoryImage({ id }: { id: string }) {
       });
     return () => {
       disposed = true;
+      controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       if (thumbnailUrlRef.current === objectUrl) thumbnailUrlRef.current = "";
     };
-  }, [id, nearViewport]);
-
-  useEffect(() => {
-    if (!previewOpen || originalUrlRef.current) return;
-    let disposed = false;
-    setPreviewError(null);
-    void historyApi
-      .image(id)
-      .then((payload) => {
-        if (disposed) return;
-        const objectUrl = URL.createObjectURL(new Blob([payload], { type: "image/png" }));
-        originalUrlRef.current = objectUrl;
-        setOriginalUrl(objectUrl);
-      })
-      .catch((error) => {
-        if (!disposed) setPreviewError(errorMessage(error));
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [id, previewAttempt, previewOpen]);
-
-  const setPreviewVisibility = useCallback((open: boolean) => {
-    setPreviewOpen(open);
-    if (open || !originalUrlRef.current) return;
-    URL.revokeObjectURL(originalUrlRef.current);
-    originalUrlRef.current = "";
-    setOriginalUrl("");
-  }, []);
-
-  const retryPreview = useCallback(() => {
-    setPreviewError(null);
-    setPreviewAttempt((attempt) => attempt + 1);
-  }, []);
-
-  useEffect(
-    () => () => {
-      if (originalUrlRef.current) URL.revokeObjectURL(originalUrlRef.current);
-      originalUrlRef.current = "";
-    },
-    [],
-  );
+  }, [id, nearViewport, thumbnailAttempt]);
 
   return (
     <div ref={hostRef} className={styles.historyImageHost}>
       {failed ? (
-        <div className={styles.historyImageFallback}>图片不可用</div>
+        <div className={styles.historyImageFallback}>
+          <span>缩略图加载失败</span>
+          <Button size="small" onClick={() => setThumbnailAttempt((attempt) => attempt + 1)}>
+            重试
+          </Button>
+        </div>
       ) : !thumbnailUrl ? (
         nearViewport ? (
           <Spin size="small" />
@@ -153,7 +121,20 @@ function HistoryImage({ id }: { id: string }) {
           type="button"
           className={styles.historyPreviewButton}
           aria-label="查看截图原图"
-          onClick={() => setPreviewVisibility(true)}
+          disabled={opening}
+          aria-busy={opening}
+          onClick={() => {
+            setOpening(true);
+            void historyApi
+              .openPreview(id)
+              .catch((error) =>
+                notification.error({
+                  message: "原图预览打开失败",
+                  description: errorMessage(error),
+                }),
+              )
+              .finally(() => setOpening(false));
+          }}
         >
           <Image
             src={thumbnailUrl}
@@ -167,40 +148,9 @@ function HistoryImage({ id }: { id: string }) {
               setFailed(true);
             }}
           />
+          {opening && <span className={styles.historyOpening}>正在打开原图…</span>}
         </button>
       )}
-      <Modal
-        title="截图原图"
-        open={previewOpen}
-        footer={null}
-        width="min(92vw, 1280px)"
-        onCancel={() => setPreviewVisibility(false)}
-      >
-        {previewError ? (
-          <Alert
-            type="error"
-            showIcon
-            message="原图加载失败"
-            description={previewError}
-            action={
-              <Button size="small" onClick={retryPreview}>
-                重试
-              </Button>
-            }
-          />
-        ) : originalUrl ? (
-          <Image
-            src={originalUrl}
-            alt="截图原图"
-            preview={false}
-            className={styles.historyOriginalImage}
-          />
-        ) : (
-          <div className={styles.historyPreviewLoading}>
-            <Spin tip="正在加载原图…" />
-          </div>
-        )}
-      </Modal>
     </div>
   );
 }
@@ -211,6 +161,7 @@ export default function ScreenshotHistory() {
   const [entries, setEntries] = useState<ScreenshotHistorySummary[]>([]);
   const [view, setView] = useState(loadScreenshotHistoryView);
   const [loading, setLoading] = useState(true);
+  const [readError, setReadError] = useState<string | null>(null);
   const [writeError, setWriteError] = useState<string | null>(null);
   const [startingCapture, setStartingCapture] = useState(false);
   const [working, setWorking] = useState<{ id: string; action: HistoryAction } | null>(null);
@@ -236,6 +187,7 @@ export default function ScreenshotHistory() {
     style: { width: 150 },
   };
   const visibleColumnCount = responsiveHistoryColumnCount(view.columns, screens);
+  const phase = screenshotHistoryPhase(loading, readError, entries.length, visibleEntries.length);
 
   useEffect(() => saveScreenshotHistoryView(view), [view]);
 
@@ -249,17 +201,18 @@ export default function ScreenshotHistory() {
   const refresh = useCallback(async () => {
     const generation = ++refreshGenerationRef.current;
     setLoading(true);
+    setReadError(null);
     try {
       const nextEntries = await historyApi.list();
       if (generation === refreshGenerationRef.current) setEntries(nextEntries);
     } catch (error) {
       if (generation === refreshGenerationRef.current) {
-        notification.error({ message: "读取截图历史失败", description: errorMessage(error) });
+        setReadError(errorMessage(error));
       }
     } finally {
       if (generation === refreshGenerationRef.current) setLoading(false);
     }
-  }, [notification]);
+  }, []);
 
   const scheduleRefresh = useCallback(() => {
     if (refreshTimerRef.current !== null) window.clearTimeout(refreshTimerRef.current);
@@ -273,12 +226,17 @@ export default function ScreenshotHistory() {
     void refresh();
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void listen(MAIN_EVENTS.historyChanged, scheduleRefresh).then((off) => {
-      if (disposed) off();
-      else unlisten = off;
-    });
+    void listen(MAIN_EVENTS.historyChanged, scheduleRefresh)
+      .then((off) => {
+        if (disposed) off();
+        else unlisten = off;
+      })
+      .catch((error) => {
+        if (!disposed) setReadError(`历史更新监听失败：${errorMessage(error)}`);
+      });
     return () => {
       disposed = true;
+      refreshGenerationRef.current += 1;
       if (refreshTimerRef.current !== null) window.clearTimeout(refreshTimerRef.current);
       unlisten?.();
     };
@@ -318,11 +276,21 @@ export default function ScreenshotHistory() {
   return (
     <div className={styles.historyPanel}>
       <div className={styles.historyHeader}>
-        <div className={styles.historyHeading}>
-          <Text strong>本地截图历史</Text>
-          <span className={styles.description}>
-            未收藏记录最多保留 100 条且不超过 30 天；连续点击贴图可创建多个独立窗口。
-          </span>
+        <div className={styles.historyTitleRow}>
+          <div className={styles.historyHeading}>
+            <Text strong>本地截图历史</Text>
+            <span className={styles.description}>
+              未收藏记录最多保留 100 条且不超过 30 天；连续点击贴图可创建多个独立窗口。
+            </span>
+          </div>
+          <Button
+            type="primary"
+            icon={<CameraOutlined />}
+            loading={startingCapture}
+            onClick={() => void startCapture()}
+          >
+            开始截图
+          </Button>
         </div>
         <div className={styles.historyToolbar}>
           <label className={styles.historyControl}>
@@ -361,15 +329,6 @@ export default function ScreenshotHistory() {
             {visibleEntries.length} 条
           </Text>
           <Button
-            type="primary"
-            icon={<CameraOutlined />}
-            loading={startingCapture}
-            disabled={working !== null}
-            onClick={() => void startCapture()}
-          >
-            开始截图
-          </Button>
-          <Button
             icon={<ReloadOutlined />}
             loading={loading}
             disabled={working !== null}
@@ -379,6 +338,20 @@ export default function ScreenshotHistory() {
           </Button>
         </div>
       </div>
+
+      {readError && (
+        <Alert
+          type="error"
+          showIcon
+          message="截图历史读取失败"
+          description={readError}
+          action={
+            <Button loading={loading} onClick={() => void refresh()}>
+              重试
+            </Button>
+          }
+        />
+      )}
 
       {writeError && (
         <Alert
@@ -391,13 +364,13 @@ export default function ScreenshotHistory() {
         />
       )}
 
-      {loading && entries.length === 0 ? (
+      {phase === "loading" ? (
         <div className={styles.historyEmpty}>
           <Spin />
         </div>
-      ) : entries.length === 0 ? (
+      ) : phase === "error" ? null : phase === "empty" ? (
         <Empty description="完成复制、保存或贴图后，截图会出现在这里" />
-      ) : visibleEntries.length === 0 ? (
+      ) : phase === "filtered" ? (
         <Empty description="没有符合当前筛选条件的截图" />
       ) : (
         <Masonry<ScreenshotHistorySummary>

@@ -62,6 +62,7 @@
     },
     "allow-get-key-visualizer-session",
     "allow-get-key-visualizer-effects-status",
-    "allow-locate-key-visualizer-mouse"
+    "allow-locate-key-visualizer-mouse",
+    "allow-open-screenshot-history-preview"
   ]
 }

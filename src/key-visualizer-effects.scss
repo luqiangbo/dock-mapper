@@ -59,3 +59,10 @@ body,
   color: white;
   font: 14px system-ui;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .key-visualizer-effects-ring {
+    animation: none;
+    transform: translate(-50%, -50%);
+  }
+}

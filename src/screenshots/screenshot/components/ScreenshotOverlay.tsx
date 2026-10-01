@@ -10,7 +10,8 @@ import {
 } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { CaptureSelectionTrace, WindowCandidate } from "../../../api/screenshotTypes";
-import type { AnnotationOutlineConfig } from "../../../types";
+import type { AnnotationOutlineConfig, MosaicEffect } from "../../../types";
+import { supportsCanvasBlur } from "./mosaicRenderer";
 import { useI18n } from "../i18n";
 import { paletteApi } from "../../../api/commands";
 import AnnotationToolbar, { type AnnotTool } from "./AnnotationToolbar";
@@ -404,6 +405,8 @@ function ScreenshotOverlay(): React.JSX.Element {
     setSelection,
     selectionRef,
   } = useCaptureLifecycle();
+  const visibleErrorRef = useRef(error);
+  visibleErrorRef.current = error;
   const handleEditorReady = useCallback(() => {
     setEditorReady(true);
     setEditorStatus("ready");
@@ -467,6 +470,9 @@ function ScreenshotOverlay(): React.JSX.Element {
   const [highlightWidth, setHighlightWidth] = useState(20);
   const [highlightOpacity, setHighlightOpacity] = useState(0.32);
   const [mosaicBlock, setMosaicBlock] = useState(12);
+  const [mosaicEffect, setMosaicEffect] = useState<MosaicEffect>("pixelate");
+  const [blurRadius, setBlurRadius] = useState(12);
+  const [mosaicBlurSupported] = useState(supportsCanvasBlur);
   const [textStyle, setTextStyle] = useState(DEFAULT_TEXT_STYLE);
   const [numberStyle, setNumberStyle] = useState(DEFAULT_NUMBER_STYLE);
   const [outlineStyle, setOutlineStyle] = useState<AnnotationOutlineConfig>({
@@ -642,7 +648,10 @@ function ScreenshotOverlay(): React.JSX.Element {
     pickerFormat,
     annotationStyles,
     captureSizeUnit,
+    toolbarTools,
     configSaving: screenshotConfigSaving,
+    styleSaveFailed,
+    styleSaveAttempted,
     reloadPalette: loadPalette,
     mutatePalette,
     updateConfig: updateScreenshotConfig,
@@ -673,6 +682,8 @@ function ScreenshotOverlay(): React.JSX.Element {
     setHighlightWidth(annotationStyles.highlight.stroke_width);
     setHighlightOpacity(annotationStyles.highlight.opacity);
     setMosaicBlock(annotationStyles.mosaic.block_size);
+    setMosaicEffect(annotationStyles.mosaic.mosaic_effect);
+    setBlurRadius(annotationStyles.mosaic.blur_radius);
   }, [annotationStyles, updateSharedColor, updateVisual]);
 
   useEffect(() => {
@@ -2996,7 +3007,9 @@ function ScreenshotOverlay(): React.JSX.Element {
       : null;
 
   const selectedStyleTool = tool === "select" ? editorSelection.tool : tool;
-  const optionsTool = isExcalidrawStyleTool(selectedStyleTool) ? selectedStyleTool : null;
+  const optionsTool = selectedStyleTool === "mosaic" || isExcalidrawStyleTool(selectedStyleTool)
+    ? selectedStyleTool
+    : null;
   const secondarySize =
     optionsTool && secondaryToolbarSize.width > 0 ? secondaryToolbarSize : undefined;
   const toolbarLayout =
@@ -3032,6 +3045,8 @@ function ScreenshotOverlay(): React.JSX.Element {
     highlightWidth,
     highlightOpacity,
     mosaicBlock,
+    mosaicEffect,
+    blurRadius,
     pickerFormat,
     textStyle,
     numberStyle,
@@ -3280,6 +3295,8 @@ function ScreenshotOverlay(): React.JSX.Element {
     if (changes.highlightWidth !== undefined) setHighlightWidth(changes.highlightWidth);
     if (changes.highlightOpacity !== undefined) setHighlightOpacity(changes.highlightOpacity);
     if (changes.mosaicBlock !== undefined) setMosaicBlock(changes.mosaicBlock);
+    if (changes.mosaicEffect !== undefined) setMosaicEffect(changes.mosaicEffect);
+    if (changes.blurRadius !== undefined) setBlurRadius(changes.blurRadius);
     if (selectedRaster && changesRaster) {
       objectStyleChangedRef.current = true;
       setRasterAnnotations((previous) =>
@@ -3405,6 +3422,8 @@ function ScreenshotOverlay(): React.JSX.Element {
           ...(changes.endArrowhead !== undefined ? { end_arrowhead: changes.endArrowhead } : {}),
           ...(changes.highlightOpacity !== undefined ? { opacity: changes.highlightOpacity } : {}),
           ...(changes.mosaicBlock !== undefined ? { block_size: changes.mosaicBlock } : {}),
+          ...(changes.mosaicEffect !== undefined ? { mosaic_effect: changes.mosaicEffect } : {}),
+          ...(changes.blurRadius !== undefined ? { blur_radius: changes.blurRadius } : {}),
           ...(changes.textStyle !== undefined
             ? { stroke_color: changes.textStyle.color, font_size: changes.textStyle.fontSize }
             : {}),
@@ -3472,6 +3491,7 @@ function ScreenshotOverlay(): React.JSX.Element {
               <ExcalidrawScreenshotEditor
                 ref={excalidrawEditorRef}
                 baseCanvas={shotBaseRef.current}
+                displayCanvas={shotRef.current}
                 captureKey={`capture-${captureGenerationRef.current}`}
                 crop={editorCrop}
                 strokeColor={strokeColor}
@@ -3490,8 +3510,14 @@ function ScreenshotOverlay(): React.JSX.Element {
                 startArrowhead={startArrowhead}
                 endArrowhead={endArrowhead}
                 textStyle={textStyle}
+                mosaicBlock={mosaicBlock}
+                mosaicEffect={mosaicEffect}
+                blurRadius={blurRadius}
+                interactionDisabled={actionsLocked}
+                tool={tool}
                 onReady={handleEditorReady}
                 onError={handleEditorError}
+                onDrawingError={setError}
                 onSelectionChange={handleEditorSelectionChange}
                 onToolChange={setTool}
               />
@@ -4371,6 +4397,7 @@ function ScreenshotOverlay(): React.JSX.Element {
         <>
           <AnnotationToolbar
             ref={primaryToolbarRef}
+            toolbarTools={toolbarTools}
             tool={tool}
             shapeKind={shapeKind}
             canUndo={editorReady}
@@ -4378,6 +4405,7 @@ function ScreenshotOverlay(): React.JSX.Element {
             compact={compactToolbar}
             toolsDisabled={toolsLocked}
             actionsDisabled={actionsLocked}
+            busy={busy}
             confirmDisabled={actionsLocked}
             ocrDisabled={!selection || !shotReady || ocrRunning}
             ocrRunning={ocrRunning}
@@ -4435,6 +4463,16 @@ function ScreenshotOverlay(): React.JSX.Element {
               ref={secondaryToolbarRef}
               tool={optionsTool}
               settings={displayedToolSettings}
+              mosaicBlurSupported={mosaicBlurSupported}
+              styleSaveFailed={styleSaveFailed}
+              styleSaveAttempted={styleSaveAttempted}
+              styleSaving={screenshotConfigSaving}
+              onRetryStyleSave={() => {
+                const failure = error;
+                void updateAnnotationStyles(annotationStyles, "标注样式保存失败").then((saved) => {
+                  if (saved && failure?.startsWith("标注样式保存失败") && visibleErrorRef.current === failure) setError(null);
+                });
+              }}
               onChange={(changes) => {
                 excalidrawEditorRef.current?.applyStyle(changes, true);
                 updateToolSettings(changes, optionsTool);

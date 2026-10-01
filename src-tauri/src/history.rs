@@ -122,6 +122,16 @@ impl HistoryStore {
             .map_err(|error| format!("读取截图历史图片失败：{error}"))
     }
 
+    pub fn summary(&self, id: &str) -> Result<ScreenshotHistorySummary, String> {
+        let path = self.entry_path(id)?;
+        let summary = read_manifest(&path.join(MANIFEST_FILE))?;
+        if summary.id != id {
+            return Err("截图历史记录标识不匹配".into());
+        }
+        self.validate_entry(&path, id, &summary)?;
+        Ok(summary)
+    }
+
     pub fn thumbnail(&self, id: &str) -> Result<Vec<u8>, String> {
         let entry_path = self.entry_path(id)?;
         let thumbnail_path = entry_path.join(THUMBNAIL_FILE);
@@ -481,6 +491,7 @@ mod tests {
         let root = temporary_root("traversal");
         let store = HistoryStore::new(root.clone()).unwrap();
         assert!(store.image("../config").is_err());
+        assert!(store.summary("../config").is_err());
         assert!(store.thumbnail("../config").is_err());
         let _ = fs::remove_dir_all(root);
     }

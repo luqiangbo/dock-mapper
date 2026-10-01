@@ -1,9 +1,9 @@
 @use "./styles/glass" as glass;
 
-$compact-radius: 10px;
+$compact-radius: 6px;
 
 .shell {
-  min-width: 840px;
+  min-width: 0;
   height: 100vh;
   padding: 10px;
   overflow: visible !important;
@@ -24,7 +24,7 @@ $compact-radius: 10px;
   min-width: 0;
   flex-direction: column;
   overflow: hidden;
-  @include glass.surface(var(--glass-panel), 16px);
+  @include glass.surface(var(--glass-panel), 10px, none, 12px);
 }
 
 .brand {
@@ -86,7 +86,7 @@ $compact-radius: 10px;
   }
 
   :global(.ant-menu-item-selected) {
-    color: var(--accent) !important;
+    color: var(--accent-ink) !important;
     background: var(--accent-soft) !important;
   }
 
@@ -99,7 +99,7 @@ $compact-radius: 10px;
   }
 
   :global(.ant-menu-item-selected .ant-menu-item-icon) {
-    color: var(--accent);
+    color: var(--accent-ink);
   }
 }
 
@@ -121,14 +121,16 @@ $compact-radius: 10px;
 
 .header {
   display: flex;
-  position: absolute;
+  position: relative;
   z-index: 2;
-  inset: 0 0 auto;
-  min-height: 64px;
+  flex: 0 0 56px;
+  height: 56px;
+  line-height: normal;
+  min-height: 56px;
   align-items: center;
   justify-content: space-between;
   padding: 0 14px;
-  @include glass.surface(var(--glass-panel), 16px);
+  @include glass.surface(var(--glass-panel), 10px, none, 12px);
 }
 
 .pageTitle,
@@ -146,13 +148,13 @@ $compact-radius: 10px;
 }
 
 .pageTitle {
-  color: var(--accent);
+  color: var(--text-secondary);
   font-size: 18px;
 
   :global(.ant-typography) {
     margin: 0;
     color: var(--text-primary);
-    font-size: 16px;
+    font-size: 20px;
   }
 }
 
@@ -161,7 +163,7 @@ $compact-radius: 10px;
     width: 34px;
     height: 34px;
     color: var(--text-secondary);
-    @include glass.control(8px);
+    @include glass.control(6px);
   }
 }
 
@@ -179,7 +181,7 @@ $compact-radius: 10px;
     height: 32px;
     padding: 0;
     border: 0;
-    border-radius: 7px;
+    border-radius: 6px;
     place-items: center;
     color: var(--text-secondary);
     background: transparent;
@@ -217,12 +219,13 @@ $compact-radius: 10px;
 .content {
   position: relative;
   width: 100%;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   min-width: 0;
   overflow: auto;
-  border-radius: 14px;
-  padding: 76px clamp(8px, 1.2vw, 16px) 16px;
-  scroll-padding-top: 76px;
+  border-radius: 10px;
+  padding: 16px clamp(12px, 2vw, 24px) 24px;
+  scroll-padding-top: 16px;
 }
 
 @container (max-width: 190px) {
@@ -256,4 +259,18 @@ $compact-radius: 10px;
     min-width: 0;
     padding: 8px;
   }
+}
+
+.bottomNav {
+  @extend .nav;
+  flex: 0 0 auto;
+  border-top: 1px solid var(--glass-border) !important;
+}
+.nav :global(.ant-menu-item-group-title) {
+  font-size: 12px;
+  padding: 16px 12px 4px;
+  color: var(--text-tertiary);
+}
+.siderPanelCompact :global(.ant-menu-item-group-title) {
+  display: none;
 }

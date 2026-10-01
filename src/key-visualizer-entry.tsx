@@ -1,3 +1,4 @@
+import { useWindowTheme } from "./hooks/useWindowTheme";
 import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { listen } from "@tauri-apps/api/event";
@@ -16,11 +17,14 @@ import {
   type KeyVisualizerEntry,
 } from "./components/keyVisualizerEntries";
 import "./key-visualizer.scss";
+import { createActivityTicker } from "./utils/activityTicker";
 
 function KeyVisualizerWindow() {
+  useWindowTheme();
   const [generation, setGeneration] = useState(0);
   const [config, setConfig] = useState<KeyVisualizerConfig | null>(null);
   const [entries, setEntries] = useState<KeyVisualizerEntry[]>([]);
+  const [now, setNow] = useState(Date.now);
   const [error, setError] = useState<string | null>(null);
 
   const session = useRef<KeyVisualizerSession | null>(null);
@@ -49,8 +53,10 @@ function KeyVisualizerWindow() {
         !status.suspended &&
         status.config.lock_keys &&
         value.generation === status.generation
-      )
+      ) {
         setLocks(value);
+        setNow(Date.now());
+      }
     };
     const receiveEffectsStatus = (next: KeyVisualizerEffectsStatus) => {
       if (disposed || (effectsStatus.current && next.generation < effectsStatus.current.generation))
@@ -74,6 +80,7 @@ function KeyVisualizerWindow() {
           session.current?.config.enabled &&
           input.generation === session.current.generation
         ) {
+          setNow(Date.now());
           setEntries((current) => appendKeyVisualizerEntry(current, input));
         }
       });
@@ -97,13 +104,17 @@ function KeyVisualizerWindow() {
     };
   }, []);
 
+  const hasContent = entries.length > 0 || locks !== null;
   useEffect(() => {
-    const timer = window.setInterval(() => {
+    if (!hasContent) return;
+    const ticker = createActivityTicker(() => {
+      setNow(Date.now());
       setEntries((current) => removeExpiredKeyVisualizerEntries(current, Date.now()));
       setLocks((current) => (current && Date.now() - current.timestamp_ms < 2000 ? current : null));
     }, 150);
-    return () => window.clearInterval(timer);
-  }, []);
+    ticker.setActive(true);
+    return ticker.stop;
+  }, [hasContent]);
 
   useEffect(() => {
     if (!config) return;
@@ -125,7 +136,6 @@ function KeyVisualizerWindow() {
       </div>
     );
   if (!config) return <div className="key-visualizer-loading">正在准备…</div>;
-  const now = Date.now();
 
   return (
     <main

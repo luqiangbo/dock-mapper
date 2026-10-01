@@ -225,12 +225,6 @@ export default function KeyMapper() {
           description="可能来自其他工具或手动修改；再次应用 DockMapper 前会要求确认并备份当前 Scancode Map。"
         />
       ) : null}
-      <Alert
-        type="info"
-        showIcon
-        message="稳定性说明"
-        description="映射由 Windows 键盘驱动在登录时加载，DockMapper 无需常驻，也不会与其他键盘钩子竞争。AltGr、Fn、组合键不支持该系统级模式。"
-      />
 
       <div className={styles.toolbar}>
         <div>

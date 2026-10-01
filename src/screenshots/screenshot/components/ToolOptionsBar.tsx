@@ -35,6 +35,11 @@ import { normalizeHexColor, selectNumber } from "./toolOptionValues";
 interface Props {
   tool: Exclude<AnnotTool, null>;
   settings: ToolSettings;
+  mosaicBlurSupported?: boolean;
+  styleSaveFailed?: boolean;
+  styleSaveAttempted?: boolean;
+  styleSaving?: boolean;
+  onRetryStyleSave?: () => void;
   onChange: (changes: Partial<ToolSettings>) => void;
   onPreviewChange?: (changes: Partial<ToolSettings>) => void;
   onColorCommit?: (color: string) => void;
@@ -216,7 +221,7 @@ function Choice({
 }: {
   label: string;
   value: string | number;
-  options: Array<{ value: string | number; label: ReactNode }>;
+  options: Array<{ value: string | number; label: ReactNode; disabled?: boolean }>;
   name: string;
   change: (value: string | number) => void;
   popup: (key: string, open: boolean) => void;
@@ -297,6 +302,11 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
   {
     tool,
     settings,
+    mosaicBlurSupported = true,
+    styleSaveFailed = false,
+    styleSaveAttempted = false,
+    styleSaving = false,
+    onRetryStyleSave,
     onChange,
     onPreviewChange,
     onColorCommit,
@@ -434,6 +444,43 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
       {settings.mixedProperties?.length ? (
         <span className="tool-options__mixed" title={`混合属性：${settings.mixedProperties.join("、")}`}>混合</span>
       ) : null}
+      {styleSaveFailed && (
+        <span role="status" className="tool-options__hint">
+          样式保存失败
+          <button type="button" className="tool-options__retry" disabled={styleSaving} onClick={onRetryStyleSave}>重试</button>
+        </span>
+      )}
+      {styleSaveAttempted && !styleSaveFailed && (
+        <span role="status" className="tool-options__hint">{styleSaving ? "保存中…" : "已保存"}</span>
+      )}
+      {tool === "mosaic" && (
+        <>
+          <Choice
+            label="效果"
+            value={settings.mosaicEffect}
+            options={[
+              { value: "pixelate", label: "像素块" },
+              { value: "blur", label: <span title={mosaicBlurSupported ? undefined : "当前环境不支持柔和模糊"}>柔和模糊</span>, disabled: !mosaicBlurSupported },
+            ]}
+            name="mosaic-effect"
+            compactWidth={98}
+            change={(value) => onChange({ mosaicEffect: value === "blur" ? "blur" : "pixelate" })}
+            popup={popup}
+          />
+          <Choice
+            label={settings.mosaicEffect === "blur" ? "强度" : "颗粒"}
+            value={settings.mosaicEffect === "blur" ? settings.blurRadius : settings.mosaicBlock}
+            options={[4, 8, 12, 16, 24, 32].map((value) => ({ value, label: `${value}px` }))}
+            name="mosaic-strength"
+            compactWidth={70}
+            change={(value) => onChange(settings.mosaicEffect === "blur"
+              ? { blurRadius: selectNumber(value) }
+              : { mosaicBlock: selectNumber(value) })}
+            popup={popup}
+          />
+          {!mosaicBlurSupported && <span role="status" className="tool-options__hint">当前环境不支持模糊，请使用像素块</span>}
+        </>
+      )}
       {sharedOptions ? sharedOptions : (tool === "rect" || tool === "ellipse" || tool === "diamond") && (
         <>
           {color}

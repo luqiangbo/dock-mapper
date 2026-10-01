@@ -30,6 +30,7 @@ export interface ApplyScancodeMapResult {
 }
 
 export interface ScreenshotConfig {
+  toolbar_tools: import("./utils/screenshotTools").ScreenshotToolbarTool[];
   shortcut: string;
   pin_shortcut: string;
   history_shortcut: string;
@@ -49,12 +50,27 @@ export interface ScreenshotConfig {
 export type AnnotationStrokeStyle = "solid" | "dashed" | "dotted";
 export type AnnotationFillStyle = "none" | "solid" | "hachure" | "cross_hatch" | "zigzag";
 export type AnnotationArrowType = "sharp" | "round" | "elbow";
-export type AnnotationArrowhead = "none" | "arrow" | "triangle" | "triangle_outline" | "circle" | "circle_outline" | "dot" | "diamond" | "diamond_outline" | "bar" | "crowfoot_one" | "crowfoot_many" | "crowfoot_one_or_many";
+export type AnnotationArrowhead =
+  | "none"
+  | "arrow"
+  | "triangle"
+  | "triangle_outline"
+  | "circle"
+  | "circle_outline"
+  | "dot"
+  | "diamond"
+  | "diamond_outline"
+  | "bar"
+  | "crowfoot_one"
+  | "crowfoot_many"
+  | "crowfoot_one_or_many";
 
 /**
  * One persisted tool preset. Fields that are not meaningful for a given tool
  * are retained so the native config has one forward-compatible wire shape.
  */
+export type MosaicEffect = "pixelate" | "blur";
+
 export interface AnnotationToolStyleConfig {
   stroke_color: string;
   background_color: string;
@@ -68,6 +84,8 @@ export interface AnnotationToolStyleConfig {
   end_arrowhead: AnnotationArrowhead;
   pressure: boolean;
   block_size: number;
+  mosaic_effect: MosaicEffect;
+  blur_radius: number;
   font_size: number;
   marker_size: number;
   outline_enabled: boolean;

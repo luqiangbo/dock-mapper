@@ -123,6 +123,7 @@ impl Default for KeyVisualizerConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ScreenshotConfig {
+    pub toolbar_tools: Vec<ScreenshotToolbarTool>,
     pub shortcut: String,
     pub pin_shortcut: String,
     pub history_shortcut: String,
@@ -153,6 +154,7 @@ impl Default for ScreenshotConfig {
     fn default() -> Self {
         Self {
             shortcut: "Control+1".into(),
+            toolbar_tools: default_screenshot_toolbar_tools(),
             pin_shortcut: "Control+2".into(),
             history_shortcut: "Control+3".into(),
             toggle_pin_shortcut: "Control+Alt+P".into(),
@@ -166,6 +168,99 @@ impl Default for ScreenshotConfig {
             annotation_styles_initialized: true,
             capture_size_unit: CaptureSizeUnit::Px,
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ScreenshotToolbarTool {
+    pub id: String,
+    pub visible: bool,
+}
+
+pub fn default_screenshot_toolbar_tools() -> Vec<ScreenshotToolbarTool> {
+    [
+        "select",
+        "rect",
+        "arrow",
+        "pen",
+        "text",
+        "mosaic",
+        "ellipse",
+        "diamond",
+        "line",
+        "highlight",
+        "picker",
+        "number",
+        "eraser",
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, id)| ScreenshotToolbarTool {
+        id: id.into(),
+        visible: index < 6,
+    })
+    .collect()
+}
+
+pub fn normalize_screenshot_toolbar_tools(tools: &mut Vec<ScreenshotToolbarTool>) {
+    let defaults = default_screenshot_toolbar_tools();
+    let mut seen = std::collections::HashSet::new();
+    tools.retain(|tool| {
+        defaults.iter().any(|known| known.id == tool.id) && seen.insert(tool.id.clone())
+    });
+    tools.extend(defaults.into_iter().filter(|tool| !seen.contains(&tool.id)));
+}
+
+#[cfg(test)]
+mod screenshot_toolbar_tests {
+    use super::*;
+    #[test]
+    fn old_settings_keep_the_original_six_visible_tools() {
+        let config: ScreenshotConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            config
+                .toolbar_tools
+                .iter()
+                .filter(|tool| tool.visible)
+                .map(|tool| tool.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["select", "rect", "arrow", "pen", "text", "mosaic"]
+        );
+    }
+    #[test]
+    fn tool_order_and_visibility_survive_save_and_read() {
+        let mut config = ScreenshotConfig::default();
+        config.toolbar_tools.swap(0, 6);
+        config.toolbar_tools[0].visible = true;
+        config.toolbar_tools[1].visible = false;
+        normalize_screenshot_config(&mut config);
+        let read: ScreenshotConfig =
+            serde_json::from_slice(&serde_json::to_vec(&config).unwrap()).unwrap();
+        assert_eq!(config.toolbar_tools, read.toolbar_tools);
+        assert_eq!(read.toolbar_tools[0].id, "ellipse");
+        assert!(!read.toolbar_tools[1].visible);
+    }
+    #[test]
+    fn unknown_and_repeated_tools_do_not_remove_other_tools() {
+        let mut tools = vec![
+            ScreenshotToolbarTool {
+                id: "pen".into(),
+                visible: false,
+            },
+            ScreenshotToolbarTool {
+                id: "pen".into(),
+                visible: true,
+            },
+            ScreenshotToolbarTool {
+                id: "unknown".into(),
+                visible: true,
+            },
+        ];
+        normalize_screenshot_toolbar_tools(&mut tools);
+        assert_eq!(tools.len(), 13);
+        assert_eq!(tools[0].id, "pen");
+        assert!(!tools[0].visible);
+        assert_eq!(tools.iter().filter(|tool| tool.id == "pen").count(), 1);
     }
 }
 
@@ -225,6 +320,15 @@ pub enum AnnotationArrowhead {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MosaicEffect {
+    Pixelate,
+    Blur,
+    #[serde(other)]
+    Unknown,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct AnnotationToolStyleConfig {
@@ -240,6 +344,8 @@ pub struct AnnotationToolStyleConfig {
     pub end_arrowhead: AnnotationArrowhead,
     pub pressure: bool,
     pub block_size: u32,
+    pub mosaic_effect: MosaicEffect,
+    pub blur_radius: u32,
     pub font_size: u32,
     pub marker_size: u32,
     pub outline_enabled: bool,
@@ -262,6 +368,8 @@ impl Default for AnnotationToolStyleConfig {
             end_arrowhead: AnnotationArrowhead::Arrow,
             pressure: true,
             block_size: 12,
+            mosaic_effect: MosaicEffect::Pixelate,
+            blur_radius: 12,
             font_size: 20,
             marker_size: 32,
             outline_enabled: true,
@@ -523,6 +631,84 @@ mod tests {
         assert_eq!(config.annotation_styles.shape.stroke_color, "#1971c2");
         assert_eq!(config.annotation_styles.arrow.stroke_color, "#1971c2");
         assert_eq!(config.annotation_styles.text.stroke_color, "#1971c2");
+    }
+
+    #[test]
+    fn old_mosaic_settings_keep_block_size_and_default_to_pixelate() {
+        let mut config: ScreenshotConfig =
+            serde_json::from_str(r#"{"annotation_styles":{"mosaic":{"block_size":24}}}"#)
+                .expect("old mosaic preset remains readable");
+        normalize_screenshot_config(&mut config);
+        assert_eq!(config.annotation_styles.mosaic.block_size, 24);
+        assert_eq!(
+            config.annotation_styles.mosaic.mosaic_effect,
+            MosaicEffect::Pixelate
+        );
+        assert_eq!(config.annotation_styles.mosaic.blur_radius, 12);
+    }
+
+    #[test]
+    fn invalid_mosaic_effect_and_strength_fall_back_to_supported_values() {
+        let mut config: ScreenshotConfig = serde_json::from_str(
+            r#"{"annotation_styles":{"mosaic":{"mosaic_effect":"unknown","blur_radius":999}}}"#,
+        )
+        .expect("unknown effects are handled by normalization");
+        normalize_screenshot_config(&mut config);
+        assert_eq!(
+            config.annotation_styles.mosaic.mosaic_effect,
+            MosaicEffect::Pixelate
+        );
+        assert_eq!(config.annotation_styles.mosaic.blur_radius, 32);
+        config.annotation_styles.mosaic.blur_radius = 0;
+        normalize_screenshot_config(&mut config);
+        assert_eq!(config.annotation_styles.mosaic.blur_radius, 2);
+    }
+
+    #[test]
+    fn changing_mosaic_effect_keeps_both_strengths_after_saving_and_reopening() {
+        let path = std::env::temp_dir().join(format!(
+            "dock-mapper-mosaic-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos(),
+        ));
+        let mut config = AppConfig::default();
+        config.screenshot_config.annotation_styles.mosaic.block_size = 24;
+        config
+            .screenshot_config
+            .annotation_styles
+            .mosaic
+            .blur_radius = 16;
+        config
+            .screenshot_config
+            .annotation_styles
+            .mosaic
+            .mosaic_effect = MosaicEffect::Blur;
+        save(&path, &config).expect("save blur preset");
+        let mut loaded = load(&path);
+        assert_eq!(
+            loaded
+                .screenshot_config
+                .annotation_styles
+                .mosaic
+                .mosaic_effect,
+            MosaicEffect::Blur
+        );
+        loaded
+            .screenshot_config
+            .annotation_styles
+            .mosaic
+            .mosaic_effect = MosaicEffect::Pixelate;
+        save(&path, &loaded).expect("replace blur with pixelate");
+        let restored = load(&path);
+        let mosaic = &restored.screenshot_config.annotation_styles.mosaic;
+        assert_eq!(mosaic.mosaic_effect, MosaicEffect::Pixelate);
+        assert_eq!(mosaic.block_size, 24);
+        assert_eq!(mosaic.blur_radius, 16);
+        let _ = fs::remove_file(storage::test_backup_path(&path));
+        let _ = fs::remove_file(path);
     }
 
     #[test]

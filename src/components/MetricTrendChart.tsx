@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import * as echarts from "echarts/core";
 import { LineChart, type LineSeriesOption } from "echarts/charts";
 import {
@@ -17,9 +17,18 @@ import { formatSpeed } from "../utils/format";
 import type { DashboardSample } from "./dashboardTelemetry";
 import styles from "./components.module.scss";
 
-echarts.use([LineChart, AriaComponent, GridComponent, LegendComponent, TooltipComponent, SVGRenderer]);
+echarts.use([
+  LineChart,
+  AriaComponent,
+  GridComponent,
+  LegendComponent,
+  TooltipComponent,
+  SVGRenderer,
+]);
 
-type ChartOption = ComposeOption<LineSeriesOption | GridComponentOption | LegendComponentOption | TooltipComponentOption>;
+type ChartOption = ComposeOption<
+  LineSeriesOption | GridComponentOption | LegendComponentOption | TooltipComponentOption
+>;
 type SampleKey = "upload" | "download" | "cpu" | "memory";
 
 interface SeriesDefinition {
@@ -28,7 +37,7 @@ interface SeriesDefinition {
   color: string;
 }
 
-export default function MetricTrendChart({
+function MetricTrendChart({
   title,
   samples,
   series,
@@ -48,10 +57,25 @@ export default function MetricTrendChart({
     if (!container) return;
     const chart = echarts.init(container, undefined, { renderer: "svg" });
     chartRef.current = chart;
-    const observer = new ResizeObserver(() => chart.resize());
+    let frame = 0;
+    let previousWidth = container.clientWidth;
+    let previousHeight = container.clientHeight;
+    const observer = new ResizeObserver(() => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+        if (width === previousWidth && height === previousHeight) return;
+        previousWidth = width;
+        previousHeight = height;
+        chart.resize();
+      });
+    });
     observer.observe(container);
     return () => {
       observer.disconnect();
+      cancelAnimationFrame(frame);
       chartRef.current = null;
       chart.dispose();
     };
@@ -60,8 +84,8 @@ export default function MetricTrendChart({
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
-    const textColor = resolved === "dark" ? "#aeb9d4" : "#5f6b82";
-    const lineColor = resolved === "dark" ? "rgba(191,209,255,.15)" : "rgba(95,107,130,.16)";
+    const textColor = resolved === "dark" ? "#b6bdc7" : "#59636f";
+    const lineColor = resolved === "dark" ? "#414750" : "#dce1e7";
     const option: ChartOption = {
       animation: false,
       aria: { enabled: true, description: `${title}动态折线图` },
@@ -70,7 +94,8 @@ export default function MetricTrendChart({
       legend: { top: 0, right: 0, textStyle: { color: textColor, fontSize: 11 } },
       tooltip: {
         trigger: "axis",
-        valueFormatter: (value) => percent ? `${Number(value).toFixed(1)}%` : formatSpeed(Number(value)),
+        valueFormatter: (value) =>
+          percent ? `${Number(value).toFixed(1)}%` : formatSpeed(Number(value)),
       },
       xAxis: {
         type: "time",
@@ -84,7 +109,7 @@ export default function MetricTrendChart({
         max: percent ? 100 : undefined,
         axisLabel: {
           color: textColor,
-          formatter: (value: number) => percent ? `${value}%` : formatSpeed(value),
+          formatter: (value: number) => (percent ? `${value}%` : formatSpeed(value)),
         },
         splitLine: { lineStyle: { color: lineColor } },
       },
@@ -114,3 +139,4 @@ export default function MetricTrendChart({
 
   return <div ref={containerRef} className={styles.trendChart} role="img" aria-label={title} />;
 }
+export default memo(MetricTrendChart);

@@ -1,6 +1,7 @@
 use super::*;
 
 pub fn normalize_screenshot_config(config: &mut ScreenshotConfig) {
+    super::normalize_screenshot_toolbar_tools(&mut config.toolbar_tools);
     config.filename_prefix = config
         .filename_prefix
         .trim()
@@ -105,6 +106,10 @@ pub(crate) fn normalize_annotation_tool_style(style: &mut AnnotationToolStyleCon
         fallback.opacity
     };
     style.block_size = style.block_size.clamp(2, 64);
+    style.blur_radius = style.blur_radius.clamp(2, 32);
+    if style.mosaic_effect == MosaicEffect::Unknown {
+        style.mosaic_effect = MosaicEffect::Pixelate;
+    }
     style.font_size = style.font_size.clamp(8, 96);
     style.marker_size = style.marker_size.clamp(16, 64);
     style.outline_color =

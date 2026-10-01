@@ -16,6 +16,9 @@ import {
   useState,
 } from "react";
 import type { AnnotTool } from "./AnnotationToolbar";
+import { MosaicDrawingLayer } from "./MosaicDrawingLayer";
+import { useScreenshotViewport } from "../hooks/useScreenshotViewport";
+import type { MosaicEffect } from "../../../types";
 import type {
   Arrowhead,
   ArrowStyle,
@@ -34,6 +37,7 @@ import {
   excalidrawToolType,
   isSameExcalidrawSelection,
   screenshotEditorPresentation,
+  screenshotToolFromActiveType,
   transformBetweenCrops,
   type ExcalidrawSelectionState,
 } from "./excalidrawScreenshotAdapter";
@@ -81,6 +85,7 @@ export type { ExcalidrawSelectionState } from "./excalidrawScreenshotAdapter";
 interface Props {
   /** The already-cropped, physical-pixel screenshot canvas. */
   baseCanvas: HTMLCanvasElement | null;
+  displayCanvas: HTMLCanvasElement | null;
   captureKey: string;
   crop: ExcalidrawCrop | null;
   strokeColor: string;
@@ -95,8 +100,14 @@ interface Props {
   startArrowhead: Arrowhead;
   endArrowhead: Arrowhead;
   textStyle: TextStyle;
+  mosaicBlock: number;
+  mosaicEffect: MosaicEffect;
+  blurRadius: number;
+  interactionDisabled: boolean;
+  tool: AnnotTool | null;
   onReady?: () => void;
   onError?: (message: string) => void;
+  onDrawingError?: (message: string) => void;
   onSelectionChange?: (selection: ExcalidrawSelectionState) => void;
   onToolChange?: (tool: AnnotTool) => void;
 }
@@ -144,17 +155,6 @@ function arrowStyleFromElement(element: { elbowed?: boolean; roundness?: unknown
   return element.roundness ? "round" : "sharp";
 }
 
-function toolFromActiveType(type: string): AnnotTool {
-  return type === "rectangle" ? "rect"
-    : type === "ellipse" ? "ellipse"
-      : type === "diamond" ? "diamond"
-        : type === "line" ? "line"
-          : type === "arrow" ? "arrow"
-            : type === "freedraw" ? "pen"
-              : type === "text" ? "text"
-                : type === "eraser" ? "eraser" : "select";
-}
-
 function supportedArrowhead(value: unknown): Arrowhead {
   return value === "arrow" || value === "triangle" || value === "triangle_outline" ||
       value === "circle" || value === "circle_outline" || value === "dot" ||
@@ -182,6 +182,14 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
   function ExcalidrawScreenshotEditor(props, ref): React.JSX.Element {
     const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
     const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
+    const { rootRef, alignViewport, scheduleAlignment, revision: viewportRevision } = useScreenshotViewport(
+      api, props.baseCanvas, props.displayCanvas, props.captureKey,
+    );
+    const baseCanvasRef = useRef(props.baseCanvas);
+    const alignViewportRef = useRef(alignViewport);
+    baseCanvasRef.current = props.baseCanvas;
+    alignViewportRef.current = alignViewport;
+    const hasBaseCanvas = Boolean(props.baseCanvas);
     const callbacksRef = useRef({ onReady: props.onReady, onError: props.onError });
     const selectionCallbackRef = useRef(props.onSelectionChange);
     const toolCallbackRef = useRef(props.onToolChange);
@@ -193,10 +201,19 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
     const appStateRef = useRef<Record<string, unknown>>({});
     const [ready, setReady] = useState(false);
     const [failed, setFailed] = useState(false);
+    const [mosaicActive, setMosaicActive] = useState(false);
+    const mosaicActiveRef = useRef(false);
     const cropRef = useRef<ExcalidrawCrop | null>(null);
     const captureKeyRef = useRef("");
     const reportedToolRef = useRef<AnnotTool>("select");
     const reportedSelectionRef = useRef<ExcalidrawSelectionState>({ tool: null, tools: [], count: 0 });
+
+    useEffect(() => {
+      if (props.tool !== "mosaic" && mosaicActiveRef.current) {
+        mosaicActiveRef.current = false;
+        setMosaicActive(false);
+      }
+    }, [props.tool]);
 
     const applyDefaultStyle = useCallback(() => {
       const api = apiRef.current;
@@ -302,11 +319,13 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
 
     useEffect(() => {
       const api = apiRef.current;
-      const base = props.baseCanvas;
+      const base = baseCanvasRef.current;
       if (!api || !base) return;
       let cancelled = false;
       setReady(false);
       setFailed(false);
+      mosaicActiveRef.current = false;
+      setMosaicActive(false);
       void (async () => {
         const fileId = `dockmapper-capture-${props.captureKey}`;
         if (cancelled) return;
@@ -318,10 +337,7 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
           appState: { viewBackgroundColor: "transparent" } as never,
           captureUpdate: CaptureUpdateAction.NEVER,
         });
-        // CSS pixels can differ from the source bitmap on a high-DPI display;
-        // fit the locked bitmap to the selected viewport without resampling it
-        // for the exported PNG.
-        api.scrollToContent(background, { fitToViewport: true, viewportZoomFactor: 1, animate: false });
+        alignViewportRef.current();
         if (!cancelled) {
           captureKeyRef.current = props.captureKey;
           cropRef.current = props.crop;
@@ -341,7 +357,7 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
       return () => {
         cancelled = true;
       };
-    }, [api, props.baseCanvas, props.captureKey]);
+    }, [api, hasBaseCanvas, props.captureKey]);
 
     useEffect(() => {
       const api = apiRef.current;
@@ -378,14 +394,11 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
           ...(element.type === "text" ? { fontSize: element.fontSize * scaleY } : {}),
         } as never);
       });
-      const boundary = elements.find((element) => element.locked);
       api.updateScene({ elements, captureUpdate: CaptureUpdateAction.NEVER });
       api.history.clear();
       cropRef.current = next;
-      if (boundary) {
-        api.scrollToContent(boundary, { fitToViewport: true, viewportZoomFactor: 1, animate: false });
-      }
-    }, [props.captureKey, props.crop, ready]);
+      alignViewport();
+    }, [alignViewport, props.captureKey, props.crop, ready]);
 
     const handleApi = useCallback((nextApi: ExcalidrawImperativeAPI) => {
       apiRef.current = nextApi;
@@ -395,7 +408,12 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
     const handleChange = useCallback<NonNullable<ExcalidrawProps["onChange"]>>(
       (elements, appState) => {
         appStateRef.current = appState as unknown as Record<string, unknown>;
-        const activeTool = toolFromActiveType(appState.activeTool.type);
+        scheduleAlignment();
+        if (mosaicActiveRef.current && appState.activeTool.type !== "selection") {
+          mosaicActiveRef.current = false;
+          setMosaicActive(false);
+        }
+        const activeTool = screenshotToolFromActiveType(appState.activeTool.type, mosaicActiveRef.current);
         if (reportedToolRef.current !== activeTool) {
           reportedToolRef.current = activeTool;
           toolCallbackRef.current?.(activeTool);
@@ -482,7 +500,7 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
           selectionCallbackRef.current?.(nextSelection);
         }
       },
-      [],
+      [scheduleAlignment],
     );
 
     useImperativeHandle(ref, () => ({
@@ -533,9 +551,14 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
         return new Uint8Array(await result.arrayBuffer());
       },
       setTool: (tool) => {
+        mosaicActiveRef.current = tool === "mosaic";
+        setMosaicActive(tool === "mosaic");
         const type = excalidrawToolType(tool);
         apiRef.current?.updateScene({
-          appState: { activeTool: { type, lastActiveTool: null, locked: type !== "selection" } } as never,
+          appState: {
+            activeTool: { type, lastActiveTool: null, locked: type !== "selection" },
+            ...(tool === "mosaic" ? { selectedElementIds: {} } : {}),
+          } as never,
         });
       },
       applyStyle: applySelectionStyle,
@@ -553,6 +576,7 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
 
     return (
       <div
+        ref={rootRef}
         className="excalidraw-screenshot-editor"
         data-ready={presentation.dataReady}
         aria-hidden={presentation.ariaHidden}
@@ -577,6 +601,18 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
           onPaste={rejectPaste}
           onChange={handleChange}
         />
+        {mosaicActive && ready && !props.interactionDisabled && api && props.baseCanvas && (
+          <MosaicDrawingLayer
+            key={`${props.captureKey}:${viewportRevision}:${props.crop?.sourceX}:${props.crop?.sourceY}:${props.crop?.sourceWidth}:${props.crop?.sourceHeight}:${props.crop?.outputWidth}:${props.crop?.outputHeight}`}
+            api={api}
+            baseCanvas={props.baseCanvas}
+            blockSize={props.mosaicBlock}
+            effect={props.mosaicEffect}
+            blurRadius={props.blurRadius}
+            captureKey={props.captureKey}
+            onError={props.onDrawingError ?? props.onError}
+          />
+        )}
       </div>
     );
   },

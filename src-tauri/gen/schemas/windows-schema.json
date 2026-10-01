@@ -519,6 +519,12 @@
           "markdownDescription": "Enables the get_screenshot_history_image command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_screenshot_history_preview_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-screenshot-history-preview-session",
+          "markdownDescription": "Enables the get_screenshot_history_preview_session command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_screenshot_history_thumbnail command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-screenshot-history-thumbnail",
@@ -565,6 +571,12 @@
           "type": "string",
           "const": "allow-locate-key-visualizer-mouse",
           "markdownDescription": "Enables the locate_key_visualizer_mouse command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_screenshot_history_preview command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-screenshot-history-preview",
+          "markdownDescription": "Enables the open_screenshot_history_preview command without any pre-configured scope."
         },
         {
           "description": "Enables the open_url command without any pre-configured scope.",
@@ -933,6 +945,12 @@
           "markdownDescription": "Denies the get_screenshot_history_image command without any pre-configured scope."
         },
         {
+          "description": "Denies the get_screenshot_history_preview_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-screenshot-history-preview-session",
+          "markdownDescription": "Denies the get_screenshot_history_preview_session command without any pre-configured scope."
+        },
+        {
           "description": "Denies the get_screenshot_history_thumbnail command without any pre-configured scope.",
           "type": "string",
           "const": "deny-get-screenshot-history-thumbnail",
@@ -979,6 +997,12 @@
           "type": "string",
           "const": "deny-locate-key-visualizer-mouse",
           "markdownDescription": "Denies the locate_key_visualizer_mouse command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_screenshot_history_preview command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-screenshot-history-preview",
+          "markdownDescription": "Denies the open_screenshot_history_preview command without any pre-configured scope."
         },
         {
           "description": "Denies the open_url command without any pre-configured scope.",

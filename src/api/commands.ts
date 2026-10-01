@@ -3,6 +3,7 @@ import type { KeyMapping, KeyVisualizerConfig, ScreenshotConfig, WidgetConfig } 
 import { invokeCommand } from "./ipc";
 
 export const MAIN_EVENTS = {
+  screenshotConfigChanged: "screenshot-config-changed",
   configChanged: "config-changed",
   historyChanged: "screenshot-history-changed",
   historyWriteFailed: "screenshot-history-write-failed",
@@ -32,6 +33,8 @@ export const keyMappingApi = {
 };
 
 export const historyApi = {
+  openPreview: (id: string) => invokeCommand("open_screenshot_history_preview", { id }),
+  previewSession: () => invokeCommand("get_screenshot_history_preview_session"),
   list: () => invokeCommand("list_screenshot_history"),
   image: async (id: string) =>
     copyBinaryPayload(await invokeCommand("get_screenshot_history_image", { id })),

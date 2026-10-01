@@ -5,6 +5,7 @@ import type {
   AnnotationOutlineConfig,
   AnnotationStrokeStyle,
   ScreenshotConfig,
+  MosaicEffect,
 } from "../../../types";
 export type ArrowPreset = AnnotationArrowType;
 export type ArrowStyle = ArrowPreset
@@ -148,6 +149,8 @@ export interface ToolSettings {
   highlightWidth: number;
   highlightOpacity: number;
   mosaicBlock: number;
+  mosaicEffect: MosaicEffect;
+  blurRadius: number;
   pickerFormat: ScreenshotConfig["color_copy_format"];
   textStyle: TextStyle;
   numberStyle: NumberStyle;

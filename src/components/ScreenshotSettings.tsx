@@ -20,6 +20,7 @@ import type { ScreenshotConfig, ShortcutRuntimeStatus } from "../types";
 import styles from "./components.module.scss";
 import ScreenshotHistory from "./ScreenshotHistory";
 import ShortcutSelect from "./ShortcutSelect";
+import ScreenshotToolbarSettings from "./ScreenshotToolbarSettings";
 import { errorMessage, MAIN_EVENTS, screenshotSettingsApi } from "../api/commands";
 import { resetShortcutConfig, shortcutStatusDisplay } from "../utils/shortcutStatus";
 import {
@@ -91,10 +92,11 @@ export default function ScreenshotSettings({
     onError: (error, { latest }) => {
       if (latest) setSaveError(errorMessage(error));
     },
-    onDetachedError: (error) => notification.error({
-      message: "截图设置未保存",
-      description: errorMessage(error),
-    }),
+    onDetachedError: (error) =>
+      notification.error({
+        message: "截图设置未保存",
+        description: errorMessage(error),
+      }),
   });
 
   const load = useCallback(async () => {
@@ -302,6 +304,9 @@ export default function ScreenshotSettings({
               ))}
             </div>
           </div>
+          <Form.Item name="toolbar_tools" className={styles.screenshotToolbarField}>
+            <ScreenshotToolbarSettings />
+          </Form.Item>
           <Form.Item name="save_directory" label="默认保存目录">
             <Input
               readOnly
@@ -376,12 +381,6 @@ export default function ScreenshotSettings({
           </div>
         </div>
       </Card>
-      <Alert
-        type="info"
-        showIcon
-        message="截图交互"
-        description="区域选择后可使用形状、画笔、高亮、马赛克、文字、取色笔、二维码识别和像素标尺。"
-      />
     </Form>
   );
   return (

@@ -1,6 +1,18 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Alert, App as AntApp, Button, Card, Col, Grid, Row, Segmented, Space, Spin, Typography } from "antd";
+import {
+  Alert,
+  App as AntApp,
+  Button,
+  Card,
+  Col,
+  Grid,
+  Row,
+  Segmented,
+  Space,
+  Spin,
+  Typography,
+} from "antd";
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
@@ -12,7 +24,13 @@ import {
   ReloadOutlined,
 } from "@ant-design/icons";
 import type { RuntimeHealth, ScancodeMapStatus, SysStatus } from "../types";
-import { errorMessage, keyMappingApi, MAIN_EVENTS, runtimeApi, screenshotSettingsApi } from "../api/commands";
+import {
+  errorMessage,
+  keyMappingApi,
+  MAIN_EVENTS,
+  runtimeApi,
+  screenshotSettingsApi,
+} from "../api/commands";
 import { formatSpeed } from "../utils/format";
 import MetricTrendChart from "./MetricTrendChart";
 import type { DashboardSample } from "./dashboardTelemetry";
@@ -20,16 +38,10 @@ import { selectTelemetryArchive, type TrendRange } from "./telemetryArchive";
 import type { TelemetryFreshness } from "../utils/telemetryFreshness";
 import type { AlertEntry } from "./telemetryAlerts";
 import styles from "./components.module.scss";
+import { useTheme } from "../ThemeContext";
+import { accentColors, themePalettes } from "../themePalette";
 
 const { Text, Title } = Typography;
-const NETWORK_SERIES = [
-  { key: "upload" as const, name: "上传", color: "#f59e0b" },
-  { key: "download" as const, name: "下载", color: "#3b82f6" },
-];
-const RESOURCE_SERIES = [
-  { key: "cpu" as const, name: "CPU", color: "#8b5cf6" },
-  { key: "memory" as const, name: "内存", color: "#10b981" },
-];
 
 interface Props {
   status: SysStatus | null;
@@ -42,12 +54,40 @@ interface Props {
 }
 
 function MetricCard({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
-  return <Card className={styles.glassCard}>
-    <div className={styles.metric}><span className={styles.metricIcon}>{icon}</span><div><Text type="secondary">{label}</Text><span className={styles.metricValue}>{value}</span></div></div>
-  </Card>;
+  return (
+    <Card className={styles.glassCard}>
+      <div className={styles.metric}>
+        <span className={styles.metricIcon}>{icon}</span>
+        <div>
+          <Text type="secondary">{label}</Text>
+          <span className={styles.metricValue}>{value}</span>
+        </div>
+      </div>
+    </Card>
+  );
 }
 
-export default function Dashboard({ status, freshness, samples, archive, alerts, onMarkAlertsRead, onNavigate }: Props) {
+export default function Dashboard({
+  status,
+  freshness,
+  samples,
+  archive,
+  alerts,
+  onMarkAlertsRead,
+  onNavigate,
+}: Props) {
+  const { accentColor, resolved } = useTheme();
+  const chartColor = accentColors(accentColor, resolved).foreground;
+  const secondaryColor = themePalettes[resolved]["chart-secondary"];
+  const warmColor = themePalettes[resolved]["chart-warm"];
+  const networkSeries = useMemo(() => [
+    { key: "upload" as const, name: "上传", color: warmColor },
+    { key: "download" as const, name: "下载", color: chartColor },
+  ], [chartColor, warmColor]);
+  const resourceSeries = useMemo(() => [
+    { key: "cpu" as const, name: "CPU", color: chartColor },
+    { key: "memory" as const, name: "内存", color: secondaryColor },
+  ], [chartColor, secondaryColor]);
   const screens = Grid.useBreakpoint();
   const gutter: [number, number] = [screens.lg ? 16 : 12, 12];
   const [mapStatus, setMapStatus] = useState<ScancodeMapStatus | null>(null);
@@ -57,19 +97,32 @@ export default function Dashboard({ status, freshness, samples, archive, alerts,
   const [startingCapture, setStartingCapture] = useState(false);
   const [showAllAlerts, setShowAllAlerts] = useState(false);
   const [trendRange, setTrendRange] = useState<TrendRange>("live");
-  const trendSamples = useMemo(() => trendRange === "live" ? samples : selectTelemetryArchive(archive, trendRange, Date.now()), [archive, samples, trendRange]);
-  const trendLabel = trendRange === "live" ? "最近 5 分钟" : trendRange === "hour" ? "最近 1 小时" : "最近 24 小时";
+  const archiveSamples = useMemo(
+    () => (trendRange === "live" ? [] : selectTelemetryArchive(archive, trendRange, Date.now())),
+    [archive, trendRange],
+  );
+  const trendSamples = trendRange === "live" ? samples : archiveSamples;
+  const trendLabel =
+    trendRange === "live" ? "最近 5 分钟" : trendRange === "hour" ? "最近 1 小时" : "最近 24 小时";
   const { notification } = AntApp.useApp();
 
   const refreshMapStatus = useCallback(async () => {
     setMapError(null);
-    try { setMapStatus(await keyMappingApi.status()); }
-    catch (error) { setMapStatus(null); setMapError(errorMessage(error)); }
+    try {
+      setMapStatus(await keyMappingApi.status());
+    } catch (error) {
+      setMapStatus(null);
+      setMapError(errorMessage(error));
+    }
   }, []);
   const refreshRuntimeHealth = useCallback(async () => {
     setHealthError(null);
-    try { setRuntimeHealth(await runtimeApi.health()); }
-    catch (error) { setRuntimeHealth(null); setHealthError(errorMessage(error)); }
+    try {
+      setRuntimeHealth(await runtimeApi.health());
+    } catch (error) {
+      setRuntimeHealth(null);
+      setHealthError(errorMessage(error));
+    }
   }, []);
 
   useEffect(() => {
@@ -77,7 +130,10 @@ export default function Dashboard({ status, freshness, samples, archive, alerts,
     void refreshRuntimeHealth();
     const timer = window.setInterval(() => void refreshRuntimeHealth(), 5000);
     const mapListener = listen(MAIN_EVENTS.scancodeMapChanged, () => void refreshMapStatus());
-    const shortcutListener = listen(MAIN_EVENTS.shortcutStatusChanged, () => void refreshRuntimeHealth());
+    const shortcutListener = listen(
+      MAIN_EVENTS.shortcutStatusChanged,
+      () => void refreshRuntimeHealth(),
+    );
     return () => {
       void mapListener.then((unlisten) => unlisten());
       void shortcutListener.then((unlisten) => unlisten());
@@ -87,71 +143,309 @@ export default function Dashboard({ status, freshness, samples, archive, alerts,
 
   const startCapture = async () => {
     setStartingCapture(true);
-    try { await screenshotSettingsApi.start(); }
-    catch (error) { notification.error({ message: "启动截图失败", description: errorMessage(error) }); }
-    finally { setStartingCapture(false); }
+    try {
+      await screenshotSettingsApi.start();
+    } catch (error) {
+      notification.error({ message: "启动截图失败", description: errorMessage(error) });
+    } finally {
+      setStartingCapture(false);
+    }
   };
-  const mappingLabel = !mapStatus ? "读取中" : mapStatus.state === "applied" ? "已写入系统" : mapStatus.state === "draft_changed" ? "草稿待应用" : mapStatus.state === "system_changed" ? "系统映射已变化" : "尚未应用";
-  const registeredShortcuts = runtimeHealth?.screenshot.shortcuts.filter((item) => item.registered).length ?? 0;
+  const mappingLabel = !mapStatus
+    ? "读取中"
+    : mapStatus.state === "applied"
+      ? "已写入系统"
+      : mapStatus.state === "draft_changed"
+        ? "草稿待应用"
+        : mapStatus.state === "system_changed"
+          ? "系统映射已变化"
+          : "尚未应用";
+  const registeredShortcuts =
+    runtimeHealth?.screenshot.shortcuts.filter((item) => item.registered).length ?? 0;
   const shortcutTotal = runtimeHealth?.screenshot.shortcuts.length ?? 0;
-  const quickOcrAvailable = runtimeHealth?.screenshot.shortcuts.find((item) => item.actionId === "quick_ocr")?.registered;
+  const quickOcrAvailable = runtimeHealth?.screenshot.shortcuts.find(
+    (item) => item.actionId === "quick_ocr",
+  )?.registered;
 
-  return <div className={styles.page}>
-    <section className={styles.dashboardHero}>
-      <div><Text type="secondary">本机实时概览</Text><Title level={3}>运行状态一目了然</Title></div>
-      <span className={styles.liveBadge}><i />{freshness === "live" ? "实时更新" : freshness === "stale" ? "数据已过期" : "等待采样"}</span>
-    </section>
-
-    {freshness === "stale" && <Alert type="warning" showIcon message="系统数据暂停更新" description="当前数值已隐藏，请检查挂件或重新打开主窗口。" />}
-
-    <Row gutter={gutter}>
-      <Col xs={24} sm={12} lg={6}><MetricCard icon={<ArrowUpOutlined />} label={!status ? "实时上传" : status.network_available ? "实时上传" : "上传（网卡不可用）"} value={status?.network_available ? formatSpeed(status.upload_speed) : "—"} /></Col>
-      <Col xs={24} sm={12} lg={6}><MetricCard icon={<ArrowDownOutlined />} label={!status ? "实时下载" : status.network_available ? "实时下载" : "下载（网卡不可用）"} value={status?.network_available ? formatSpeed(status.download_speed) : "—"} /></Col>
-      <Col xs={24} sm={12} lg={6}><MetricCard icon={<DashboardOutlined />} label="CPU 占用" value={status?.cpu_usage == null ? "—" : `${status.cpu_usage.toFixed(0)}%`} /></Col>
-      <Col xs={24} sm={12} lg={6}><MetricCard icon={<DashboardOutlined />} label="内存占用" value={status == null ? "—" : `${status.memory_usage.toFixed(0)}%`} /></Col>
-      {status?.battery && <Col xs={24} sm={12} lg={6}><MetricCard icon={<DashboardOutlined />} label={status.battery.charging ? "电池（充电中）" : "电池"} value={`${status.battery.percentage.toFixed(0)}%`} /></Col>}
-    </Row>
-
-    <Card className={styles.surfaceCard} title={`本地提醒 · ${alerts.filter((item) => !item.read).length} 条未读`} extra={<Space>{alerts.length > 5 && <Button size="small" onClick={() => setShowAllAlerts((value) => !value)}>{showAllAlerts ? "收起" : "查看全部"}</Button>}<Button size="small" disabled={!alerts.some((item) => !item.read)} onClick={onMarkAlertsRead}>全部标为已读</Button></Space>}>
-      {alerts.length === 0 ? <Text type="secondary">暂无提醒；可在挂件设置中启用指标阈值。</Text> : (showAllAlerts ? alerts : alerts.slice(-5)).slice().reverse().map((alert) => (
-        <div key={alert.id} className={styles.dashboardStatusRow}>
-          <span>{alert.read ? "" : "● "}{alert.kind === "cpu" ? "CPU" : alert.kind === "memory" ? "内存" : "电池"} {alert.value.toFixed(0)}% · 阈值 {alert.threshold}%</span>
-          <Text type="secondary">{new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(alert.createdAt)}</Text>
+  return (
+    <div className={styles.page}>
+      <section className={styles.dashboardHero}>
+        <div>
+          <Title level={3}>本机状态</Title>
+          <Text type="secondary">系统指标与工具状态</Text>
         </div>
-      ))}
-    </Card>
+        <Button
+          type="primary"
+          icon={<CameraOutlined />}
+          loading={startingCapture}
+          onClick={() => void startCapture()}
+        >
+          开始截图
+        </Button>
+        <span className={styles.liveBadge}>
+          <i />
+          {freshness === "live" ? "实时更新" : freshness === "stale" ? "数据已过期" : "等待采样"}
+        </span>
+      </section>
 
-    <Segmented<TrendRange> value={trendRange} onChange={setTrendRange} options={[{ label: "5 分钟", value: "live" }, { label: "1 小时", value: "hour" }, { label: "24 小时", value: "day" }]} aria-label="趋势时间范围" />
-    {trendRange !== "live" && <Text type="secondary">应用运行时按分钟保存在本机；退出后的时段显示断点。</Text>}
-    <Row gutter={gutter}>
-      <Col xs={24} lg={12}><Card className={styles.surfaceCard} title={`网络趋势 · ${trendLabel}`}>
-        {trendSamples.length < 2 ? <div className={styles.chartEmpty}>{trendRange === "live" && <Spin size="small" />}<Text type="secondary">该时间范围暂无足够采样</Text></div> : <MetricTrendChart title={`${trendLabel}网络趋势`} samples={trendSamples} series={NETWORK_SERIES} />}
-      </Card></Col>
-      <Col xs={24} lg={12}><Card className={styles.surfaceCard} title={`资源趋势 · ${trendLabel}`}>
-        {trendSamples.length < 2 ? <div className={styles.chartEmpty}>{trendRange === "live" && <Spin size="small" />}<Text type="secondary">该时间范围暂无足够采样</Text></div> : <MetricTrendChart title={`${trendLabel}资源趋势`} samples={trendSamples} series={RESOURCE_SERIES} percent />}
-      </Card></Col>
-    </Row>
+      {freshness === "stale" && (
+        <Alert
+          type="warning"
+          showIcon
+          message="系统数据暂停更新"
+          description="当前数值已隐藏，请检查挂件或重新打开主窗口。"
+        />
+      )}
 
-    <Row gutter={gutter}>
-      <Col xs={24} lg={12}><Card className={styles.surfaceCard} title="功能状态">
-        <div className={styles.dashboardStatusList}>
-          {mapError ? <Alert type="error" showIcon message="扫描码映射状态读取失败" description={mapError} action={<Button size="small" icon={<ReloadOutlined />} onClick={() => void refreshMapStatus()}>重试</Button>} /> : <div className={styles.dashboardStatusRow}><span><KeyOutlined />扫描码映射</span><b>{mappingLabel}</b></div>}
-          {healthError ? <Alert type="error" showIcon message="运行统计读取失败" description={healthError} action={<Button size="small" icon={<ReloadOutlined />} onClick={() => void refreshRuntimeHealth()}>重试</Button>} /> : runtimeHealth ? <>
-            <div className={styles.dashboardStatusRow}><span><CameraOutlined />截图快捷键</span><b>{registeredShortcuts}/{shortcutTotal} 可用</b></div>
-            <div className={styles.dashboardStatusRow}><span><DashboardOutlined />最近捕获</span><b>{runtimeHealth.screenshot.recentCaptureBackend ?? "暂无"}{runtimeHealth.screenshot.recentCaptureMs == null ? "" : ` · ${runtimeHealth.screenshot.recentCaptureMs} ms`}</b></div>
-            <div className={styles.dashboardStatusRow}><span><DashboardOutlined />OCR / 贴图</span><b>OCR {quickOcrAvailable ? "可用" : "不可用"} · 贴图 {runtimeHealth.screenshot.pinCount}</b></div>
-            <div className={styles.dashboardStatusRow}><span><HistoryOutlined />截图历史</span><b>{runtimeHealth.historyCount} 项</b></div>
-          </> : <Spin size="small" />}
-        </div>
-      </Card></Col>
-      <Col xs={24} lg={12}><Card className={styles.surfaceCard} title="快捷操作">
-        <div className={styles.dashboardActions}>
-          <Button type="primary" icon={<CameraOutlined />} loading={startingCapture} onClick={() => void startCapture()}>开始截图</Button>
-          <Button icon={<HistoryOutlined />} onClick={() => onNavigate("screenshot", "history")}>截图历史</Button>
-          <Button icon={<KeyOutlined />} onClick={() => onNavigate("keymapper")}>按键映射</Button>
-          <Button icon={<MenuOutlined />} onClick={() => onNavigate("widget")}>挂件设置</Button>
-        </div>
-      </Card></Col>
-    </Row>
-  </div>;
+      <Row gutter={gutter}>
+        <Col xs={24} sm={12} lg={6}>
+          <MetricCard
+            icon={<ArrowUpOutlined />}
+            label={
+              !status ? "实时上传" : status.network_available ? "实时上传" : "上传（网卡不可用）"
+            }
+            value={status?.network_available ? formatSpeed(status.upload_speed) : "—"}
+          />
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <MetricCard
+            icon={<ArrowDownOutlined />}
+            label={
+              !status ? "实时下载" : status.network_available ? "实时下载" : "下载（网卡不可用）"
+            }
+            value={status?.network_available ? formatSpeed(status.download_speed) : "—"}
+          />
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <MetricCard
+            icon={<DashboardOutlined />}
+            label="CPU 占用"
+            value={status?.cpu_usage == null ? "—" : `${status.cpu_usage.toFixed(0)}%`}
+          />
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <MetricCard
+            icon={<DashboardOutlined />}
+            label="内存占用"
+            value={status == null ? "—" : `${status.memory_usage.toFixed(0)}%`}
+          />
+        </Col>
+        {status?.battery && (
+          <Col xs={24} sm={12} lg={6}>
+            <MetricCard
+              icon={<DashboardOutlined />}
+              label={status.battery.charging ? "电池（充电中）" : "电池"}
+              value={`${status.battery.percentage.toFixed(0)}%`}
+            />
+          </Col>
+        )}
+      </Row>
+      <Row gutter={gutter}>
+        <Col xs={24} lg={12}>
+          <Card className={styles.surfaceCard} title="功能状态">
+            <div className={styles.dashboardStatusList}>
+              {mapError ? (
+                <Alert
+                  type="error"
+                  showIcon
+                  message="扫描码映射状态读取失败"
+                  description={mapError}
+                  action={
+                    <Button
+                      size="small"
+                      icon={<ReloadOutlined />}
+                      onClick={() => void refreshMapStatus()}
+                    >
+                      重试
+                    </Button>
+                  }
+                />
+              ) : (
+                <div className={styles.dashboardStatusRow}>
+                  <span>
+                    <KeyOutlined />
+                    扫描码映射
+                  </span>
+                  <b>{mappingLabel}</b>
+                </div>
+              )}
+              {healthError ? (
+                <Alert
+                  type="error"
+                  showIcon
+                  message="运行统计读取失败"
+                  description={healthError}
+                  action={
+                    <Button
+                      size="small"
+                      icon={<ReloadOutlined />}
+                      onClick={() => void refreshRuntimeHealth()}
+                    >
+                      重试
+                    </Button>
+                  }
+                />
+              ) : runtimeHealth ? (
+                <>
+                  <div className={styles.dashboardStatusRow}>
+                    <span>
+                      <CameraOutlined />
+                      截图快捷键
+                    </span>
+                    <b>
+                      {registeredShortcuts}/{shortcutTotal} 可用
+                    </b>
+                  </div>
+                  <div className={styles.dashboardStatusRow}>
+                    <span>
+                      <DashboardOutlined />
+                      最近捕获
+                    </span>
+                    <b>
+                      {runtimeHealth.screenshot.recentCaptureBackend ?? "暂无"}
+                      {runtimeHealth.screenshot.recentCaptureMs == null
+                        ? ""
+                        : ` · ${runtimeHealth.screenshot.recentCaptureMs} ms`}
+                    </b>
+                  </div>
+                  <div className={styles.dashboardStatusRow}>
+                    <span>
+                      <DashboardOutlined />
+                      OCR / 贴图
+                    </span>
+                    <b>
+                      OCR {quickOcrAvailable ? "可用" : "不可用"} · 贴图{" "}
+                      {runtimeHealth.screenshot.pinCount}
+                    </b>
+                  </div>
+                  <div className={styles.dashboardStatusRow}>
+                    <span>
+                      <HistoryOutlined />
+                      截图历史
+                    </span>
+                    <b>{runtimeHealth.historyCount} 项</b>
+                  </div>
+                </>
+              ) : (
+                <Spin size="small" />
+              )}
+            </div>
+          </Card>
+        </Col>
+        <Col xs={24} lg={12}>
+          <Card className={styles.surfaceCard} title="快捷操作">
+            <div className={styles.dashboardActions}>
+              <Button
+                icon={<HistoryOutlined />}
+                onClick={() => onNavigate("screenshot", "history")}
+              >
+                截图历史
+              </Button>
+              <Button icon={<KeyOutlined />} onClick={() => onNavigate("keymapper")}>
+                按键映射
+              </Button>
+              <Button icon={<MenuOutlined />} onClick={() => onNavigate("widget")}>
+                挂件设置
+              </Button>
+            </div>
+          </Card>
+        </Col>
+      </Row>
+
+      <Segmented<TrendRange>
+        value={trendRange}
+        onChange={setTrendRange}
+        options={[
+          { label: "5 分钟", value: "live" },
+          { label: "1 小时", value: "hour" },
+          { label: "24 小时", value: "day" },
+        ]}
+        aria-label="趋势时间范围"
+      />
+      {trendRange !== "live" && (
+        <Text type="secondary">应用运行时按分钟保存在本机；退出后的时段显示断点。</Text>
+      )}
+      <Row gutter={gutter}>
+        <Col xs={24} lg={12}>
+          <Card className={styles.surfaceCard} title={`网络趋势 · ${trendLabel}`}>
+            {trendSamples.length < 2 ? (
+              <div className={styles.chartEmpty}>
+                {trendRange === "live" && <Spin size="small" />}
+                <Text type="secondary">该时间范围暂无足够采样</Text>
+              </div>
+            ) : (
+              <MetricTrendChart
+                title={`${trendLabel}网络趋势`}
+                samples={trendSamples}
+                series={networkSeries}
+              />
+            )}
+          </Card>
+        </Col>
+        <Col xs={24} lg={12}>
+          <Card className={styles.surfaceCard} title={`资源趋势 · ${trendLabel}`}>
+            {trendSamples.length < 2 ? (
+              <div className={styles.chartEmpty}>
+                {trendRange === "live" && <Spin size="small" />}
+                <Text type="secondary">该时间范围暂无足够采样</Text>
+              </div>
+            ) : (
+              <MetricTrendChart
+                title={`${trendLabel}资源趋势`}
+                samples={trendSamples}
+                series={resourceSeries}
+                percent
+              />
+            )}
+          </Card>
+        </Col>
+      </Row>
+
+      <Card
+        className={styles.surfaceCard}
+        title={`本地提醒 · ${alerts.filter((item) => !item.read).length} 条未读`}
+        extra={
+          <Space>
+            {alerts.length > 5 && (
+              <Button size="small" onClick={() => setShowAllAlerts((value) => !value)}>
+                {showAllAlerts ? "收起" : "查看全部"}
+              </Button>
+            )}
+            <Button
+              size="small"
+              disabled={!alerts.some((item) => !item.read)}
+              onClick={onMarkAlertsRead}
+            >
+              全部标为已读
+            </Button>
+          </Space>
+        }
+      >
+        {alerts.length === 0 ? (
+          <Text type="secondary">暂无提醒；可在挂件设置中启用指标阈值。</Text>
+        ) : (
+          (showAllAlerts ? alerts : alerts.slice(-5))
+            .slice()
+            .reverse()
+            .map((alert) => (
+              <div key={alert.id} className={styles.dashboardStatusRow}>
+                <span>
+                  {alert.read ? "" : "● "}
+                  {alert.kind === "cpu" ? "CPU" : alert.kind === "memory" ? "内存" : "电池"}{" "}
+                  {alert.value.toFixed(0)}% · 阈值 {alert.threshold}%
+                </span>
+                <Text type="secondary">
+                  {new Intl.DateTimeFormat("zh-CN", {
+                    month: "numeric",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  }).format(alert.createdAt)}
+                </Text>
+              </div>
+            ))
+        )}
+      </Card>
+    </div>
+  );
 }

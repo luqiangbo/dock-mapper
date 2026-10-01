@@ -4,6 +4,18 @@ import { calculateToolbarLayout, shouldCompactToolbar } from "./toolbarLayout";
 const viewport = { width: 1_000, height: 800 };
 
 describe("floating toolbar layout", () => {
+  it("keeps both measured bars accessible beside a bottom-edge selection on a narrow screen", () => {
+    const layout = calculateToolbarLayout(
+      { x: 290, y: 170, width: 25, height: 25 },
+      { width: 320, height: 240 },
+      { width: 304, height: 44 },
+      { width: 280, height: 40 },
+    );
+    expect(layout.primary.left).toBe(8);
+    expect(layout.primary.top).toBeGreaterThanOrEqual(8);
+    expect(layout.secondary!.left + 280).toBeLessThanOrEqual(312);
+    expect(layout.secondary!.top + 40).toBeLessThanOrEqual(232);
+  });
   it("centers primary and secondary bars independently on the selection", () => {
     const layout = calculateToolbarLayout(
       { x: 200, y: 100, width: 400, height: 300 },

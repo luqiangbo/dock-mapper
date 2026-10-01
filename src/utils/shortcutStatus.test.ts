@@ -1,9 +1,11 @@
+import { defaultScreenshotTools } from "./screenshotTools";
 import { describe, expect, it } from "vitest";
 import type { ScreenshotConfig } from "../types";
 import { DEFAULT_ANNOTATION_STYLES } from "../screenshots/screenshot/components/annotationStyleDefaults";
 import { resetShortcutConfig, shortcutStatusDisplay } from "./shortcutStatus";
 
 const config: ScreenshotConfig = {
+  toolbar_tools: defaultScreenshotTools(),
   shortcut: "Control+1",
   pin_shortcut: "Control+2",
   history_shortcut: "Control+3",

@@ -126,10 +126,11 @@ export default function KeyVisualizerSettings() {
     onError: (reason, { latest }) => {
       if (latest) setError(errorMessage(reason));
     },
-    onDetachedError: (reason) => notification.error({
-      message: "按键展示设置未保存",
-      description: errorMessage(reason),
-    }),
+    onDetachedError: (reason) =>
+      notification.error({
+        message: "按键展示设置未保存",
+        description: errorMessage(reason),
+      }),
   });
 
   const load = useCallback(async () => {
@@ -280,7 +281,16 @@ export default function KeyVisualizerSettings() {
           showIcon
           message="操作未完成"
           description={visibleError}
-          action={status?.error ? <Button onClick={() => void retry()}>重试</Button> : undefined}
+          action={
+            <Button
+              disabled={saving}
+              onClick={() =>
+                status?.error ? void retry() : scheduleSave(form.getFieldsValue(true))
+              }
+            >
+              重试
+            </Button>
+          }
         />
       )}
       <Form
@@ -303,101 +313,162 @@ export default function KeyVisualizerSettings() {
             </div>
           </div>
 
-          <section className={styles.visualizerSection}>
-            <div className={styles.compactSectionTitle}>
-              <Text strong>展示内容</Text>
-              <Text type="secondary">至少选择一种内容</Text>
-            </div>
-            <Row gutter={[screens.lg ? 8 : 6, 8]}>
-              {CONTENT_FIELDS.map((item) => (
-                <Col xs={24} lg={12} key={item.name}>
-                  <div className={styles.visualizerOption}>
-                    <div>
-                      <Text strong>{item.label}</Text>
-                      <span className={styles.description}>{item.description}</span>
-                    </div>
-                    <Form.Item name={item.name} valuePropName="checked">
-                      <Switch />
-                    </Form.Item>
-                  </div>
-                </Col>
-              ))}
-            </Row>
-          </section>
-
-          <section className={styles.visualizerSection}>
-            <div className={styles.compactSectionTitle}>
-              <Text strong>显示样式</Text>
-              <Text type="secondary">修改后自动同步到悬浮窗</Text>
-            </div>
-            <Row gutter={[8, 8]}>
-              <Col xs={24} sm={12} lg={8}>
-                <label className={styles.visualizerMetric}>
-                  <span>字号</span>
-                  <Form.Item
-                    name="font_size"
-                    rules={[{ required: true, type: "number", min: 16, max: 48 }]}
-                  >
-                    <InputNumber min={16} max={48} suffix="px" />
-                  </Form.Item>
-                </label>
-              </Col>
-              <Col xs={24} sm={12} lg={8}>
-                <label className={styles.visualizerMetric}>
-                  <span>整体缩放</span>
-                  <Form.Item
-                    name="scale_percent"
-                    rules={[{ required: true, type: "number", min: 75, max: 200 }]}
-                  >
-                    <InputNumber min={75} max={200} step={5} suffix="%" />
-                  </Form.Item>
-                </label>
-              </Col>
-              <Col xs={24} sm={12} lg={8}>
-                <label className={styles.visualizerMetric}>
-                  <span>文本透明度</span>
-                  <Form.Item
-                    name="text_opacity"
-                    rules={[{ required: true, type: "number", min: 20, max: 100 }]}
-                  >
-                    <InputNumber min={20} max={100} step={5} suffix="%" />
-                  </Form.Item>
-                </label>
-              </Col>
-            </Row>
-          </section>
-
-          <div className={styles.visualizerFooter}>
-            <div className={styles.visualizerFooterStatus}>
-              {saving ? "正在自动保存…" : dirty ? "等待自动保存…" : "已自动保存"}
-            </div>
-            <div className={styles.visualizerFooterActions}>
-              <Button
-                icon={<AimOutlined />}
-                disabled={
-                  dirty ||
-                  saving ||
-                  !saved.enabled ||
-                  !saved.highlight ||
-                  status?.suspended ||
-                  status?.phase === "starting"
-                }
-                onClick={() => void locate()}
-              >
-                定位鼠标
-              </Button>
-              <Button
-                icon={<UndoOutlined />}
-                disabled={!dirty || saving}
-                onClick={() => {
-                  invalidateSave();
-                  form.setFieldsValue(saved);
-                  form.setFields([{ name: "enabled", errors: [] }]);
-                  setError(null);
+          <div className={styles.previewLayout}>
+            <aside className={styles.previewPane}>
+              <Text strong>样式预览</Text>
+              <div
+                className={styles.visualizerPreview}
+                style={{
+                  fontSize: Math.min(
+                    96,
+                    Math.max(
+                      12,
+                      (Number(values?.font_size ?? saved.font_size) *
+                        Number(values?.scale_percent ?? saved.scale_percent)) /
+                        100,
+                    ),
+                  ),
                 }}
               >
-                撤销
-              </Button>
+                <div
+                  className={styles.visualizerPreviewKeys}
+                  style={{
+                    opacity: Math.min(
+                      1,
+                      Math.max(0.2, Number(values?.text_opacity ?? saved.text_opacity) / 100),
+                    ),
+                  }}
+                >
+                  {![
+                    (values ?? saved).show_combinations,
+                    (values ?? saved).show_modifiers,
+                    (values ?? saved).show_other,
+                    (values ?? saved).show_characters,
+                  ].some(Boolean) && (
+                    <span className={styles.description}>
+                      当前仅开启辅助效果，没有按键文字可预览。
+                    </span>
+                  )}
+                  {(values ?? saved).show_combinations && (
+                    <span style={{ display: "inline-block" }}>Ctrl + Shift + S</span>
+                  )}
+                  {(values ?? saved).show_modifiers && (
+                    <span style={{ display: "inline-block" }}>Alt</span>
+                  )}
+                  {(values ?? saved).show_other && (
+                    <span style={{ display: "inline-block" }}>Enter</span>
+                  )}
+                  {(values ?? saved).show_characters && (
+                    <span style={{ display: "inline-block" }}>😀 🚀</span>
+                  )}
+                </div>
+              </div>
+              <Text type="secondary">示例按键，实际展示位置沿用当前设置。</Text>
+            </aside>
+            <div className={styles.configurationPane}>
+              <section className={styles.visualizerSection}>
+                <div className={styles.compactSectionTitle}>
+                  <Text strong>展示内容</Text>
+                  <Text type="secondary">至少选择一种内容</Text>
+                </div>
+                <Row gutter={[screens.lg ? 8 : 6, 8]}>
+                  {CONTENT_FIELDS.map((item) => (
+                    <Col xs={24} lg={12} key={item.name}>
+                      <div className={styles.visualizerOption}>
+                        <div>
+                          <Text strong>{item.label}</Text>
+                          <span className={styles.description}>{item.description}</span>
+                        </div>
+                        <Form.Item name={item.name} valuePropName="checked">
+                          <Switch />
+                        </Form.Item>
+                      </div>
+                    </Col>
+                  ))}
+                </Row>
+              </section>
+
+              <section className={styles.visualizerSection}>
+                <div className={styles.compactSectionTitle}>
+                  <Text strong>显示样式</Text>
+                  <Text type="secondary">修改后自动同步到悬浮窗</Text>
+                </div>
+                <Row gutter={[8, 8]}>
+                  <Col xs={24} sm={12} lg={8}>
+                    <label className={styles.visualizerMetric}>
+                      <span>字号</span>
+                      <Form.Item
+                        name="font_size"
+                        rules={[{ required: true, type: "number", min: 16, max: 48 }]}
+                      >
+                        <InputNumber min={16} max={48} suffix="px" />
+                      </Form.Item>
+                    </label>
+                  </Col>
+                  <Col xs={24} sm={12} lg={8}>
+                    <label className={styles.visualizerMetric}>
+                      <span>整体缩放</span>
+                      <Form.Item
+                        name="scale_percent"
+                        rules={[{ required: true, type: "number", min: 75, max: 200 }]}
+                      >
+                        <InputNumber min={75} max={200} step={5} suffix="%" />
+                      </Form.Item>
+                    </label>
+                  </Col>
+                  <Col xs={24} sm={12} lg={8}>
+                    <label className={styles.visualizerMetric}>
+                      <span>文本透明度</span>
+                      <Form.Item
+                        name="text_opacity"
+                        rules={[{ required: true, type: "number", min: 20, max: 100 }]}
+                      >
+                        <InputNumber min={20} max={100} step={5} suffix="%" />
+                      </Form.Item>
+                    </label>
+                  </Col>
+                </Row>
+              </section>
+
+              <div className={styles.visualizerFooter}>
+                <div className={styles.visualizerFooterStatus}>
+                  {error && dirty
+                    ? "保存失败"
+                    : saving
+                      ? "正在自动保存…"
+                      : dirty
+                        ? "等待自动保存…"
+                        : "已自动保存"}
+                </div>
+                <div className={styles.visualizerFooterActions}>
+                  <Button
+                    icon={<AimOutlined />}
+                    disabled={
+                      dirty ||
+                      saving ||
+                      !saved.enabled ||
+                      !saved.highlight ||
+                      status?.suspended ||
+                      status?.phase === "starting"
+                    }
+                    onClick={() => void locate()}
+                  >
+                    定位鼠标
+                  </Button>
+                  <Button
+                    icon={<UndoOutlined />}
+                    disabled={!dirty || saving}
+                    onClick={() => {
+                      invalidateSave();
+                      form.setFieldsValue(saved);
+                      form.setFields([{ name: "enabled", errors: [] }]);
+                      setError(null);
+                    }}
+                  >
+                    撤销
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
         </Card>

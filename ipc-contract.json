@@ -69,6 +69,8 @@
     "get_key_visualizer_status",
     "retry_key_visualizer",
     "get_minimize_to_tray",
-    "set_minimize_to_tray"
+    "set_minimize_to_tray",
+    "open_screenshot_history_preview",
+    "get_screenshot_history_preview_session"
   ]
 }

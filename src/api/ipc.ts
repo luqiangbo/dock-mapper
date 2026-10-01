@@ -30,7 +30,14 @@ import type {
   WidgetLayoutBudget,
 } from "./screenshotTypes";
 
+export interface HistoryPreviewSession {
+  id: string;
+  generation: number;
+}
+
 interface CommandContract {
+  open_screenshot_history_preview: { args: { id: string }; result: void };
+  get_screenshot_history_preview_session: { args: undefined; result: HistoryPreviewSession | null };
   get_supported_keys: { args: undefined; result: SupportedKey[] };
   get_key_mappings: { args: undefined; result: KeyMapping[] };
   get_scancode_map_status: { args: undefined; result: ScancodeMapStatus };

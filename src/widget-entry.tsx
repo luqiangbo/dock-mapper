@@ -1,3 +1,4 @@
+import { useWindowTheme } from "./hooks/useWindowTheme";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactDOM from "react-dom/client";
 import { emit, listen } from "@tauri-apps/api/event";
@@ -205,6 +206,7 @@ function sameMeasurements(a: WidgetMeasurements, b: WidgetMeasurements): boolean
 }
 
 function TaskbarWidget() {
+  useWindowTheme();
   const [status, setStatus] = useState<SysStatus | null>(null);
   const [lastSampleAt, setLastSampleAt] = useState<number | null>(null);
   const freshness = useTelemetryFreshness(lastSampleAt);

@@ -125,6 +125,19 @@ export function excalidrawToolType(tool: AnnotTool): string {
   return tool ? (EXCALIDRAW_TOOL_TYPES[tool] ?? "selection") : "selection";
 }
 
+/** Mosaic uses a host pointer layer while the native editor stays in selection. */
+export function screenshotToolFromActiveType(type: string, mosaicActive = false): AnnotTool {
+  if (type === "selection" && mosaicActive) return "mosaic";
+  return type === "rectangle" ? "rect"
+    : type === "ellipse" ? "ellipse"
+      : type === "diamond" ? "diamond"
+        : type === "line" ? "line"
+          : type === "arrow" ? "arrow"
+            : type === "freedraw" ? "pen"
+              : type === "text" ? "text"
+                : type === "eraser" ? "eraser" : "select";
+}
+
 export function captureBackgroundSkeleton(fileId: string, width: number, height: number) {
   // A locked transparent frame gives Excalidraw a stable physical-pixel
   // viewport without embedding a second copy of the screenshot.

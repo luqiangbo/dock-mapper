@@ -11,6 +11,8 @@ export const IPC_COMMAND_NAMES = [
   "restore_scancode_map",
   "upload_image",
   "release_image",
+  "open_screenshot_history_preview",
+  "get_screenshot_history_preview_session",
   "list_screenshot_history",
   "get_screenshot_history_image",
   "get_screenshot_history_thumbnail",

@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "history-preview-window",
+  "description": "截图原图预览只读取图片和会话，并控制自身窗口",
+  "windows": ["history_preview"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-close",
+    "core:window:allow-set-theme",
+    "core:window:allow-start-dragging",
+    "core:window:allow-start-resize-dragging",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen",
+    "allow-get-screenshot-history-image",
+    "allow-get-screenshot-history-preview-session"
+  ]
+}

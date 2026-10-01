@@ -1,29 +1,14 @@
 import { Divider, Dropdown, type MenuProps } from "antd";
-import {
-  ArrowUpRight,
-  Check,
-  Circle,
-  MoreHorizontal,
-  PenLine,
-  Pin,
-  QrCode,
-  Save,
-  ScanText,
-  Square,
-  Diamond,
-  Eraser,
-  Minus,
-  MousePointer2,
-  Type,
-  Undo2,
-  Redo2,
-  X,
-} from "lucide-react";
-import { forwardRef } from "react";
-import { useI18n } from "../i18n";
+import { Check, MoreHorizontal, Pin, QrCode, Save, ScanText, Undo2, Redo2, X } from "lucide-react";
+import { forwardRef, useEffect, useState } from "react";
 import TooltipButton from "./TooltipButton";
+import { screenshotToolIcons } from "../../../utils/screenshotToolIcons";
+import {
+  SCREENSHOT_TOOL_LABELS,
+  screenshotToolbarGroups,
+  type ScreenshotToolbarTool,
+} from "../../../utils/screenshotTools";
 import type { FrameShape } from "./annotationTypes";
-
 export type AnnotTool =
   | "select"
   | "rect"
@@ -53,12 +38,14 @@ export const STROKE_COLORS = [
 
 interface AnnotationToolbarProps {
   tool: AnnotTool;
+  toolbarTools?: ScreenshotToolbarTool[];
   shapeKind: FrameShape;
   canUndo: boolean;
   canRedo: boolean;
   compact: boolean;
   toolsDisabled?: boolean;
   actionsDisabled?: boolean;
+  busy?: boolean;
   confirmDisabled?: boolean;
   ocrDisabled?: boolean;
   ocrRunning?: boolean;
@@ -76,15 +63,15 @@ interface AnnotationToolbarProps {
 }
 
 const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
-  function AnnotationToolbar(
-    {
+  function AnnotationToolbar(props, ref) {
+    const {
       tool,
-      shapeKind,
+      toolbarTools,
       canUndo,
       canRedo,
-      compact,
       toolsDisabled,
       actionsDisabled,
+      busy,
       confirmDisabled,
       ocrDisabled,
       ocrRunning,
@@ -99,39 +86,39 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
       onConfirm,
       onPopupOpenChange,
       style,
-    },
-    ref,
-  ): React.JSX.Element {
-    const { t } = useI18n();
-    const locked = Boolean(toolsDisabled);
-    const actionsLocked = Boolean(actionsDisabled);
-    const iconProps = { size: 19, strokeWidth: 2.45, "aria-hidden": true };
-    const overflowActions = { ocr: onOcr, qr: onQr, save: onSave, pin: onPin } as const;
-    const overflowItems: MenuProps["items"] = [
+    } = props;
+    const [moreOpen, setMoreOpen] = useState(false);
+    const changeOpen = (open: boolean) => {
+      setMoreOpen(open);
+      onPopupOpenChange(open);
+    };
+    useEffect(() => {
+      setMoreOpen(false);
+      onPopupOpenChange(false);
+    }, [tool, toolsDisabled, onPopupOpenChange]);
+    const icons = screenshotToolIcons;
+    const labels = { ...SCREENSHOT_TOOL_LABELS, select: "选择（V）", eraser: "对象橡皮擦" };
+    const { main, more } = screenshotToolbarGroups(toolbarTools);
+    const selectedMore = more.find((item) => item === tool);
+    const MoreIcon = selectedMore ? icons[selectedMore] : MoreHorizontal;
+    const iconProps = { size: 18, strokeWidth: 1.8, "aria-hidden": true };
+    const items: MenuProps["items"] = [
+      ...more.map((key) => {
+        const Icon = icons[key];
+        return { key, label: labels[key], icon: <Icon size={16} />, disabled: toolsDisabled };
+      }),
+      ...(more.length ? [{ type: "divider" as const }] : []),
       {
         key: "ocr",
+        label: ocrRunning ? "正在识别文字…" : "识别文字",
         icon: <ScanText size={16} />,
-        label: ocrRunning ? "正在识别文字" : "识别文字",
-        disabled: actionsLocked || ocrDisabled || ocrRunning,
+        disabled: actionsDisabled || ocrDisabled || ocrRunning,
       },
       {
         key: "qr",
-        icon: <QrCode size={16} />,
         label: "识别二维码",
-        disabled: actionsLocked || ocrDisabled,
-      },
-      { type: "divider" },
-      {
-        key: "save",
-        icon: <Save size={16} />,
-        label: t.toolbar.save,
-        disabled: actionsLocked || confirmDisabled,
-      },
-      {
-        key: "pin",
-        icon: <Pin size={16} />,
-        label: t.toolbar.pin,
-        disabled: actionsLocked || confirmDisabled,
+        icon: <QrCode size={16} />,
+        disabled: actionsDisabled || ocrDisabled,
       },
     ];
     return (
@@ -142,155 +129,98 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
         onPointerDown={(event) => event.stopPropagation()}
       >
         <div className="wx-toolbar__row">
-          <div className="wx-toolbar__group">
-            <TooltipButton
-              label="选择（V）"
-              active={tool === "select"}
-              disabled={locked}
-              onClick={() => onToolChange("select")}
-            >
-              <MousePointer2 {...iconProps} />
-            </TooltipButton>
-            <TooltipButton
-              label="矩形"
-              active={tool === "rect"}
-              disabled={locked}
-              onClick={() => onToolChange("rect")}
-            >
-              <Square {...iconProps} />
-            </TooltipButton>
-            <TooltipButton
-              label="圆形"
-              active={tool === "ellipse"}
-              disabled={locked}
-              onClick={() => onToolChange("ellipse")}
-            >
-              <Circle {...iconProps} />
-            </TooltipButton>
-            <TooltipButton
-              label="菱形"
-              active={tool === "diamond"}
-              disabled={locked}
-              onClick={() => onToolChange("diamond")}
-            >
-              <Diamond {...iconProps} />
-            </TooltipButton>
-            <TooltipButton
-              label="线条"
-              active={tool === "line"}
-              disabled={locked}
-              onClick={() => onToolChange("line")}
-            >
-              <Minus {...iconProps} />
-            </TooltipButton>
-            <TooltipButton
-              label={t.toolbar.arrow}
-              active={tool === "arrow"}
-              disabled={locked}
-              onClick={() => onToolChange("arrow")}
-            >
-              <ArrowUpRight {...iconProps} />
-            </TooltipButton>
-            <TooltipButton
-              label={t.toolbar.pen}
-              active={tool === "pen"}
-              disabled={locked}
-              onClick={() => onToolChange("pen")}
-            >
-              <PenLine {...iconProps} />
-            </TooltipButton>
-            <TooltipButton
-              label={t.toolbar.text}
-              active={tool === "text"}
-              disabled={locked}
-              onClick={() => onToolChange("text")}
-            >
-              <Type {...iconProps} />
-            </TooltipButton>
-            <TooltipButton
-              label="对象橡皮擦"
-              active={tool === "eraser"}
-              disabled={locked}
-              onClick={() => onToolChange("eraser")}
-            >
-              <Eraser {...iconProps} />
-            </TooltipButton>
-          </div>
-
-          {!compact && (
-            <>
-              <Divider type="vertical" />
-              <div className="wx-toolbar__group">
-                <TooltipButton
-                  label={ocrRunning ? "正在识别文字" : "识别文字（当前 OCR 引擎）"}
-                  disabled={actionsLocked || ocrDisabled}
-                  loading={ocrRunning}
-                  onClick={onOcr}
-                >
-                  <ScanText {...iconProps} />
-                </TooltipButton>
-                <TooltipButton label="识别二维码" disabled={actionsLocked || ocrDisabled} onClick={onQr}>
-                  <QrCode {...iconProps} />
-                </TooltipButton>
-              </div>
-            </>
-          )}
-
-          <Divider type="vertical" />
-          <div className="wx-toolbar__group">
-            <TooltipButton label={t.toolbar.undo} disabled={locked || !canUndo} onClick={onUndo}>
-              <Undo2 {...iconProps} />
-            </TooltipButton>
-            <TooltipButton label="重做" disabled={locked || !canRedo} onClick={() => onRedo?.()}>
-              <Redo2 {...iconProps} />
-            </TooltipButton>
-            {compact ? (
+          <div className="wx-toolbar__tools">
+            <div className="wx-toolbar__group">
+              {main.map((key) => {
+                const Icon = icons[key];
+                return (
+                  <TooltipButton
+                    key={key}
+                    label={labels[key]}
+                    active={tool === key}
+                    disabled={toolsDisabled}
+                    onClick={() => onToolChange(key)}
+                  >
+                    <Icon {...iconProps} />
+                  </TooltipButton>
+                );
+              })}
               <Dropdown
+                open={moreOpen}
                 trigger={["click"]}
+                onOpenChange={changeOpen}
                 menu={{
-                  items: overflowItems,
-                  onClick: ({ key }) => overflowActions[key as keyof typeof overflowActions](),
+                  items,
+                  selectedKeys: tool ? [tool] : [],
+                  onClick: ({ key }) => {
+                    changeOpen(false);
+                    if (key === "ocr") onOcr();
+                    else if (key === "qr") onQr();
+                    else onToolChange(key as AnnotTool);
+                  },
                 }}
-                onOpenChange={onPopupOpenChange}
               >
                 <span>
-                  <TooltipButton label="更多操作">
-                    <MoreHorizontal {...iconProps} />
+                  <TooltipButton
+                    label={
+                      selectedMore
+                        ? labels[selectedMore]
+                        : ocrRunning
+                          ? "更多工具 · 正在识别文字"
+                          : "更多工具"
+                    }
+                    active={!!selectedMore || moreOpen}
+                  >
+                    <MoreIcon {...iconProps} />
                   </TooltipButton>
                 </span>
               </Dropdown>
-            ) : (
-              <>
-                <TooltipButton
-                  label={t.toolbar.save}
-                  disabled={actionsLocked || confirmDisabled}
-                  onClick={onSave}
-                >
-                  <Save {...iconProps} />
-                </TooltipButton>
-                <TooltipButton
-                  label={t.toolbar.pin}
-                  disabled={actionsLocked || confirmDisabled}
-                  onClick={onPin}
-                >
-                  <Pin {...iconProps} />
-                </TooltipButton>
-              </>
-            )}
+            </div>
+            <Divider type="vertical" />
+            <div className="wx-toolbar__group">
+              <TooltipButton
+                label="撤销（Ctrl+Z）"
+                disabled={toolsDisabled || !canUndo}
+                onClick={onUndo}
+              >
+                <Undo2 {...iconProps} />
+              </TooltipButton>
+              <TooltipButton
+                label="重做（Ctrl+Shift+Z）"
+                disabled={toolsDisabled || !canRedo}
+                onClick={onRedo}
+              >
+                <Redo2 {...iconProps} />
+              </TooltipButton>
+            </div>
           </div>
-
           <Divider type="vertical" />
-          <div className="wx-toolbar__group">
-            <TooltipButton label={t.toolbar.cancel} danger onClick={onCancel}>
-              <X {...iconProps} />
+          <div className="wx-toolbar__group wx-toolbar__outputs">
+            <TooltipButton
+              label="保存图片"
+              disabled={actionsDisabled || confirmDisabled}
+              onClick={onSave}
+            >
+              <Save {...iconProps} />
             </TooltipButton>
             <TooltipButton
-              label={t.toolbar.done}
+              label="贴图"
+              disabled={actionsDisabled || confirmDisabled}
+              onClick={onPin}
+            >
+              <Pin {...iconProps} />
+            </TooltipButton>
+            <TooltipButton
+              label="复制图片（Enter）"
+              loading={busy}
               success
-              disabled={actionsLocked || confirmDisabled}
+              disabled={actionsDisabled || confirmDisabled}
               onClick={onConfirm}
             >
               <Check {...iconProps} />
+            </TooltipButton>
+            <TooltipButton label="取消（Esc）" danger onClick={onCancel}>
+              <X {...iconProps} />
             </TooltipButton>
           </div>
         </div>
@@ -298,5 +228,4 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
     );
   },
 );
-
 export default AnnotationToolbar;

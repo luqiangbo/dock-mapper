@@ -16,10 +16,16 @@ pub fn get_screenshot_config(
 #[tauri::command]
 pub fn update_screenshot_config(
     app: AppHandle,
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     screenshot_config: config::ScreenshotConfig,
 ) -> Result<config::ScreenshotConfig, String> {
-    update_screenshot_config_impl(&app, &state, screenshot_config)
+    update_screenshot_config_impl(
+        &app,
+        &state,
+        screenshot_config,
+        window.label().starts_with("overlay-"),
+    )
 }
 
 fn preserve_overlay_owned_screenshot_fields(
@@ -31,10 +37,21 @@ fn preserve_overlay_owned_screenshot_fields(
     requested.annotation_styles = current.annotation_styles.clone();
 }
 
+fn preserve_settings_owned_toolbar(
+    current: &config::ScreenshotConfig,
+    requested: &mut config::ScreenshotConfig,
+    from_overlay: bool,
+) {
+    if from_overlay {
+        requested.toolbar_tools = current.toolbar_tools.clone();
+    }
+}
+
 fn update_screenshot_config_impl(
     app: &AppHandle,
     state: &AppState,
     mut screenshot_config: config::ScreenshotConfig,
+    from_overlay: bool,
 ) -> Result<config::ScreenshotConfig, String> {
     let _mutation = state
         .mutation_lock
@@ -52,6 +69,11 @@ fn update_screenshot_config_impl(
         &previous_config.screenshot_config,
         &mut screenshot_config,
     );
+    preserve_settings_owned_toolbar(
+        &previous_config.screenshot_config,
+        &mut screenshot_config,
+        from_overlay,
+    );
     config::normalize_screenshot_config(&mut screenshot_config);
     let mut next_config = previous_config.clone();
     next_config.screenshot_config = screenshot_config.clone();
@@ -62,12 +84,18 @@ fn update_screenshot_config_impl(
         |previous, next| screenshot::update_shortcuts(app, previous, next),
         |config| config::save(&state.config_path, config),
     );
-    let _ = app.emit("shortcut-status-changed", ());
-    result?;
+    if let Err(error) = result {
+        let _ = app.emit("shortcut-status-changed", ());
+        return Err(error);
+    }
     *state
         .config
         .lock()
         .map_err(|_| "配置状态已损坏".to_string())? = next_config;
+    let _ = app.emit("shortcut-status-changed", ());
+    if let Err(error) = app.emit("screenshot-config-changed", &screenshot_config) {
+        tracing::warn!(target: "dock_mapper::screenshot", %error, "截图设置变化通知失败");
+    }
     Ok(screenshot_config)
 }
 
@@ -169,8 +197,17 @@ pub fn update_screenshot_annotation_styles(
         .stroke_color
         .clone();
     next.screenshot_config.annotation_outline = config::AnnotationOutlineConfig {
-        enabled: next.screenshot_config.annotation_styles.shape.outline_enabled,
-        color: next.screenshot_config.annotation_styles.shape.outline_color.clone(),
+        enabled: next
+            .screenshot_config
+            .annotation_styles
+            .shape
+            .outline_enabled,
+        color: next
+            .screenshot_config
+            .annotation_styles
+            .shape
+            .outline_color
+            .clone(),
         width: next.screenshot_config.annotation_styles.shape.outline_width,
     };
     config::save(&state.config_path, &next)?;
@@ -377,6 +414,21 @@ pub fn set_minimize_to_tray(state: State<'_, AppState>, enabled: bool) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn changing_overlay_units_does_not_restore_an_old_toolbar_layout() {
+        let mut current = config::ScreenshotConfig::default();
+        current.toolbar_tools.swap(0, 6);
+        current.toolbar_tools[0].visible = true;
+        let mut requested = config::ScreenshotConfig::default();
+        requested.capture_size_unit = config::CaptureSizeUnit::Dip;
+        preserve_settings_owned_toolbar(&current, &mut requested, true);
+        assert_eq!(requested.toolbar_tools, current.toolbar_tools);
+        assert_eq!(requested.capture_size_unit, config::CaptureSizeUnit::Dip);
+        let mut settings_request = config::ScreenshotConfig::default();
+        preserve_settings_owned_toolbar(&current, &mut settings_request, false);
+        assert_ne!(settings_request.toolbar_tools, current.toolbar_tools);
+    }
 
     #[test]
     fn stale_settings_form_cannot_replace_overlay_annotation_visuals() {

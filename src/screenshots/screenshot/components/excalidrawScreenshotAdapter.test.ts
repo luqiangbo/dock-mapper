@@ -9,9 +9,20 @@ import {
   isExcalidrawStyleTool,
   isSameExcalidrawSelection,
   screenshotEditorPresentation,
+  screenshotToolFromActiveType,
   transformBetweenCrops,
   type ExcalidrawSelectionState,
 } from "./excalidrawScreenshotAdapter";
+
+describe("马赛克工具状态", () => {
+  it("编辑器通知选择状态时保留正在使用的马赛克工具", () => {
+    expect(screenshotToolFromActiveType("selection", true)).toBe("mosaic");
+  });
+  it("退出马赛克后恢复选择工具，切换原生工具时报告新工具", () => {
+    expect(screenshotToolFromActiveType("selection", false)).toBe("select");
+    expect(screenshotToolFromActiveType("freedraw", true)).toBe("pen");
+  });
+});
 
 describe("Excalidraw rectangle roundness mapping", () => {
   it("keeps app-state strings separate from element roundness objects", () => {
