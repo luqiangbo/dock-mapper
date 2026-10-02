@@ -6,7 +6,7 @@ const checks = [
   ["Tauri 依赖版本", process.execPath, [".github/scripts/tauri-versions.mjs"], root],
   ["前端类型", "pnpm", ["typecheck"], root],
   ["前端行为", "pnpm", ["test"], root],
-  ["发布规则", process.execPath, ["--test", ".github/scripts/release-version.test.mjs", ".github/scripts/release-api.test.mjs", ".github/scripts/release-assets.test.mjs"], root],
+  ["发布规则", process.execPath, ["--test", ".github/scripts/release-version.test.mjs", ".github/scripts/release-api.test.mjs", ".github/scripts/release-assets.test.mjs", ".github/scripts/winget-fork.test.mjs"], root],
   ["Rust 核心行为", "cargo", ["test", "--", "--skip", "model"], fileURLToPath(new URL("../../src-tauri/", import.meta.url))],
 ];
 

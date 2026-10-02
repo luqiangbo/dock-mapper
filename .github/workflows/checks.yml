@@ -34,7 +34,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pnpm test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node --test .github/scripts/release-version.test.mjs .github/scripts/release-api.test.mjs .github/scripts/release-assets.test.mjs
+          node --test .github/scripts/release-version.test.mjs .github/scripts/release-api.test.mjs .github/scripts/release-assets.test.mjs .github/scripts/winget-fork.test.mjs
       - name: Rust core behavior
         working-directory: src-tauri
         run: cargo test -- --skip model

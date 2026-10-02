@@ -194,9 +194,15 @@ jobs:
     needs: publish-release
     if: needs.publish-release.outputs.published == 'true'
     runs-on: windows-latest
+    concurrency:
+      group: dockmapper-winget
+      cancel-in-progress: false
     permissions:
       contents: read
     steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
       - name: Submit manifest
         env:
           GH_TOKEN: ${{ github.token }}
@@ -253,6 +259,8 @@ jobs:
           }
 
           $manifestDirectory = $installerManifest.Directory.FullName
+          node .github/scripts/winget-fork.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Winget fork synchronization failed; see the API error above" }
           & $wingetCreate submit `
             --no-open `
             --prtitle "New version: luqiangbo.DockMapper version $env:VERSION" `

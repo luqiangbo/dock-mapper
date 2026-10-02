@@ -85,6 +85,20 @@ Windows Authenticode 证书可选，配置时必须通过验证；Updater 签名
 Winget 失败：只重跑 Submit Winget update，不重新构建应用。
 Release 支持 workflow_dispatch 手动补跑当前 main；旧提交使用原运行的重跑。
 
+Winget 清单校验成功后出现 `The forked repository could not be synced with the
+upstream commits`，表示提交 PR 前的 fork 同步失败，与安装器架构警告无关。
+WingetCreate 1.12.13.0 在同步接口返回 HTTP 422 时报告这条错误。
+工作流使用 `WINGET_TOKEN` 识别提交账号，提交前检查其 `winget-pkgs` fork，
+对仅落后的默认分支通过 Git reference API 执行非强制快进；首次没有可访问的
+fork 时继续交由 WingetCreate 创建。Winget 提交任务串行执行，避免互相更新分支。
+
+若 fork 默认分支有独有提交，流程会停止，保留提交并要求手动同步；若权限不足、
+分支保护阻止更新或 GitHub API 拒绝请求，日志会包含 HTTP 状态和响应。
+检查 `WINGET_TOKEN` 是否能读写提交账号的 fork，而非仅能访问本项目。
+不要删除 fork 或强制重置分支来自动处理失败。可在提交账号的
+`winget-pkgs` 仓库使用 **Sync fork**，处理冲突后再重跑 Winget 任务。
+已失败的旧运行仍使用旧提交中的工作流；本次修复合并后，新的发布运行才包含预检。
+
 Tauri API 和已使用插件的 npm 包与 Rust 锁文件保持主、次版本一致，前端对应包
 固定版本以避免漂移；CLI 单独版本不要求与 Rust crate 同号。自动版本流程不会
 升级依赖。Quality gate 和签名预检都在构建前检查对应版本，发现漂移明确失败。
