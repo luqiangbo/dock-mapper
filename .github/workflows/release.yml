@@ -153,8 +153,12 @@ jobs:
           if ($releaseMetadata.id -ne $env:RELEASE_ID -or $releaseMetadata.tag_name -ne $env:TAG_NAME) { throw "Release metadata does not match allocated candidate" }
           $installerAssets = @($releaseMetadata.assets | Where-Object { $_.name -eq $installerName })
           if ($installerAssets.Count -ne 1) { throw "Expected exactly one installer asset" }
-          $expectedUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:TAG_NAME/$installerName"
-          if ($installerAssets[0].browser_download_url -ne $expectedUrl) { throw "Installer download URL mismatch" }
+          # Draft browser URLs can use an untagged placeholder. Bind identity to the API asset URL instead.
+          $installerAsset = $installerAssets[0]
+          if ($installerAsset.id -notmatch '^[1-9][0-9]*$') { throw "Installer asset ID is missing or invalid" }
+          $expectedApiUrl = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/assets/$($installerAsset.id)"
+          if ($installerAsset.url -ne $expectedApiUrl) { throw "Installer asset API URL mismatch: expected $expectedApiUrl, received $($installerAsset.url)" }
+          if ($installerAsset.state -ne 'uploaded' -or $installerAsset.size -ne $installer.Length) { throw "Installer asset is not uploaded or size mismatch" }
           node .github/scripts/normalize-updater.mjs release-assets "$env:GITHUB_REPOSITORY" "$env:VERSION" "$($installerAssets[0].id)"
           if ($LASTEXITCODE -ne 0) { throw "Updater URL normalization failed" }
           $binary = Get-Item src-tauri/target/release/dock-mapper.exe

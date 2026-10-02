@@ -4,6 +4,64 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sourceMarker } from "./release-version.mjs";
+import { spawnSync } from "node:child_process";
+
+// Exercise the actual PowerShell metadata gate, without downloading or publishing assets.
+async function verifyInstallerMetadata(overrides = {}, assetOverrides = {}) {
+  const workflow = await readFile(new URL("../workflows/release.yml", import.meta.url), "utf8");
+  const start = workflow.indexOf("          $releaseMetadata = $releaseJson | ConvertFrom-Json");
+  const end = workflow.indexOf("          node .github/scripts/normalize-updater.mjs", start);
+  assert.ok(start >= 0 && end > start, "Release metadata gate must exist");
+  const metadata = {
+    id: 42, tag_name: "v2026.1002.3", draft: true,
+    assets: [{ id: 123, name: "DockMapper_2026.1002.3_x64-setup.exe", state: "uploaded", size: 10,
+      url: "https://api.github.com/repos/owner/repo/releases/assets/123",
+      browser_download_url: "https://github.com/owner/repo/releases/download/untagged-abc123/DockMapper_2026.1002.3_x64-setup.exe",
+      ...assetOverrides }],
+    ...overrides,
+  };
+  const result = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command",
+    "$ErrorActionPreference = 'Stop'\n" +
+    "$releaseJson = $env:TEST_RELEASE_METADATA\n" +
+    "$installerName = 'DockMapper_2026.1002.3_x64-setup.exe'\n" +
+    "$installer = @{ Length = 10 }\n" + workflow.slice(start, end)], {
+    encoding: "utf8",
+    env: { ...process.env, GITHUB_REPOSITORY: "owner/repo", RELEASE_ID: "42", TAG_NAME: "v2026.1002.3",
+      TEST_RELEASE_METADATA: JSON.stringify(metadata) },
+  });
+  assert.ifError(result.error);
+  return result;
+}
+
+test("草稿安装包使用临时浏览器地址仍能通过资源校验", async () => {
+  const result = await verifyInstallerMetadata();
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test("正式发布安装包也能通过同一资源校验", async () => {
+  const result = await verifyInstallerMetadata({ draft: false }, {
+    browser_download_url: "https://github.com/owner/repo/releases/download/v2026.1002.3/DockMapper_2026.1002.3_x64-setup.exe",
+  });
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test("资源校验拒绝错误发布、重复安装包、错误 API 地址和未完成上传", async () => {
+  const cases = [
+    [{ id: 43 }, {}, /Release metadata does not match/],
+    [{ tag_name: "v2026.1002.2" }, {}, /Release metadata does not match/],
+    [{ assets: [] }, {}, /Expected exactly one installer asset/],
+    [{ assets: [{ name: "DockMapper_2026.1002.3_x64-setup.exe" }, { name: "DockMapper_2026.1002.3_x64-setup.exe" }] }, {}, /Expected exactly one installer asset/],
+    [{}, { id: 0 }, /Installer asset ID is missing or invalid/],
+    [{}, { url: "https://api.github.com/repos/other/repo/releases/assets/123" }, /Installer asset API URL mismatch/],
+    [{}, { state: "starter" }, /Installer asset is not uploaded or size mismatch/],
+    [{}, { size: 11 }, /Installer asset is not uploaded or size mismatch/],
+  ];
+  for (const [metadata, asset, message] of cases) {
+    const result = await verifyInstallerMetadata(metadata, asset);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, message);
+  }
+});
 
 const sha = "a".repeat(40);
 let sequence = 0;
