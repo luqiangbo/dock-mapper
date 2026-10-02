@@ -6,7 +6,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { verifyUpdaterSignature, validateUpdater, verifyReleaseAssets } from "./release-assets.mjs";
+import { verifyUpdaterSignature, validateUpdater, verifyReleaseAssets, normalizeUpdaterUrls } from "./release-assets.mjs";
 import { assertMatchingTauriVersions } from "./tauri-versions.mjs";
 
 test("产物目录为空时说明下载前置条件并以失败状态退出", async () => {
@@ -75,6 +75,25 @@ const version = "2026.1002.1";
 const repo = "owner/repo";
 const url = `https://github.com/${repo}/releases/download/v${version}/DockMapper_${version}_x64-setup.exe`;
 const updater = () => ({ version, platforms: { "windows-x86_64": { url, signature } } });
+test("仅将当前发布安装包的 API 地址转换为固定版本下载地址", () => {
+  const apiUrl = `https://api.github.com/repos/${repo}/releases/assets/123`;
+  const manifest = { ...updater(), platforms: {
+    "windows-x86_64": { url: apiUrl, signature },
+    "windows-x86_64-nsis": { url: apiUrl, signature },
+  } };
+  const options = { version, repo, signature, assetId: 123 };
+  const normalized = normalizeUpdaterUrls(manifest, options);
+  assert.equal(normalized.platforms["windows-x86_64"].url, url);
+  assert.equal(normalized.platforms["windows-x86_64-nsis"].url, url);
+  assert.equal(manifest.platforms["windows-x86_64"].url, apiUrl);
+  assert.deepEqual(normalizeUpdaterUrls(normalized, options), normalized);
+  assert.throws(() => normalizeUpdaterUrls(manifest, { ...options, assetId: 456 }), /URL mismatch/);
+  assert.throws(() => normalizeUpdaterUrls(manifest, { ...options, repo: "other/repo" }), /URL mismatch/);
+  assert.throws(() => normalizeUpdaterUrls(manifest, { ...options, signature: "wrong" }), /signature mismatch/);
+  assert.throws(() => normalizeUpdaterUrls(manifest, { ...options, assetId: "invalid" }), /asset ID/);
+  assert.throws(() => normalizeUpdaterUrls({ ...manifest, version: "1.0.0" }, options), /version mismatch/);
+});
+
 test("更新清单必须包含 Windows x64、正确版本、固定版本 URL 和相同签名", () => {
   validateUpdater(updater(), { version, repo, signature });
   assert.throws(() => validateUpdater({ version, platforms: { linux: { url, signature } } }, { version, repo, signature }), /windows-x86_64/);

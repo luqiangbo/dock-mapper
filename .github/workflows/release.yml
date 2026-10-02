@@ -143,6 +143,16 @@ jobs:
           $installerName = "DockMapper_$($env:VERSION)_x64-setup.exe"
           $installer = Get-Item (Join-Path release-assets $installerName)
           if ($installer.Length -eq 0) { throw "Installer is empty" }
+          # tauri-action v1 emits API asset URLs; bind the conversion to this release's installer ID.
+          $releaseJson = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:TAG_NAME"
+          if ($LASTEXITCODE -ne 0) { throw "Release asset metadata lookup failed" }
+          $releaseMetadata = $releaseJson | ConvertFrom-Json
+          $installerAssets = @($releaseMetadata.assets | Where-Object { $_.name -eq $installerName })
+          if ($installerAssets.Count -ne 1) { throw "Expected exactly one installer asset" }
+          $expectedUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:TAG_NAME/$installerName"
+          if ($installerAssets[0].browser_download_url -ne $expectedUrl) { throw "Installer download URL mismatch" }
+          node .github/scripts/normalize-updater.mjs release-assets "$env:GITHUB_REPOSITORY" "$env:VERSION" "$($installerAssets[0].id)"
+          if ($LASTEXITCODE -ne 0) { throw "Updater URL normalization failed" }
           $binary = Get-Item src-tauri/target/release/dock-mapper.exe
           $resource = $binary.VersionInfo
           $binaryVersion = "$($resource.FileMajorPart).$($resource.FileMinorPart).$($resource.FileBuildPart)"
@@ -164,7 +174,7 @@ jobs:
           @{version=$env:VERSION; sha=$env:GITHUB_SHA; sha256=$checksums} | ConvertTo-Json -Depth 3 | Set-Content release-assets/build-info.json -Encoding utf8NoBOM
           pnpm release:verify release-assets "$env:GITHUB_REPOSITORY" "$env:VERSION" "$env:GITHUB_SHA"
           if ($LASTEXITCODE -ne 0) { throw "Release asset verification failed" }
-          gh release upload $env:TAG_NAME release-assets/build-info.json --clobber
+          gh release upload $env:TAG_NAME release-assets/latest.json release-assets/build-info.json --clobber
           if ($LASTEXITCODE -ne 0) { throw "Provenance upload failed" }
       - name: Publish latest verified candidate
         id: publish

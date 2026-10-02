@@ -61,6 +61,9 @@ CI 串行分配编号，tag 指向完整源码 SHA，草稿说明保存提交绑
 → NSIS 与 Updater 签名 → 安装包、更新清单、SHA-256 和源码绑定校验
 → 发布前再次校验 → 正式 Release → 独立 Winget 提交。
 更新清单必须指向该版本安装包；build-info.json 保存版本、完整提交号及产物摘要。
+`tauri-action@v1` 生成的清单可能使用 GitHub API 资产地址。CI 根据当前草稿中
+对应安装包的真实资产 ID，将该地址转换为固定版本下载地址，再生成摘要、验签，
+并上传校验后的 `latest.json` 和 `build-info.json`；其他资产地址或不同签名仍会失败。
 Windows Authenticode 证书可选，配置时必须通过验证；Updater 签名私钥必需。
 安装包构建仅在 GitHub 发布任务执行，本地不运行全量构建。
 

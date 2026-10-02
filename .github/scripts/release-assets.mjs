@@ -76,11 +76,27 @@ export function validateUpdater(updater, { version, repo, signature }) {
   const platforms = updater.platforms;
   if (!platforms || !Object.hasOwn(platforms, "windows-x86_64")) throw new Error("Updater windows-x86_64 platform missing");
   const expectedUrl = `https://github.com/${repo}/releases/download/v${version}/DockMapper_${version}_x64-setup.exe`;
-  for (const platform of Object.values(platforms)) {
-    if (!platform || platform.url !== expectedUrl || typeof platform.signature !== "string" || platform.signature.trim() !== signature.trim()) {
-      throw new Error("Updater signature/URL mismatch");
+  for (const [name, platform] of Object.entries(platforms)) {
+    if (!platform || platform.url !== expectedUrl) {
+      throw new Error(`Updater URL mismatch (${name}): expected ${expectedUrl}, received ${JSON.stringify(platform?.url)}`);
+    }
+    if (typeof platform.signature !== "string" || platform.signature.trim() !== signature.trim()) {
+      throw new Error(`Updater signature mismatch (${name}): latest.json 与安装包 .sig 不一致`);
     }
   }
+}
+
+export function normalizeUpdaterUrls(updater, { version, repo, signature, assetId }) {
+  if (!/^[1-9]\d*$/.test(String(assetId))) throw new Error("Invalid installer asset ID");
+  const apiUrl = `https://api.github.com/repos/${repo}/releases/assets/${assetId}`;
+  const downloadUrl = `https://github.com/${repo}/releases/download/v${version}/DockMapper_${version}_x64-setup.exe`;
+  const normalized = { ...updater, platforms: Object.fromEntries(
+    Object.entries(updater.platforms ?? {}).map(([name, platform]) => [name,
+      platform?.url === apiUrl ? { ...platform, url: downloadUrl } : platform,
+    ]),
+  ) };
+  validateUpdater(normalized, { version, repo, signature });
+  return normalized;
 }
 
 export async function verifyReleaseAssets({ directory = "release-assets", repo, version, sha, publicKey }) {
