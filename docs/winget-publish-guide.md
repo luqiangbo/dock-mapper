@@ -89,12 +89,21 @@ Winget 清单校验成功后出现 `The forked repository could not be synced wi
 upstream commits`，表示提交 PR 前的 fork 同步失败，与安装器架构警告无关。
 WingetCreate 1.12.13.0 在同步接口返回 HTTP 422 时报告这条错误。
 工作流使用 `WINGET_TOKEN` 识别提交账号，提交前检查其 `winget-pkgs` fork，
-对仅落后的默认分支通过 Git reference API 执行非强制快进；首次没有可访问的
-fork 时继续交由 WingetCreate 创建。Winget 提交任务串行执行，避免互相更新分支。
+对仅落后的默认分支先通过 Git reference API 执行非强制快进。该 API 返回
+404/422 时，使用 runner 已安装的 Git 抓取目标提交及共同祖先，再进行非强制
+推送，最后重新读取 fork 分支确认提交。Git 操作在 runner 临时裸仓库中执行，
+不修改项目工作区；PAT 只通过子进程环境传递，不写入 URL、命令参数或配置文件。
+首次没有可访问的 fork 时继续交由 WingetCreate 创建。
+Winget 提交任务串行执行，避免互相更新分支。
 
 若 fork 默认分支有独有提交，流程会停止，保留提交并要求手动同步；若权限不足、
 分支保护阻止更新或 GitHub API 拒绝请求，日志会包含 HTTP 状态和响应。
 检查 `WINGET_TOKEN` 是否能读写提交账号的 fork，而非仅能访问本项目。
+Fine-grained PAT 必须选中该账号的 `winget-pkgs`，并授予 **Contents: Read and
+write**；Classic PAT 需有 `public_repo`。若同步涉及上游工作流文件变动，还可能
+需要 **Workflows: Read and write** 或 Classic PAT 的 `workflow` scope。
+GET 成功并不能证明令牌有写权限，PATCH 的 404 也不能单独证明仓库不存在；
+落后过多和认证问题均需考虑，以 Git 兜底输出的错误进一步区分。
 不要删除 fork 或强制重置分支来自动处理失败。可在提交账号的
 `winget-pkgs` 仓库使用 **Sync fork**，处理冲突后再重跑 Winget 任务。
 已失败的旧运行仍使用旧提交中的工作流；本次修复合并后，新的发布运行才包含预检。
