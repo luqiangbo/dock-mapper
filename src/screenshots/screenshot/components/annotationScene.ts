@@ -188,18 +188,25 @@ export function simplifyScenePoints(points: ScenePoint[], minimumDistance = 1): 
   return result;
 }
 
+function arrowLabelBounds(annotation: RasterAnnotation): SceneBounds | null {
+  if (annotation.kind !== "arrow" || annotation.style.arrowStyle !== "label" || !annotation.style.arrowLabelStyle)
+    return null;
+  const first = annotation.points[0];
+  const last = annotation.points[annotation.points.length - 1];
+  const label = annotation.style.arrowLabel?.trim() ?? "";
+  if (!first || !last || !label) return null;
+  const fontSize = annotation.style.arrowLabelStyle.fontSize;
+  const width = Math.max(fontSize * 1.5, label.length * fontSize * 0.68) + 16;
+  const height = fontSize + 12;
+  return { x: (first.x + last.x) / 2 - width / 2, y: (first.y + last.y) / 2 - height / 2, width, height };
+}
+
 function unrotatedAnnotationBounds(annotation: RasterAnnotation): SceneBounds {
   const geometry = annotationGeometryBounds(annotation);
   const padding = annotationPadding(annotation);
-  if (annotation.kind === "arrow" && annotation.style.arrowStyle === "label") {
-    const first = annotation.points[0];
-    const last = annotation.points[annotation.points.length - 1] ?? first;
-    const label = annotation.style.arrowLabel?.trim() ?? "";
-    const fontSize = annotation.style.arrowLabelStyle?.fontSize ?? 24;
-    const labelWidth = Math.max(fontSize * 1.5, label.length * fontSize * 0.68) + 16;
-    const labelHeight = fontSize + 12;
-    const labelX = (first.x + last.x) / 2 - labelWidth / 2;
-    const labelY = (first.y + last.y) / 2 - labelHeight / 2;
+  const label = arrowLabelBounds(annotation);
+  if (label) {
+    const { x: labelX, y: labelY, width: labelWidth, height: labelHeight } = label;
     const left = Math.min(geometry.x - padding, labelX);
     const top = Math.min(geometry.y - padding, labelY);
     const right = Math.max(geometry.x + geometry.width + padding, labelX + labelWidth);
@@ -375,6 +382,10 @@ export function hitTestAnnotation(
   const center = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
   const local = rotatePoint(point, center, -(annotation.angle ?? 0));
   const width = Math.max(tolerance, annotation.style.strokeWidth / 2 + tolerance);
+  const label = arrowLabelBounds(annotation);
+  if (label && local.x >= label.x - tolerance && local.x <= label.x + label.width + tolerance &&
+      local.y >= label.y - tolerance && local.y <= label.y + label.height + tolerance)
+    return true;
   if (annotation.kind === "ellipse") {
     const radiusX = Math.max(1, bounds.width / 2);
     const radiusY = Math.max(1, bounds.height / 2);

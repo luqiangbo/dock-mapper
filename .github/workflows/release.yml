@@ -61,8 +61,12 @@ jobs:
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_SIGNING_TIMESTAMP_URL: ${{ vars.WINDOWS_SIGNING_TIMESTAMP_URL }}
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $signingConfig = @{bundle=@{windows=@{}}}
+          $signingConfig | ConvertTo-Json -Depth 4 | Set-Content tauri-signing.json -Encoding utf8NoBOM
           if (-not $env:WINDOWS_CERTIFICATE) {
             Write-Host "Windows certificate is not configured; Authenticode verification will be informational."
             exit 0
@@ -72,10 +76,27 @@ jobs:
           certutil -decode certificate/certificate.txt certificate/certificate.pfx
           if ($LASTEXITCODE -ne 0) { throw "Certificate decode failed" }
           Remove-Item -Path certificate/certificate.txt
-          Import-PfxCertificate `
+          $certificates = @(Import-PfxCertificate `
             -FilePath certificate/certificate.pfx `
             -CertStoreLocation Cert:\CurrentUser\My `
-            -Password (ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force)
+            -Password (ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force))
+          $signers = @($certificates | Where-Object {
+            $_.HasPrivateKey -and (@($_.EnhancedKeyUsageList.ObjectId) -contains '1.3.6.1.5.5.7.3.3')
+          })
+          if ($signers.Count -ne 1) { throw "Expected exactly one code signing certificate with a private key" }
+          $certificate = $signers[0]
+          if ($certificate.NotBefore -gt (Get-Date) -or $certificate.NotAfter -le (Get-Date)) {
+            throw "Windows code signing certificate is not currently valid"
+          }
+          if (-not $env:WINDOWS_SIGNING_TIMESTAMP_URL) { throw "WINDOWS_SIGNING_TIMESTAMP_URL repository variable is required when signing Windows binaries" }
+          $timestampUri = [Uri]$env:WINDOWS_SIGNING_TIMESTAMP_URL
+          if (-not $timestampUri.IsAbsoluteUri -or $timestampUri.Scheme -notin @('http', 'https')) { throw "Invalid timestamp URL" }
+          $signingConfig.bundle.windows = @{
+            certificateThumbprint=$certificate.Thumbprint
+            digestAlgorithm='sha256'
+            timestampUrl=$env:WINDOWS_SIGNING_TIMESTAMP_URL
+          }
+          $signingConfig | ConvertTo-Json -Depth 4 | Set-Content tauri-signing.json -Encoding utf8NoBOM
 
 
       - name: Check latest main before build
@@ -86,8 +107,9 @@ jobs:
         if: steps.latest.outputs.build == 'true'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw "TAURI_SIGNING_PRIVATE_KEY is required for releases" }
+          node .github/scripts/signing-preflight.mjs
       - name: Build and upload draft release
         if: steps.latest.outputs.build == 'true'
         uses: tauri-apps/tauri-action@v1
@@ -102,7 +124,7 @@ jobs:
           tagName: ${{ steps.prepare.outputs.tag }}
           releaseDraft: true
           prerelease: false
-          args: --bundles nsis
+          args: --bundles nsis --config tauri-signing.json
           uploadUpdaterJson: true
           updaterJsonPreferNsis: true
           uploadUpdaterSignatures: true
@@ -129,11 +151,19 @@ jobs:
           if ($updater.version.TrimStart('v') -ne $env:VERSION) { throw "Updater version mismatch" }
           $signature = Get-AuthenticodeSignature $installer.FullName
           if ($env:WINDOWS_CERTIFICATE -and $signature.Status -ne 'Valid') { throw "Invalid Authenticode signature" }
+          if ($env:WINDOWS_CERTIFICATE) {
+            $expectedThumbprint = (Get-Content tauri-signing.json -Raw | ConvertFrom-Json).bundle.windows.certificateThumbprint
+            if ($signature.SignerCertificate.Thumbprint -ne $expectedThumbprint) { throw "Installer signing certificate mismatch" }
+            $binarySignature = Get-AuthenticodeSignature $binary.FullName
+            if ($binarySignature.Status -ne 'Valid' -or $binarySignature.SignerCertificate.Thumbprint -ne $expectedThumbprint) { throw "Invalid executable Authenticode signature" }
+          }
           $checksums = @{}
           foreach ($name in @($installerName, 'latest.json')) {
             $checksums[$name] = (Get-FileHash (Join-Path release-assets $name) -Algorithm SHA256).Hash.ToLowerInvariant()
           }
           @{version=$env:VERSION; sha=$env:GITHUB_SHA; sha256=$checksums} | ConvertTo-Json -Depth 3 | Set-Content release-assets/build-info.json -Encoding utf8NoBOM
+          pnpm release:verify release-assets "$env:GITHUB_REPOSITORY" "$env:VERSION" "$env:GITHUB_SHA"
+          if ($LASTEXITCODE -ne 0) { throw "Release asset verification failed" }
           gh release upload $env:TAG_NAME release-assets/build-info.json --clobber
           if ($LASTEXITCODE -ne 0) { throw "Provenance upload failed" }
       - name: Publish latest verified candidate

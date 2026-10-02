@@ -21,6 +21,11 @@
 | `WINDOWS_CERTIFICATE` | 可选，Windows 代码签名证书 Base64 |
 | `WINDOWS_CERTIFICATE_PASSWORD` | 可选，证书密码 |
 
+配置 Windows 证书时，还需在 Actions 的 **Variables** 中设置
+`WINDOWS_SIGNING_TIMESTAMP_URL`，值使用证书服务商提供的 HTTP/HTTPS 时间戳地址。
+CI 检查证书私钥、代码签名用途和有效期，生成临时 Tauri 配置并将证书指纹传给
+构建命令；安装包和应用 EXE 都必须通过 Authenticode 校验且使用该证书。
+
 Updater 密钥必须使用 Tauri CLI 生成文件的**完整单行内容**，不要先做 Base64
 解码，也不要只复制解码后的密钥正文：
 
@@ -32,8 +37,8 @@ $publicKey = (Get-Content -Raw "$env:USERPROFILE\.tauri\dockmapper.key.pub").Tri
 # 将 $publicKey 原样写入 src-tauri/tauri.conf.json 的 plugins.updater.pubkey
 ```
 
-发布任务将这两个 Secrets 直接传给 Tauri Action。私钥内容或密码错误时，Tauri
-会在构建更新器签名时直接报告失败。私钥与公钥必须来自同一次
+发布任务在全量构建前，用小文件试签并使用应用内公钥验签；私钥、密码错误或
+公私钥不匹配会提前失败。这两个 Secrets 随后传给 Tauri Action。私钥与公钥必须来自同一次
 `tauri signer generate`，否则客户端无法验证后续更新。
 
 在仓库 `Settings → General → Releases` 启用 immutable releases。该设置会在 Draft
@@ -77,8 +82,10 @@ Windows Authenticode 证书可选，配置时必须通过验证；Updater 签名
 Winget 失败：只重跑 Submit Winget update，不重新构建应用。
 Release 支持 workflow_dispatch 手动补跑当前 main；旧提交使用原运行的重跑。
 
-当前 npm / Rust Tauri 版本不匹配属于单独的启动/发布前置问题，需另外修复；
-自动版本流程不会升级依赖。首次正式发布必须验证签名与旧版升级。
+Tauri API 和已使用插件的 npm 包与 Rust 锁文件保持主、次版本一致，前端对应包
+固定版本以避免漂移；CLI 单独版本不要求与 Rust crate 同号。自动版本流程不会
+升级依赖。Quality gate 和签名预检都在构建前检查对应版本，发现漂移明确失败。
+首次正式发布必须验证签名与旧版升级。
 
 ## Winget 审核
 
@@ -88,6 +95,47 @@ Release 支持 workflow_dispatch 手动补跑当前 main；旧提交使用原运
 - 只有出现验证失败、维护者明确请求修改或 `Needs-Author-Feedback` 时才继续推送。
 
 ## 本地验收
+
+日常改动仍只运行仓库规定的两项快速验证：根目录 `pnpm typecheck`，以及
+`src-tauri` 目录 `cargo test -- --skip model`。准备合并或发布时，在仓库根目录运行：
+
+```powershell
+pnpm release:preflight
+```
+
+这会依次运行 Tauri 版本检查、前端类型与行为测试、发布规则测试、跳过模型的
+Rust 核心测试；失败时立即停止。不运行全量构建、模型初始化或格式检查。
+
+下载同一候选版本的安装包、安装包 `.sig`、`latest.json` 和 `build-info.json`
+到仓库根目录的 `release-assets` 目录后，可按需运行以下轻量校验，不触发构建、安装或发布：
+`release:verify` 不会创建产物目录，也不会生成 `build-info.json`；该文件由发布 CI
+在构建后生成并上传。尚未下载产物时不要直接运行此命令。旧发布若没有
+`build-info.json`，无法完成来源与摘要校验，应使用包含该文件的 CI 发布产物。
+
+```powershell
+pnpm release:verify
+# 如果产物放在其他目录：pnpm release:verify .\其他目录
+```
+
+默认从更新地址读取仓库，从 `build-info.json` 读取版本，并要求其中的完整
+提交号等于当前 `git HEAD`。验收其他提交的产物时，先切换到该提交，或显式传入
+`pnpm release:verify <目录> <owner/repo> <版本> <完整40位提交号>`。
+校验覆盖非空安装包、源码/版本绑定、两个产物的 SHA-256、Windows x64 平台项、
+固定版本下载地址、清单与 `.sig` 一致性，以及应用公钥对安装包和可信注释的
+实际 Minisign 验签。任一失败返回非零退出码。SHA-256 用于一致性检查，
+`build-info.json` 本身没有独立签名，不能单独作为可信来源证明。
+本地验签使用当前检出的 `tauri.conf.json` 公钥；验收旧版本时使用对应版本配置。
+
+Windows 代码签名需要另行读取安装包状态；配置证书的版本应为 `Valid`，并核对
+签名证书指纹与预期一致：
+
+```powershell
+Get-AuthenticodeSignature .\release-assets\DockMapper_<version>_x64-setup.exe |
+  Select-Object Status, StatusMessage, SignerCertificate
+```
+
+工作流仍自动发布已校验的候选；上述本地校验不会暂停 CI，也不能证明真实安装
+或更新成功。正式上线验收还需从旧版执行应用内更新、重新打开并确认版本和配置保留。
 
 必须在未预装 Microsoft Visual C++ 运行库的干净 Windows Sandbox 中使用正式
 Release URL 验证。先直装 NSIS 并启动应用，再验证 Winget 安装、升级和卸载：

@@ -17,13 +17,14 @@ describe("semantic annotation lines", () => {
     expect(normalizeLineStyle()).toBe("solid");
   });
 
-  it("keeps the shaft axis stable while seeds vary the open arrow head", () => {
+  it("keeps shaft and open arrow head geometry stable across texture seeds", () => {
     const first = assembledArrowParts({ x: 10, y: 20 }, { x: 210, y: 20 }, "straight", 1);
     const repeated = assembledArrowParts({ x: 10, y: 20 }, { x: 210, y: 20 }, "straight", 1);
     const varied = assembledArrowParts({ x: 10, y: 20 }, { x: 210, y: 20 }, "straight", 2);
     expect(first).toEqual(repeated);
     expect(first[0]).toEqual({ role: "shaft", start: { x: 10, y: 20 }, end: { x: 210, y: 20 } });
-    expect(first.slice(1)).not.toEqual(varied.slice(1));
+    expect(first).toEqual(varied);
+    expect(first.filter((part) => part.role === "head")).toHaveLength(2);
   });
 
   it("reserves extra paint bounds for an enabled outline", () => {

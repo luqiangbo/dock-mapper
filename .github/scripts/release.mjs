@@ -1,5 +1,5 @@
-import { appendFile, readFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
+import { appendFile } from "node:fs/promises";
+import { verifyReleaseAssets } from "./release-assets.mjs";
 import { candidateState, isNewerVersion, nextReleaseVersion, parseReleaseTag, releaseDay, reusableRelease, sourceMarker } from "./release-version.mjs";
 
 const repo = process.env.GITHUB_REPOSITORY;
@@ -75,24 +75,8 @@ if (mode === "check") {
         throw new Error("Candidate version must exceed every published stable version");
       }
     }
-    const metadata = JSON.parse(await readFile("release-assets/build-info.json", "utf8"));
-    const updater = JSON.parse(await readFile("release-assets/latest.json", "utf8"));
     const version = release.tag_name.slice(1);
-    if (metadata.sha !== sha || metadata.version !== version || updater.version.replace(/^v/, "") !== version) throw new Error("Release provenance/version mismatch");
-    for (const [name, expected] of Object.entries(metadata.sha256)) {
-      if (name !== `DockMapper_${version}_x64-setup.exe` && name !== "latest.json") throw new Error("Unexpected provenance asset");
-      const hash = createHash("sha256").update(await readFile(`release-assets/${name}`)).digest("hex");
-      if (hash !== expected) throw new Error(`Asset checksum mismatch: ${name}`);
-    }
-    if (Object.keys(metadata.sha256).length !== 2) throw new Error("Incomplete provenance");
-    const platforms = Object.values(updater.platforms ?? {});
-    if (!platforms.length) throw new Error("Updater platforms missing");
-    for (const platform of platforms) {
-      const installerName = `DockMapper_${version}_x64-setup.exe`;
-      if (!platform.signature || platform.url !== `https://github.com/${repo}/releases/download/${release.tag_name}/${installerName}`) throw new Error("Updater signature/URL mismatch");
-      const signature = (await readFile(`release-assets/${installerName}.sig`, "utf8")).trim();
-      if (signature !== platform.signature.trim()) throw new Error("Updater signature differs from installer signature asset");
-    }
+    await verifyReleaseAssets({ repo, version, sha });
     // The last main check is the start of the non-cancellable publication section.
     if ((await api("git/ref/heads/main")).object.sha !== sha) {
       await output({ published: false });

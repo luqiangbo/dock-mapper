@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ARROW_STYLE_OPTIONS, LINE_STYLE_OPTIONS } from "./annotationTypes";
 import {
   annotationBounds,
+  annotationGeometryBounds,
   cloneRasterAnnotations,
   convertFrameAnnotation,
   hitTestAnnotation,
@@ -280,5 +281,14 @@ describe("retained annotation scene", () => {
     const bounds = annotationBounds(labeled);
     expect(bounds.width).toBeGreaterThan(140);
     expect(hitTestAnnotation(labeled, { x: bounds.x + 2, y: 40 })).toBe(true);
+    expect(hitTestAnnotation(labeled, { x: bounds.x - 20, y: 40 })).toBe(false);
+    expect(hitTestAnnotation(labeled, { x: bounds.x + 2, y: bounds.y - 20 })).toBe(false);
+    expect(hitTestAnnotation({ ...labeled, style: { ...labeled.style, arrowLabel: "" } }, { x: bounds.x + 2, y: 40 })).toBe(false);
+    const geometry = annotationGeometryBounds(labeled);
+    const center = { x: geometry.x + geometry.width / 2, y: geometry.y + geometry.height / 2 };
+    expect(hitTestAnnotation({ ...labeled, angle: Math.PI / 2 }, {
+      x: center.x - (40 - center.y),
+      y: center.y + (bounds.x + 2 - center.x),
+    })).toBe(true);
   });
 });
