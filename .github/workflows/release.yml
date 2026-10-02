@@ -135,6 +135,7 @@ jobs:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           TAG_NAME: ${{ steps.prepare.outputs.tag }}
           VERSION: ${{ steps.prepare.outputs.version }}
+          RELEASE_ID: ${{ steps.prepare.outputs.release_id }}
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path release-assets -Force | Out-Null
@@ -144,9 +145,12 @@ jobs:
           $installer = Get-Item (Join-Path release-assets $installerName)
           if ($installer.Length -eq 0) { throw "Installer is empty" }
           # tauri-action v1 emits API asset URLs; bind the conversion to this release's installer ID.
-          $releaseJson = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:TAG_NAME"
+          # The tag endpoint only returns published releases; this candidate is still a draft.
+          if ($env:RELEASE_ID -notmatch '^[1-9][0-9]*$') { throw "Release ID is missing or invalid" }
+          $releaseJson = gh api "repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID"
           if ($LASTEXITCODE -ne 0) { throw "Release asset metadata lookup failed" }
           $releaseMetadata = $releaseJson | ConvertFrom-Json
+          if ($releaseMetadata.id -ne $env:RELEASE_ID -or $releaseMetadata.tag_name -ne $env:TAG_NAME) { throw "Release metadata does not match allocated candidate" }
           $installerAssets = @($releaseMetadata.assets | Where-Object { $_.name -eq $installerName })
           if ($installerAssets.Count -ne 1) { throw "Expected exactly one installer asset" }
           $expectedUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:TAG_NAME/$installerName"

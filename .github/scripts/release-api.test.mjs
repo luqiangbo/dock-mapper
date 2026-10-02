@@ -60,6 +60,21 @@ test("草稿创建前中断留下的标签恢复为同一个编号", async () =>
   });
   assert.match(result.output, /version=2026.1002.1/);
   assert.equal(result.calls.filter((call) => call.method === "POST").length, 1);
+  assert.match(result.output, /release_id=1\n/);
+});
+
+test("重跑已有草稿时提供同一发布 ID 且不创建新发布", async () => {
+  const draft = { id: 42, tag_name: "v2026.1002.1", body: sourceMarker(sha), draft: true };
+  const result = await simulate("prepare", (path) => {
+    if (path === "git/ref/heads/main") return { object: { sha } };
+    if (path === "releases") return [draft];
+    if (path === `git/ref/tags/${draft.tag_name}`) return { object: { type: "commit", sha } };
+    throw new Error(`Unexpected API: ${path}`);
+  });
+  assert.match(result.output, /release_id=42\n/);
+  assert.match(result.output, /build=true\n/);
+  assert.match(result.output, /tag=v2026\.1002\.1\n/);
+  assert.ok(result.calls.every((call) => call.method === "GET"));
 });
 test("GitHub 读取失败明确失败且不会创建正式发布", async () => {
   await assert.rejects(simulate("prepare", () => { throw new Error("GitHub unavailable"); }), /GitHub unavailable/);
