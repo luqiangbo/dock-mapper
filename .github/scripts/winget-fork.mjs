@@ -23,7 +23,11 @@ export async function fastForwardWingetFork({ token, forkRepo, branch, sha, behi
     try {
       await run("git", args, { env, timeout: 180000, maxBuffer: 1024 * 1024, windowsHide: true });
     } catch (error) {
-      const detail = `${error.message}\n${error.stderr ?? ""}`
+      // --porcelain writes per-ref rejection reasons to stdout, not stderr.
+      const detail = [error.message,
+        error.stdout && `stdout:\n${error.stdout}`,
+        error.stderr && `stderr:\n${error.stderr}`,
+      ].filter(Boolean).join("\n")
         .split(token).join("<REDACTED>").split(authorization).join("<REDACTED>");
       throw new Error(`Winget Git synchronization failed: ${detail}. Verify WINGET_TOKEN can write ${forkRepo} (fine-grained PAT: select this fork and Contents: write; classic PAT: public_repo). Updating upstream workflow files may also require Workflows: write or the workflow scope. Check branch protection, then retry.`);
     }

@@ -168,6 +168,26 @@ test("Git 推送后仍未同步到目标提交时停止提交", async () => {
   await assert.rejects(run, /expected upstream SHA/);
 });
 
+test("Git 推送失败时保留 stdout 中的拒绝原因并遮蔽两路输出的凭据", async () => {
+  const { fastForwardWingetFork } = await import("./winget-fork.mjs");
+  const token = "test-secret", encoded = Buffer.from(`x-access-token:${token}`).toString("base64");
+  await assert.rejects(() => fastForwardWingetFork({ token, forkRepo: "publisher/winget-pkgs", branch: "master",
+    sha: "a".repeat(40), behindBy: 15699, createDirectory: async () => "test-bare-repository",
+    run: async (_file, args) => {
+      if (!args.includes("push")) return;
+      const error = new Error(`Command failed: git push ${token}`);
+      error.stdout = `!\t${"a".repeat(40)}:refs/heads/master\t[remote rejected] (shallow update not allowed) ${token} ${encoded}`;
+      error.stderr = `error: failed to push some refs ${token} ${encoded}`;
+      throw error;
+    },
+  }), (error) => {
+    assert.match(error.message, /stdout:\n.*remote rejected.*shallow update not allowed/);
+    assert.match(error.message, /stderr:\nerror: failed to push some refs/);
+    assert.ok(!error.message.includes(token) && !error.message.includes(encoded));
+    return true;
+  });
+});
+
 test("真实 Git 能快进落后的分支，并拒绝覆盖并发新增提交", async () => {
   const { fastForwardWingetFork } = await import("./winget-fork.mjs");
   const exec = promisify(execFile);
@@ -204,6 +224,9 @@ test("真实 Git 能快进落后的分支，并拒绝覆盖并发新增提交", 
   await git(["--git-dir", fork, "update-ref", "refs/heads/master", concurrent]);
   const newer = await git(["--git-dir", upstream, "commit-tree", tree, "-p", tip, "-m", "upstream change"]);
   await git(["--git-dir", upstream, "update-ref", "refs/heads/master", newer]);
-  await assert.rejects(() => synchronize(newer, 1), /rejected|non-fast-forward|fetch first/);
+  await assert.rejects(() => synchronize(newer, 1), (error) => {
+    assert.match(error.message, /stdout:\n[\s\S]*\[rejected\].*(?:non-fast-forward|fetch first)/);
+    return true;
+  });
   assert.equal(await git(["--git-dir", fork, "rev-parse", "refs/heads/master"]), concurrent);
 });

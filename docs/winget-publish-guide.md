@@ -104,6 +104,12 @@ write**；Classic PAT 需有 `public_repo`。若同步涉及上游工作流文�
 需要 **Workflows: Read and write** 或 Classic PAT 的 `workflow` scope。
 GET 成功并不能证明令牌有写权限，PATCH 的 404 也不能单独证明仓库不存在；
 落后过多和认证问题均需考虑，以 Git 兜底输出的错误进一步区分。
+Git 推送使用 `--porcelain`，具体的分支拒绝原因在 stdout 中；同步脚本会在错误中
+保留 stdout 和 stderr，并遮蔽两者中的 PAT 及其 Basic 认证编码。若只看到
+`failed to push some refs`，无法据此判定为权限问题，应使用修复后的脚本获取完整原因。
+若原因提示缺少 `workflow` 权限，补充上述工作流写权限；若提示分支规则拒绝，检查
+fork 的分支保护；若提示 `shallow update not allowed`，先在 GitHub 上同步 fork，
+再重跑 Winget 任务。不要仅根据 PATCH 404 或通用推送错误盲目调整令牌权限。
 不要删除 fork 或强制重置分支来自动处理失败。可在提交账号的
 `winget-pkgs` 仓库使用 **Sync fork**，处理冲突后再重跑 Winget 任务。
 已失败的旧运行仍使用旧提交中的工作流；本次修复合并后，新的发布运行才包含预检。
