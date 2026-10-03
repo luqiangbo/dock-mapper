@@ -73,6 +73,30 @@ Windows Authenticode 证书可选，配置时必须通过验证；Updater 签名
 
 ## 合并保护和失败处理
 
+日常开发在 `test`，正式发版将 `test` 通过 PR 合并到 `main`。Checks 在每次
+`test` 推送、目标为 `test` 或 `main` 的 PR 上执行，也支持手动运行。相同分支或
+PR 的新提交会取消过时检查；正式发布仍保持串行，不取消正在发布的任务。
+
+Checks 在安装依赖前解析工作流中的 PowerShell `run` 命令和发布 JavaScript
+脚本，只检查语法、不执行发布操作；后续运行前端和发布规则回归测试、Rust
+核心测试。语法检查不覆盖 YAML schema、GitHub 表达式语义、Action 输入或实际
+GitHub 权限。main 的必需检查配置见下文；test 上通过后仍要检查 PR 合并结果。
+
+日常本地验证继续只执行 `pnpm typecheck`，然后在 `src-tauri` 执行
+`cargo test -- --skip model`。发版前需要显式执行更完整的脚本预检时，可运行
+`pnpm release:preflight`，它还包含工作流语法、Tauri 版本和发布规则测试，
+不构建安装包、不初始化模型、不修改 GitHub。
+
+Release 在改写发布版本之前恢复 Rust 缓存，避免每次分配发布版本改变精确
+缓存键；保留 job 维度的缓存隔离，检查与发布分别缓存 debug/release 依赖。
+检查和发布固定使用 Rust `1.98.1`，升级时同步修改两个工作流。构建后即使
+产物校验失败也保存依赖缓存；Cargo 仍负责校验依赖是否需要重新编译。
+缓存仍随源码依赖、编译选项及工具链变化而失效，不承诺所有构建都命中。
+
+Updater 私钥/密码与应用公钥匹配检查、可选 Windows 证书检查，在 Release
+安装依赖后、设置 Rust 工具链及编译前执行。Secret、PAT 权限、Winget fork
+状态和网络故障仍需真实 GitHub 环境验证；本地测试通过不能保证这些步骤成功。
+
 在 Settings → Rules → Rulesets 为 main 创建规则，要求 Pull Request，禁止强推，
 添加本仓库 Checks 工作流的 **Quality gate** 为必需检查；先运行一次 PR 检查，
 再从 GitHub 展示的检查名称中选择。要求分支在合并前保持最新，避免测试旧基线。
@@ -135,7 +159,7 @@ Tauri API 和已使用插件的 npm 包与 Rust 锁文件保持主、次版本�
 pnpm release:preflight
 ```
 
-这会依次运行 Tauri 版本检查、前端类型与行为测试、发布规则测试、跳过模型的
+这会依次运行工作流和发布脚本语法检查、Tauri 版本检查、前端类型与行为测试、发布规则测试、跳过模型的
 Rust 核心测试；失败时立即停止。不运行全量构建、模型初始化或格式检查。
 
 下载同一候选版本的安装包、安装包 `.sig`、`latest.json` 和 `build-info.json`

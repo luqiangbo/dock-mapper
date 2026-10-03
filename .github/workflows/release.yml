@@ -40,20 +40,6 @@ jobs:
       - name: Allocate or resume release
         id: prepare
         run: node .github/scripts/release.mjs prepare
-      - name: Synchronize build version
-        if: steps.prepare.outputs.build == 'true'
-        env:
-          VERSION: ${{ steps.prepare.outputs.version }}
-        run: node .github/scripts/sync-version.mjs "$env:VERSION"
-      - uses: dtolnay/rust-toolchain@stable
-        if: steps.prepare.outputs.build == 'true'
-        with:
-          targets: x86_64-pc-windows-msvc
-      - uses: swatinem/rust-cache@v2
-        if: steps.prepare.outputs.build == 'true'
-        with:
-          workspaces: src-tauri
-          key: windows-x86_64
       - run: pnpm install --frozen-lockfile
         if: steps.prepare.outputs.build == 'true'
       - name: Import Windows signing certificate
@@ -110,6 +96,24 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           node .github/scripts/signing-preflight.mjs
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.latest.outputs.build == 'true'
+        with:
+          toolchain: 1.98.1
+          targets: x86_64-pc-windows-msvc
+      # Hash the source manifests before assigning the per-release package version.
+      # The job-specific cache keeps release artifacts separate from debug tests.
+      - uses: swatinem/rust-cache@v2
+        if: steps.latest.outputs.build == 'true'
+        with:
+          workspaces: src-tauri
+          key: windows-x86_64
+          cache-on-failure: true
+      - name: Synchronize build version
+        if: steps.latest.outputs.build == 'true'
+        env:
+          VERSION: ${{ steps.prepare.outputs.version }}
+        run: node .github/scripts/sync-version.mjs "$env:VERSION"
       - name: Build and upload draft release
         if: steps.latest.outputs.build == 'true'
         uses: tauri-apps/tauri-action@v1
