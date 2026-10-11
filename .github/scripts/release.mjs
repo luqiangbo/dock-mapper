@@ -29,6 +29,9 @@ async function output(values) {
 }
 const main = await api("git/ref/heads/main");
 const releases = await list("releases");
+const publishedVersions = releases
+  .filter((release) => !release.draft && !release.prerelease && parseReleaseTag(release.tag_name))
+  .map((release) => release.tag_name);
 let release = reusableRelease(releases, sha);
 const state = candidateState(main.object.sha, sha, release);
 if (mode === "check") {
@@ -42,13 +45,13 @@ if (mode === "check") {
     if (!release) {
       const commit = await api(`commits/${sha}`);
       const tags = await list("tags");
-      const orphan = tags.find((tag) => tag.commit.sha === sha && parseReleaseTag(tag.name)?.day === releaseDay(commit.commit.committer.date) && !releases.some((item) => item.tag_name === tag.name));
-      const version = orphan?.name.slice(1) ?? nextReleaseVersion(commit.commit.committer.date, [...tags.map((tag) => tag.name), ...releases.map((item) => item.tag_name)]);
+      const timestamp = commit.commit.committer.date;
+      const day = releaseDay(timestamp);
+      const orphan = tags.find((tag) => tag.commit.sha === sha && parseReleaseTag(tag.name)?.day === day && !releases.some((item) => item.tag_name === tag.name));
+      const version = orphan?.name.slice(1) ?? nextReleaseVersion(timestamp, [...tags.map((tag) => tag.name), ...releases.map((item) => item.tag_name)]);
       const tag = `v${version}`;
-      for (const item of releases.filter((item) => !item.draft && !item.prerelease)) {
-        if (/^v?\d+\.\d+\.\d+$/.test(item.tag_name) && !isNewerVersion(version, item.tag_name)) {
-          throw new Error("Commit date would regress the published version; correct the commit timestamp before releasing");
-        }
+      if (publishedVersions.some((published) => !isNewerVersion(version, published))) {
+        throw new Error("Commit date would regress the published version; correct the commit timestamp before releasing");
       }
       // Create the immutable source reference before allocating its draft.
       if (!orphan) await api("git/refs", "POST", { ref: `refs/tags/${tag}`, sha });
@@ -70,10 +73,8 @@ if (mode === "check") {
   } else {
     const tag = await api(`git/ref/tags/${release.tag_name}`);
     if (tag.object.type !== "commit" || tag.object.sha !== sha) throw new Error("Source tag mismatch");
-    for (const item of releases.filter((item) => !item.draft && !item.prerelease)) {
-      if (/^v?\d+\.\d+\.\d+$/.test(item.tag_name) && !isNewerVersion(release.tag_name, item.tag_name)) {
-        throw new Error("Candidate version must exceed every published stable version");
-      }
+    if (publishedVersions.some((published) => !isNewerVersion(release.tag_name, published))) {
+      throw new Error("Candidate version must exceed every published stable version");
     }
     const version = release.tag_name.slice(1);
     await verifyReleaseAssets({ repo, version, sha });

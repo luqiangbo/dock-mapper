@@ -116,7 +116,7 @@ export default function GeneralSettings() {
         return;
       }
       modal.confirm({
-        title: `发现 DockMapper ${update.version}`,
+        title: `发现 DockMapper v${update.version}`,
         content: "下载完成后应用将自动重启。",
         okText: "下载并安装",
         cancelText: "稍后",
