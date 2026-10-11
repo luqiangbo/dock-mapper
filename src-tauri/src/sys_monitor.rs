@@ -10,6 +10,10 @@ pub struct SysStatusPayload {
     memory_usage: f32,
     network_available: bool,
     cpu_usage: Option<f32>,
+    cpu_temperature_celsius: Option<f32>,
+    cpu_temperature_error: Option<String>,
+    gpu_usage: Option<f32>,
+    gpu_usage_error: Option<String>,
     battery: Option<BatteryStatus>,
 }
 
@@ -59,6 +63,8 @@ pub fn start_sys_monitor(app: AppHandle) {
         let mut previous_tick = Instant::now();
         let mut last_list_refresh = Instant::now();
         let mut last_hidden_main_emit: Option<Instant> = None;
+        let temperature_monitor = crate::cpu_temperature::CpuTemperatureMonitor::default();
+        let gpu_monitor = crate::gpu_usage::GpuUsageMonitor::default();
 
         loop {
             let current = settings.borrow().clone();
@@ -89,6 +95,28 @@ pub fn start_sys_monitor(app: AppHandle) {
                 baseline.sample(None, network_available, total_rx, total_tx, elapsed);
             previous_tick = now;
             let total_memory = sys.total_memory() as f32;
+            let (temperature_enabled, gpu_enabled) = app
+                .state::<crate::AppState>()
+                .config
+                .lock()
+                .map(|config| {
+                    let enabled = |kind| {
+                        config
+                            .widget_config
+                            .metrics
+                            .iter()
+                            .any(|m| m.enabled && m.kind == kind)
+                    };
+                    (
+                        config.widget_config.metrics.iter().any(|m| {
+                            m.enabled && m.kind == crate::widget::WidgetMetricKind::CpuTemperature
+                        }),
+                        enabled(crate::widget::WidgetMetricKind::GpuUsage),
+                    )
+                })
+                .unwrap_or((false, false));
+            let temperature = temperature_monitor.sample(temperature_enabled);
+            let gpu = gpu_monitor.sample(gpu_enabled);
             let payload = SysStatusPayload {
                 upload_speed,
                 download_speed,
@@ -99,6 +127,10 @@ pub fn start_sys_monitor(app: AppHandle) {
                 },
                 network_available,
                 cpu_usage: Some(sys.global_cpu_info().cpu_usage()),
+                cpu_temperature_celsius: temperature.celsius,
+                cpu_temperature_error: temperature.error,
+                gpu_usage: gpu.usage,
+                gpu_usage_error: gpu.error,
                 battery: battery_status(),
             };
 

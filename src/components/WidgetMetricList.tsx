@@ -9,12 +9,22 @@ import {
   type MetricDrag,
 } from "./widgetMetricOrder";
 import styles from "./components.module.scss";
+import { pairWidgetMetrics } from "../widgetColumns";
 
-const labels = { network: "网速", cpu: "CPU", memory: "内存", battery: "电池" };
+const labels = {
+  network: "网速",
+  upload: "上传",
+  download: "下载",
+  cpu: "CPU",
+  cpu_temperature: "CPU 温度",
+  gpu_usage: "GPU 占用率",
+  memory: "内存",
+  battery: "电池",
+};
 const schemes = [
-  { value: "capsule", label: "紧凑" },
+  { value: "capsule", label: "胶囊" },
   { value: "ring", label: "圆环" },
-  { value: "gauge", label: "刻度" },
+  { value: "number", label: "纯数值" },
 ];
 
 export function WidgetMetricList({
@@ -122,7 +132,7 @@ export function WidgetMetricList({
   return (
     <div ref={host} className={styles.metricList}>
       <div className={styles.metricListHeading}>
-        展示指标 <span>拖动手柄调整顺序</span>
+        展示指标 <span>拖动排序决定列位置和上下顺序；任意两项可上下组合</span>
       </div>
       {visible.map((metric, index) => (
         <div
@@ -182,15 +192,21 @@ export function WidgetMetricList({
               />
             </span>
           </Tooltip>
-          {metric.kind === "network" ? (
-            <span className={styles.metricScheme}>双行网速</span>
+          {metric.kind === "network" || metric.kind === "upload" || metric.kind === "download" ? (
+            <span className={styles.metricScheme}>实时网速</span>
           ) : (
             <Select
               className={styles.metricScheme}
               aria-label={`${labels[metric.kind]}展示样式`}
               value={metric.usage_scheme}
               disabled={!metric.enabled}
-              options={schemes}
+              options={
+                metric.kind === "cpu_temperature"
+                  ? schemes.filter(
+                      (scheme) => scheme.value === "number" || scheme.value === "capsule",
+                    )
+                  : schemes
+              }
               onChange={(usage_scheme) =>
                 onChange(
                   metrics.map((item) =>
@@ -200,6 +216,47 @@ export function WidgetMetricList({
               }
             />
           )}
+          <Select
+            className={styles.metricScheme}
+            aria-label={`${labels[metric.kind]}图标样式`}
+            value={metric.icon_style}
+            disabled={!metric.enabled}
+            options={[
+              { value: "outline", label: "线框图标" },
+              { value: "filled", label: "实心图标" },
+              { value: "text", label: "文字标记" },
+            ]}
+            onChange={(icon_style) =>
+              onChange(
+                metrics.map((item) => (item.kind === metric.kind ? { ...item, icon_style } : item)),
+              )
+            }
+          />
+          <Select
+            className={styles.metricScheme}
+            aria-label={`${labels[metric.kind]}上下组合`}
+            popupMatchSelectWidth={240}
+            value={metric.pair_with ?? ""}
+            disabled={!metric.enabled}
+            options={[
+              { value: "", label: "独立一列" },
+              ...metrics
+                .filter(
+                  (other) =>
+                    other.kind !== metric.kind &&
+                    ((other.enabled && kinds.includes(other.kind)) ||
+                      other.kind === metric.pair_with),
+                )
+                .map((other) => ({
+                  value: other.kind,
+                  label: `与${labels[other.kind]}上下组合${!other.enabled ? "（已关闭）" : !kinds.includes(other.kind) ? "（不可用）" : ""}`,
+                  disabled: !other.enabled || !kinds.includes(other.kind),
+                })),
+            ]}
+            onChange={(partner: WidgetMetricKind | "") =>
+              onChange(pairWidgetMetrics(metrics, metric.kind, partner || null))
+            }
+          />
           <div className={styles.metricMoveActions}>
             <Button
               aria-label={`${labels[metric.kind]}上移`}

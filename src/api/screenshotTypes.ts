@@ -83,6 +83,9 @@ export interface PinWindowGeometryRequest {
 }
 
 export interface WidgetLayoutBudget {
+  revision: number;
+  state: "probeFailed" | "insufficientSpace" | "ready";
+  error: string | null;
   allocatedWidth: number;
   constrained: boolean;
   visible: boolean;

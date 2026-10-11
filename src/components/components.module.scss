@@ -225,74 +225,25 @@ $compact-radius: 10px;
 
 .widgetPreview {
   display: flex;
-  width: fit-content;
-  min-height: 48px;
   align-items: center;
-  gap: 6px;
-  padding: 7px 4px;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 48px;
+  overflow-x: auto;
+  padding: 0;
   border: 1px solid var(--glass-border);
   border-radius: 10px;
-  color: var(--text-primary);
   background: var(--surface-muted);
-  font: 12px/1.1 var(--font-mono);
-  font-variant-numeric: tabular-nums;
 }
-
-.previewNetwork {
-  display: grid;
-  grid-template-columns: 12px 6ch 4.5ch;
-  align-items: center;
-
-  b {
-    text-align: right;
-  }
-
-  small {
-    padding-left: 3px;
-    font-size: 10px;
-  }
-}
-
-.previewCompact,
-.previewGauge {
-  display: flex;
-  min-width: 48px;
-  align-items: center;
-  gap: 3px;
-
-  b {
-    min-width: 4ch;
-    text-align: right;
-  }
-}
-
-.previewRing {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  border: 3px solid var(--accent);
-  border-radius: 50%;
-  font-size: 9px;
-}
-
-.previewGauge > span {
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
-
-  i {
-    width: 3px;
-    height: 12px;
-    border-radius: 2px;
-    background: var(--glass-border);
-  }
-
-  i[data-active="true"] {
-    background: var(--accent);
-  }
-}
-
+.widgetSettingsLayout { display: flex; flex-direction: column; gap: 16px; }
+.widgetStatusPane { display: flex; flex-direction: column; gap: 8px; }
+.widgetSettingsLayout .configurationPane { border-left: 0; padding-left: 0; }
+.previewBoundary { flex: 0 0 16px; text-align: center; color: var(--text-secondary); }
+.widgetLayoutControls { padding: 12px 0 16px; border-bottom: 1px solid var(--glass-border); }
+.widgetLayoutHeading { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.widgetLayoutField { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.widgetLayoutField :global(.ant-select), .widgetLayoutField :global(.ant-input-number) { width: 140px; flex: 0 0 140px; }
+.widgetDistanceGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px 24px; margin: 12px 0; }
 .widgetOptionCard {
   display: grid;
   min-width: 0;
@@ -1088,10 +1039,11 @@ $compact-radius: 10px;
 }
 
 .previewPane .widgetPreview {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   max-width: 100%;
   min-width: 0;
 }
+.widgetPreview > :global(.wm-row) { flex: 0 0 auto; }
 
 .visualizerOption > div:last-child {
   flex: 0 0 auto;
@@ -1253,3 +1205,4 @@ $compact-radius: 10px;
     min-width: 100px;
   }
 }
+

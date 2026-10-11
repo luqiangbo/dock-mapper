@@ -169,11 +169,18 @@ impl HistoryStore {
             return Ok(false);
         }
         fs::remove_dir_all(path).map_err(|error| format!("删除截图历史失败：{error}"))?;
-        let _ = self
-            .count
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-                Some(count.saturating_sub(1))
-            });
+        let mut count = self.count.load(Ordering::Acquire);
+        loop {
+            match self.count.compare_exchange_weak(
+                count,
+                count.saturating_sub(1),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break,
+                Err(current) => count = current,
+            }
+        }
         Ok(true)
     }
 

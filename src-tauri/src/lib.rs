@@ -4,6 +4,8 @@ mod app_commands;
 mod app_state;
 mod config;
 mod config_transaction;
+mod cpu_temperature;
+mod gpu_usage;
 mod diagnostics;
 mod dxgi_capture;
 mod history;
@@ -25,6 +27,7 @@ mod taskbar;
 mod tray;
 mod visualizer_effects;
 mod widget;
+mod widget_layout;
 
 use std::sync::Arc;
 use tauri::Manager;

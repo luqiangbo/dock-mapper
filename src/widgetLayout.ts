@@ -1,4 +1,6 @@
-import type { WidgetMetricKind } from "./types";
+import type { WidgetLayoutSettings, WidgetMetricKind } from "./types";
+import type { WidgetLayoutBudget } from "./api/screenshotTypes";
+import { DEFAULT_WIDGET_LAYOUT, widgetSpacing } from "./widgetPresentation";
 
 export interface WidgetResponsiveLayout {
   compact: boolean;
@@ -8,15 +10,22 @@ export interface WidgetResponsiveLayout {
 }
 
 export interface WidgetLayoutReport {
+  revision?: number;
   visibleKinds: WidgetMetricKind[];
   hiddenKinds: WidgetMetricKind[];
   compact: boolean;
   visible: boolean;
 }
 
-export function describeWidgetLayout(enabledKinds: readonly WidgetMetricKind[], layout: WidgetResponsiveLayout, visible: boolean): WidgetLayoutReport {
+export function describeWidgetLayout(
+  enabledKinds: readonly WidgetMetricKind[],
+  layout: WidgetResponsiveLayout,
+  visible: boolean,
+  budget?: WidgetLayoutBudget,
+): WidgetLayoutReport {
   const visibleCount = visible ? layout.visibleCount : 0;
   return {
+    ...(budget ? { revision: budget.revision } : {}),
     visibleKinds: enabledKinds.slice(0, visibleCount),
     hiddenKinds: enabledKinds.slice(visibleCount),
     compact: layout.compact,
@@ -35,38 +44,57 @@ export function calculateWidgetResponsiveLayout(
   compactWidths: readonly number[],
   allocatedWidth: number,
   overflowWidth = 12,
+  settings: WidgetLayoutSettings = DEFAULT_WIDGET_LAYOUT,
 ): WidgetResponsiveLayout {
   const count = Math.min(normalWidths.length, compactWidths.length);
-  if (count === 0)
-    return { compact: false, visibleCount: 0, hiddenCount: 0, showOverflow: false };
+  if (count === 0) return { compact: false, visibleCount: 0, hiddenCount: 0, showOverflow: false };
   const budget = Math.max(0, allocatedWidth);
-  if (occupiedWidth(normalWidths.slice(0, count), 4, 6) <= budget + 0.5) {
+  const standard = widgetSpacing(settings, false);
+  const compact = widgetSpacing(settings, true);
+  if (
+    settings.mode !== "compact" &&
+    occupiedWidth(normalWidths.slice(0, count), standard.padding, standard.gap) <= budget + 0.01
+  ) {
     return { compact: false, visibleCount: count, hiddenCount: 0, showOverflow: false };
   }
-  if (occupiedWidth(compactWidths.slice(0, count), 2, 3) <= budget + 0.5) {
-    return { compact: true, visibleCount: count, hiddenCount: 0, showOverflow: false };
+  const isCompact = settings.mode !== "standard";
+  const spacing = isCompact ? compact : standard;
+  const selectedWidths = isCompact ? compactWidths : normalWidths;
+  if (
+    occupiedWidth(selectedWidths.slice(0, count), spacing.padding, spacing.gap) <=
+    budget + 0.01
+  ) {
+    return { compact: isCompact, visibleCount: count, hiddenCount: 0, showOverflow: false };
   }
 
   let visibleCount = 0;
   for (let candidate = 1; candidate <= count; candidate += 1) {
     const hidden = candidate < count;
-    const widths = compactWidths.slice(0, candidate);
+    const widths = selectedWidths.slice(0, candidate);
     if (hidden) widths.push(overflowWidth);
-    if (occupiedWidth(widths, 2, 3) > budget + 0.5) break;
+    if (occupiedWidth(widths, spacing.padding, spacing.gap) > budget + 0.01) break;
     visibleCount = candidate;
   }
   // The native minimum-width contract guarantees the first metric fits. If the
   // ellipsis does not, preserve the metric and omit only the marker.
-  if (visibleCount === 0 && occupiedWidth(compactWidths.slice(0, 1), 2, 3) <= budget + 0.5) {
+  if (
+    visibleCount === 0 &&
+    occupiedWidth(selectedWidths.slice(0, 1), spacing.padding, spacing.gap) <= budget + 0.01
+  ) {
     visibleCount = 1;
   }
   return {
-    compact: true,
+    compact: isCompact,
     visibleCount,
     hiddenCount: count - visibleCount,
     showOverflow:
       visibleCount > 0 &&
       visibleCount < count &&
-      occupiedWidth([...compactWidths.slice(0, visibleCount), overflowWidth], 2, 3) <= budget + 0.5,
+      occupiedWidth(
+        [...selectedWidths.slice(0, visibleCount), overflowWidth],
+        spacing.padding,
+        spacing.gap,
+      ) <=
+        budget + 0.01,
   };
 }

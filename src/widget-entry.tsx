@@ -1,48 +1,70 @@
 import { useWindowTheme } from "./hooks/useWindowTheme";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import ReactDOM from "react-dom/client";
 import { emit, listen } from "@tauri-apps/api/event";
-import { CaretDownFilled, CaretUpFilled } from "@ant-design/icons";
-import { Battery, Cpu, MemoryStick } from "lucide-react";
-import type {
-  MemoryScheme,
-  SysStatus,
-  WidgetConfig,
-  WidgetMetricConfig,
-  WidgetMetricKind,
-} from "./types";
-import { formatSpeedParts } from "./utils/format";
-import { calculateWidgetResponsiveLayout, describeWidgetLayout, type WidgetLayoutReport } from "./widgetLayout";
+import type { SysStatus, WidgetConfig } from "./types";
+import { calculateWidgetResponsiveLayout, type WidgetLayoutReport } from "./widgetLayout";
+import {
+  DEFAULT_WIDGET_LAYOUT,
+  acceptWidgetBudget,
+  enabledWidgetMetrics,
+  widgetSpacing,
+} from "./widgetPresentation";
+import { WidgetColumn } from "./components/WidgetColumn";
+import { buildWidgetColumns, describeWidgetColumns } from "./widgetColumns";
 import { useTelemetryFreshness } from "./utils/telemetryFreshness";
 import { invokeCommand } from "./api/ipc";
 import type { WidgetLayoutBudget } from "./api/screenshotTypes";
 import "./widget.scss";
 
-const FALLBACK_METRICS: WidgetMetricConfig[] = [
-  { kind: "network", enabled: true, usage_scheme: "capsule" },
-  { kind: "memory", enabled: true, usage_scheme: "capsule" },
-];
 const FALLBACK_CONFIG: WidgetConfig = {
   memory_scheme: "capsule",
-  metrics: FALLBACK_METRICS,
+  layout: { ...DEFAULT_WIDGET_LAYOUT },
+  metrics: [
+    {
+      kind: "upload",
+      pair_with: "download",
+      enabled: true,
+      usage_scheme: "capsule",
+      icon_style: "outline",
+      row_layout: "single",
+    },
+    {
+      kind: "download",
+      pair_with: "upload",
+      enabled: true,
+      usage_scheme: "capsule",
+      icon_style: "outline",
+      row_layout: "single",
+    },
+    {
+      kind: "memory",
+      enabled: true,
+      usage_scheme: "capsule",
+      icon_style: "outline",
+      row_layout: "single",
+    },
+  ],
   refresh_interval_secs: 1,
   network_interface: null,
   speed_unit: "auto",
   alerts: { cpu_percent: null, memory_percent: null, battery_below_percent: null },
   presets: [],
 };
-
-interface WidgetMeasurements {
-  preferredWidth: number;
-  minimumWidth: number;
-  normalWidths: number[];
-  compactWidths: number[];
-}
-
 const INITIAL_BUDGET: WidgetLayoutBudget = {
-  allocatedWidth: 180,
-  constrained: false,
-  visible: true,
+  revision: 0,
+  state: "probeFailed",
+  error: null,
+  allocatedWidth: 0,
+  constrained: true,
+  visible: false,
 };
 const MEASUREMENT_STATUS: SysStatus = {
   upload_speed: 99_999_999,
@@ -50,159 +72,16 @@ const MEASUREMENT_STATUS: SysStatus = {
   memory_usage: 100,
   network_available: true,
   cpu_usage: 100,
+  cpu_temperature_celsius: 100,
+  gpu_usage: 100,
   battery: { percentage: 100, charging: false },
 };
-
-function memoryColor(usage: number): string {
-  if (usage < 70) return "#35c985";
-  if (usage < 90) return "#f2a33a";
-  return "#ff5d67";
-}
-
-function metricIcon(kind: Exclude<WidgetMetricKind, "network">): ReactNode {
-  if (kind === "cpu") return <Cpu />;
-  if (kind === "battery") return <Battery />;
-  return <MemoryStick />;
-}
-
-function metricLabel(kind: Exclude<WidgetMetricKind, "network">): string {
-  if (kind === "cpu") return "CPU";
-  if (kind === "battery") return "电池";
-  return "内存";
-}
-
-function CapsuleIndicator({
-  usage,
-  kind,
-}: {
-  usage: number;
-  kind: Exclude<WidgetMetricKind, "network">;
-}) {
-  return (
-    <div className="capsule-indicator">
-      <span className="metric-icon">{metricIcon(kind)}</span>
-      <span className="capsule-label" aria-label={`${metricLabel(kind)}占用 ${usage.toFixed(0)}%`}>
-        {usage.toFixed(0)}%
-      </span>
-    </div>
-  );
-}
-
-function RingIndicator({
-  usage,
-  kind,
-}: {
-  usage: number;
-  kind: Exclude<WidgetMetricKind, "network">;
-}) {
-  const radius = 9.5;
-  const circumference = 2 * Math.PI * radius;
-  const dash = (usage / 100) * circumference;
-  return (
-    <div className="ring-indicator" aria-label={`${metricLabel(kind)}占用 ${usage.toFixed(0)}%`}>
-      <svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true">
-        <circle className="ring-track" cx="12" cy="12" r={radius} fill="none" strokeWidth="2.8" />
-        <circle
-          cx="12"
-          cy="12"
-          r={radius}
-          fill="none"
-          stroke={memoryColor(usage)}
-          strokeWidth="2.8"
-          strokeDasharray={`${dash} ${circumference - dash}`}
-          strokeLinecap="round"
-          transform="rotate(-90 12 12)"
-        />
-      </svg>
-      <span className="ring-core">{usage.toFixed(0)}</span>
-    </div>
-  );
-}
-
-function GaugeIndicator({
-  usage,
-  kind,
-}: {
-  usage: number;
-  kind: Exclude<WidgetMetricKind, "network">;
-}) {
-  const filled = Math.ceil(usage / 20);
-  const color = memoryColor(usage);
-  return (
-    <div className="gauge-indicator" aria-label={`${metricLabel(kind)}占用 ${usage.toFixed(0)}%`}>
-      <div className="gauge-blocks" aria-hidden="true">
-        {[0, 1, 2, 3, 4].map((index) => (
-          <span
-            key={index}
-            className="gauge-block"
-            style={index < filled ? { backgroundColor: color } : undefined}
-          />
-        ))}
-      </div>
-      <span className="gauge-label">{usage.toFixed(0)}%</span>
-    </div>
-  );
-}
-
-function UsageIndicator({
-  usage,
-  scheme,
-  kind,
-}: {
-  usage: number;
-  scheme: MemoryScheme;
-  kind: Exclude<WidgetMetricKind, "network">;
-}) {
-  if (scheme === "ring") return <RingIndicator usage={usage} kind={kind} />;
-  if (scheme === "gauge") return <GaugeIndicator usage={usage} kind={kind} />;
-  return <CapsuleIndicator usage={usage} kind={kind} />;
-}
-
-interface MetricContentProps {
-  metric: WidgetMetricConfig;
-  status: SysStatus;
-  upload: ReturnType<typeof formatSpeedParts>;
-  download: ReturnType<typeof formatSpeedParts>;
-}
-
-function MetricContent({
-  metric,
-  status,
-  upload,
-  download,
-}: MetricContentProps): React.JSX.Element {
-  if (metric.kind === "network") {
-    return (
-      <div className="net-speed" aria-label="实时网速">
-        <div className="speed-row">
-          <CaretUpFilled className="speed-arrow up-arrow" aria-hidden="true" />
-          <span className="speed-value">{upload.value}</span>
-          <span className="speed-unit">{upload.unit}</span>
-        </div>
-        <div className="speed-row">
-          <CaretDownFilled className="speed-arrow down-arrow" aria-hidden="true" />
-          <span className="speed-value">{download.value}</span>
-          <span className="speed-unit">{download.unit}</span>
-        </div>
-      </div>
-    );
-  }
-  const usage =
-    metric.kind === "memory"
-      ? status.memory_usage
-      : metric.kind === "cpu"
-        ? (status.cpu_usage ?? 0)
-        : (status.battery?.percentage ?? 0);
-  return <UsageIndicator usage={usage} scheme={metric.usage_scheme} kind={metric.kind} />;
-}
-
-function sameMeasurements(a: WidgetMeasurements, b: WidgetMeasurements): boolean {
-  return (
-    a.preferredWidth === b.preferredWidth &&
-    a.minimumWidth === b.minimumWidth &&
-    a.normalWidths.join(",") === b.normalWidths.join(",") &&
-    a.compactWidths.join(",") === b.compactWidths.join(",")
-  );
+interface Measurements {
+  preferredWidth: number;
+  minimumWidth: number;
+  normalWidths: number[];
+  compactWidths: number[];
+  key: string;
 }
 
 function TaskbarWidget() {
@@ -213,232 +92,301 @@ function TaskbarWidget() {
   const liveStatus = freshness === "live" ? status : null;
   const [config, setConfig] = useState<WidgetConfig>(FALLBACK_CONFIG);
   const [budget, setBudget] = useState<WidgetLayoutBudget>(INITIAL_BUDGET);
-  const [measurements, setMeasurements] = useState<WidgetMeasurements>({
+  const [error, setError] = useState<string | null>(null);
+  const [measurements, setMeasurements] = useState<Measurements>({
     preferredWidth: 180,
     minimumWidth: 48,
     normalWidths: [],
     compactWidths: [],
+    key: "",
   });
-  const normalMeasureRef = useRef<HTMLDivElement>(null);
-  const compactMeasureRef = useRef<HTMLDivElement>(null);
-  const normalItemRefs = useRef<Array<HTMLDivElement | null>>([]);
-  const compactItemRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const normalRow = useRef<HTMLDivElement>(null);
+  const compactRow = useRef<HTMLDivElement>(null);
   const measureFrame = useRef<number | null>(null);
-  const syncFrame = useRef<number | null>(null);
+  const syncInFlight = useRef(false);
+  const retryTimer = useRef<number | null>(null);
   const pendingRequest = useRef<{ preferredWidth: number; minimumWidth: number } | null>(null);
   const lastRequestKey = useRef<string | null>(null);
-  const syncInFlight = useRef(false);
   const disposed = useRef(false);
-  const layoutReportRef = useRef<WidgetLayoutReport>({ visibleKinds: [], hiddenKinds: [], compact: false, visible: false });
+  const reportRef = useRef<WidgetLayoutReport>({
+    visibleKinds: [],
+    hiddenKinds: [],
+    compact: false,
+    visible: false,
+  });
+  const applyBudget = useCallback((next: WidgetLayoutBudget) => {
+    if (!disposed.current) setBudget((current) => acceptWidgetBudget(current, next));
+  }, []);
+  const enabled = enabledWidgetMetrics(config.metrics, status);
+  const columns = buildWidgetColumns(enabled);
+  const enabledKey = enabled
+    .map((m) => `${m.kind}:${m.usage_scheme}:${m.icon_style}:${m.pair_with ?? ""}`)
+    .join("|");
+  const presentationKey = `${enabledKey}:${config.speed_unit}:${JSON.stringify(config.layout)}`;
+  const normalSpacing = widgetSpacing(config.layout, false);
+  const compactSpacing = widgetSpacing(config.layout, true);
+  const rowStyle = (compact: boolean): CSSProperties => {
+    const spacing = compact ? compactSpacing : normalSpacing;
+    return {
+      "--wm-gap": `${spacing.gap}px`,
+      "--wm-padding": `${spacing.padding}px`,
+      "--wm-font-size": `${config.layout.font_size}px`,
+      "--wm-icon-size": `${config.layout.icon_size}px`,
+    } as CSSProperties;
+  };
+  const fail = useCallback((message: string, cause: unknown) => {
+    console.error(message, cause);
+    if (!disposed.current) setError(message);
+  }, []);
 
-  const upload = liveStatus?.network_available
-    ? formatSpeedParts(liveStatus.upload_speed, config.speed_unit)
-    : { value: "—", unit: "" };
-  const download = liveStatus?.network_available
-    ? formatSpeedParts(liveStatus.download_speed, config.speed_unit)
-    : { value: "—", unit: "" };
-  const enabled = config.metrics
-    .filter((metric) => metric.enabled)
-    .filter((metric) => {
-      if (metric.kind === "battery") return status?.battery != null || status === null;
-      if (metric.kind === "cpu") return status?.cpu_usage != null || status === null;
-      return true;
-    });
-  const enabledKey = enabled.map((metric) => `${metric.kind}:${metric.usage_scheme}`).join("|");
-
-  const flushLayoutSync = useCallback(() => {
-    syncFrame.current = null;
+  const flush = useCallback(() => {
     if (disposed.current || syncInFlight.current) return;
     const request = pendingRequest.current;
     pendingRequest.current = null;
     if (!request) return;
     const key = `${request.preferredWidth}:${request.minimumWidth}`;
-    if (key === lastRequestKey.current) return;
+    if (lastRequestKey.current === key) return;
     lastRequestKey.current = key;
     syncInFlight.current = true;
     void invokeCommand("sync_widget_dynamic_width", request)
-      .then((nextBudget) => {
-        if (!disposed.current) setBudget(nextBudget);
+      .then((next) => {
+        applyBudget(next);
+        if (!disposed.current)
+          setError((current) => (current === "挂件布局同步失败，正在重试" ? null : current));
       })
-      .catch((error) => {
-        if (lastRequestKey.current === key) lastRequestKey.current = null;
-        console.error("任务栏挂件安全布局同步失败", error);
+      .catch((cause) => {
+        lastRequestKey.current = null;
+        pendingRequest.current ??= request;
+        fail("挂件布局同步失败，正在重试", cause);
+        if (!disposed.current && retryTimer.current === null) {
+          retryTimer.current = window.setTimeout(() => {
+            retryTimer.current = null;
+            flush();
+          }, 1_000);
+        }
       })
       .finally(() => {
         syncInFlight.current = false;
-        if (!disposed.current && pendingRequest.current && syncFrame.current === null) {
-          syncFrame.current = requestAnimationFrame(flushLayoutSync);
-        }
+        // New measurements run immediately; failed requests retry with a bounded delay.
+        if (!disposed.current && pendingRequest.current && lastRequestKey.current !== null) flush();
       });
-  }, []);
+  }, [applyBudget, fail]);
 
   useEffect(() => {
+    if (measurements.key !== presentationKey) return;
     pendingRequest.current = {
       preferredWidth: measurements.preferredWidth,
       minimumWidth: measurements.minimumWidth,
     };
-    if (!syncInFlight.current && syncFrame.current === null) {
-      syncFrame.current = requestAnimationFrame(flushLayoutSync);
-    }
-  }, [flushLayoutSync, measurements.minimumWidth, measurements.preferredWidth]);
+    lastRequestKey.current = null;
+    flush();
+  }, [flush, measurements, presentationKey]);
 
   useEffect(() => {
     disposed.current = false;
-    void invokeCommand("get_widget_config")
-      .then(setConfig)
-      .catch((error) => console.error("任务栏挂件配置读取失败", error));
-
-    const statusListener = listen<SysStatus>("sys-status-update", (event) => {
-      setStatus(event.payload);
-      setLastSampleAt(Date.now());
-    });
-    const configListener = listen<WidgetConfig>("widget-config-changed", (event) => {
-      setConfig(event.payload);
-    });
-    const layoutRequestListener = listen("widget-layout-request", () => {
-      void emit("widget-layout-report", layoutReportRef.current).catch((error) => console.error("挂件布局上报失败", error));
-    });
-    const refreshPosition = (): void => {
-      void invokeCommand("refresh_widget_position")
-        .then((nextBudget) => {
-          if (!disposed.current) setBudget(nextBudget);
+    let configChanged = false;
+    const cleanup: Array<() => void> = [];
+    const subscribe = <T,>(name: string, callback: (payload: T) => void) => {
+      return listen<T>(name, (event) => {
+        if (!disposed.current) callback(event.payload);
+      })
+        .then((off) => {
+          if (disposed.current) off();
+          else cleanup.push(off);
         })
-        .catch((error) => console.error("任务栏挂件位置刷新失败", error));
+        .catch((cause) => fail("挂件事件监听失败", cause));
     };
-    refreshPosition();
-    window.addEventListener("resize", refreshPosition);
-    window.addEventListener("focus", refreshPosition);
-    const positionTimer = window.setInterval(refreshPosition, 10_000);
-
+    const registrations = [
+      subscribe<WidgetLayoutBudget>("widget-layout-budget", (next) => {
+        applyBudget(next);
+        flush();
+      }),
+      subscribe<SysStatus>("sys-status-update", (next) => {
+        setStatus(next);
+        setLastSampleAt(Date.now());
+      }),
+      subscribe<WidgetConfig>("widget-config-changed", (next) => {
+        configChanged = true;
+        setConfig(next);
+      }),
+      subscribe("widget-layout-request", () => {
+        void emit("widget-layout-report", reportRef.current).catch((cause) =>
+          fail("挂件布局上报失败", cause),
+        );
+      }),
+    ];
+    const refresh = () => {
+      flush();
+      void invokeCommand("refresh_widget_position")
+        .then(applyBudget)
+        .catch((cause) => fail("挂件位置刷新失败", cause));
+    };
+    // Await listener registration before reading the initial snapshots.
+    void Promise.all(registrations).then(() => {
+      if (disposed.current) return;
+      void invokeCommand("get_widget_config")
+        .then((next) => {
+          if (!disposed.current && !configChanged) setConfig(next);
+        })
+        .catch((cause) => fail("挂件配置读取失败", cause));
+      refresh();
+    });
+    window.addEventListener("resize", refresh);
+    window.addEventListener("focus", refresh);
     return () => {
       disposed.current = true;
+      cleanup.forEach((off) => off());
       if (measureFrame.current !== null) cancelAnimationFrame(measureFrame.current);
-      if (syncFrame.current !== null) cancelAnimationFrame(syncFrame.current);
-      measureFrame.current = null;
-      syncFrame.current = null;
-      pendingRequest.current = null;
-      void statusListener.then((unlisten) => unlisten());
-      void configListener.then((unlisten) => unlisten());
-      void layoutRequestListener.then((unlisten) => unlisten()).catch((error) => console.error("挂件布局请求监听失败", error));
-      window.removeEventListener("resize", refreshPosition);
-      window.removeEventListener("focus", refreshPosition);
-      window.clearInterval(positionTimer);
+      if (retryTimer.current !== null) window.clearTimeout(retryTimer.current);
+      window.removeEventListener("resize", refresh);
+      window.removeEventListener("focus", refresh);
     };
-  }, []);
+  }, [applyBudget, fail, flush]);
 
-  const measureContent = useCallback(() => {
+  const measure = useCallback(() => {
     if (measureFrame.current !== null) return;
     measureFrame.current = requestAnimationFrame(() => {
       measureFrame.current = null;
-      const normalRow = normalMeasureRef.current;
-      const compactRow = compactMeasureRef.current;
-      if (!normalRow || !compactRow) return;
-      const normalWidths = normalItemRefs.current
-        .slice(0, enabled.length)
-        .map((item) => Math.ceil(item?.getBoundingClientRect().width ?? 0));
-      const compactWidths = compactItemRefs.current
-        .slice(0, enabled.length)
-        .map((item) => Math.ceil(item?.getBoundingClientRect().width ?? 0));
-      const next: WidgetMeasurements = {
-        preferredWidth: Math.max(48, Math.ceil(normalRow.getBoundingClientRect().width)),
-        minimumWidth: Math.max(48, (compactWidths[0] ?? 44) + 4),
+      if (disposed.current || !normalRow.current || !compactRow.current) return;
+      const widths = (row: HTMLDivElement) =>
+        [...row.children].map((node) => node.getBoundingClientRect().width);
+      const normalWidths = widths(normalRow.current);
+      const compactWidths = widths(compactRow.current);
+      const lockedCompact = config.layout.mode === "compact";
+      const minimumCompact = config.layout.mode !== "standard";
+      const preferredWidth = Math.max(
+        1,
+        Math.ceil(
+          enabled.length
+            ? (lockedCompact ? compactRow.current : normalRow.current).getBoundingClientRect().width
+            : 40 + 2 * (lockedCompact ? compactSpacing.padding : normalSpacing.padding),
+        ),
+      );
+      const minimumWidth = Math.max(
+        1,
+        Math.ceil(
+          ((minimumCompact ? compactWidths[0] : normalWidths[0]) ?? 40) +
+            2 * (minimumCompact ? compactSpacing.padding : normalSpacing.padding),
+        ),
+      );
+      const next = {
+        preferredWidth,
+        minimumWidth,
         normalWidths,
         compactWidths,
+        key: presentationKey,
       };
-      setMeasurements((current) => (sameMeasurements(current, next) ? current : next));
+      setMeasurements((current) =>
+        JSON.stringify(current) === JSON.stringify(next) ? current : next,
+      );
     });
-  }, [enabled.length]);
+  }, [presentationKey, config.layout.mode, normalSpacing.padding, compactSpacing.padding]);
 
   useLayoutEffect(() => {
-    const normalRow = normalMeasureRef.current;
-    const compactRow = compactMeasureRef.current;
-    if (!normalRow || !compactRow) return;
-    const observer = new ResizeObserver(measureContent);
-    observer.observe(normalRow);
-    observer.observe(compactRow);
-    normalItemRefs.current
-      .slice(0, enabled.length)
-      .forEach((item) => item && observer.observe(item));
-    compactItemRefs.current
-      .slice(0, enabled.length)
-      .forEach((item) => item && observer.observe(item));
-    measureContent();
-    return () => observer.disconnect();
-  }, [enabled.length, enabledKey, measureContent]);
+    const observer = new ResizeObserver(measure);
+    [normalRow.current, compactRow.current].forEach((row) => {
+      if (!row) return;
+      observer.observe(row);
+      [...row.children].forEach((node) => observer.observe(node));
+    });
+    measure();
+    let cancelled = false;
+    void document.fonts.ready.then(() => {
+      if (!cancelled) measure();
+    });
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+      if (measureFrame.current !== null) cancelAnimationFrame(measureFrame.current);
+      measureFrame.current = null;
+    };
+  }, [measure]);
 
   const responsive =
-    measurements.normalWidths.length === enabled.length
+    measurements.key === presentationKey
       ? calculateWidgetResponsiveLayout(
           measurements.normalWidths,
           measurements.compactWidths,
           budget.allocatedWidth,
+          12,
+          config.layout,
         )
       : {
-          compact: budget.constrained,
-          visibleCount: enabled.length,
-          hiddenCount: 0,
+          compact: config.layout.mode === "compact",
+          visibleCount: 0,
+          hiddenCount: enabled.length,
           showOverflow: false,
         };
-  const visibleMetrics = enabled.slice(0, responsive.visibleCount);
-  const report = describeWidgetLayout(enabled.map((metric) => metric.kind), responsive, budget.visible);
-  layoutReportRef.current = report;
-
+  const report: WidgetLayoutReport = {
+    ...describeWidgetColumns(columns, budget.visible ? responsive.visibleCount : 0),
+    revision: budget.revision,
+    compact: responsive.compact,
+    visible: budget.visible,
+  };
+  reportRef.current = report;
   useEffect(() => {
-    void emit("widget-layout-report", layoutReportRef.current).catch((error) => console.error("挂件布局上报失败", error));
-  }, [enabledKey, responsive.compact, responsive.visibleCount, budget.visible]);
-
-  const renderMetric = (metric: WidgetMetricConfig): React.JSX.Element => (
-    liveStatus ? <MetricContent key={metric.kind} metric={metric} status={liveStatus} upload={upload} download={download} />
-      : <span key={metric.kind} className="widget-empty" aria-label={freshness === "stale" ? "数据已过期" : "等待采样"}>—</span>
-  );
-  const measurementRows = useMemo(() => {
-    const speed = formatSpeedParts(MEASUREMENT_STATUS.upload_speed, config.speed_unit);
-    const metricContent = (metric: WidgetMetricConfig) => (
-      <MetricContent key={metric.kind} metric={metric} status={MEASUREMENT_STATUS} upload={speed} download={speed} />
+    void emit("widget-layout-report", reportRef.current).catch((cause) =>
+      fail("挂件布局上报失败", cause),
     );
-    return <>
-      <div ref={normalMeasureRef} className="widget-container widget-measure-row">
-        {enabled.map((metric, index) => <div key={metric.kind} ref={(node) => { normalItemRefs.current[index] = node; }} className="widget-metric">{metricContent(metric)}</div>)}
-      </div>
-      <div ref={compactMeasureRef} className="widget-container widget-measure-row is-compact">
-        {enabled.map((metric, index) => <div key={metric.kind} ref={(node) => { compactItemRefs.current[index] = node; }} className="widget-metric">{metricContent(metric)}</div>)}
-      </div>
-    </>;
-  }, [config.speed_unit, enabledKey]);
+  }, [presentationKey, responsive.compact, responsive.visibleCount, budget.revision, fail]);
 
   return (
     <>
       <div
-        className={`widget-container${responsive.compact ? " is-compact" : ""}`}
+        className={`widget-container wm-row${responsive.compact ? " wm-compact" : ""}`}
+        style={rowStyle(responsive.compact)}
         aria-hidden={!budget.visible}
+        title={error ?? budget.error ?? undefined}
       >
-        {visibleMetrics.length ? (
-          visibleMetrics.map((metric) => (
-            <div key={metric.kind} className="widget-metric">
-              {renderMetric(metric)}
-            </div>
-          ))
-        ) : (
-          <span className="widget-empty" aria-label="暂无可用挂件指标">
-            —
-          </span>
-        )}
+        {columns.slice(0, responsive.visibleCount).map((column) => (
+          <WidgetColumn
+            key={column[0].kind}
+            metrics={column}
+            status={liveStatus}
+            speedUnit={config.speed_unit}
+            stale={freshness === "stale"}
+          />
+        ))}
         {responsive.showOverflow && (
           <span
             className="widget-overflow"
-            title={`另有 ${responsive.hiddenCount} 项指标因空间不足已收起`}
-            aria-label={`另有 ${responsive.hiddenCount} 项指标已收起`}
+            title={`另有 ${report.hiddenKinds.length} 项指标因空间不足已收起`}
+            aria-label={`另有 ${report.hiddenKinds.length} 项指标已收起`}
           >
             …
           </span>
         )}
+        {!enabled.length && (
+          <span className="widget-empty" role="status" aria-label="暂无可用挂件指标">
+            —
+          </span>
+        )}
+        {error && (
+          <span className="widget-error" role="status" title={error}>
+            !
+          </span>
+        )}
       </div>
-
       <div className="widget-measurements" aria-hidden="true">
-        {measurementRows}
+        {[false, true].map((compact) => (
+          <div
+            key={String(compact)}
+            ref={compact ? compactRow : normalRow}
+            className={`widget-container widget-measure-row wm-row${compact ? " wm-compact" : ""}`}
+            style={rowStyle(compact)}
+          >
+            {columns.map((column) => (
+              <WidgetColumn
+                key={column[0].kind}
+                metrics={column}
+                status={MEASUREMENT_STATUS}
+                speedUnit={config.speed_unit}
+              />
+            ))}
+          </div>
+        ))}
       </div>
     </>
   );
 }
-
 ReactDOM.createRoot(document.getElementById("root")!).render(<TaskbarWidget />);

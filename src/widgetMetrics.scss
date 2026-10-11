@@ -1,0 +1,151 @@
+.wm-row {
+  display: flex;
+  align-items: center;
+  gap: var(--wm-gap, 6px);
+  padding: 0 var(--wm-padding, 4px);
+  font:
+    var(--wm-font-size, 14px)/1.1 "Segoe UI Variable",
+    "Segoe UI",
+    "Microsoft YaHei UI",
+    sans-serif;
+  color: var(--text-primary);
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+.wm-item {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.wm-column {
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 1px;
+}
+.wm-column-paired .wm-resource {
+  font-size: min(var(--wm-font-size, 14px), 14px);
+}
+.wm-column-paired .wm-icon {
+  width: 14px;
+  height: 14px;
+  flex-basis: 14px;
+}
+.wm-column-paired .wm-ring {
+  width: 14px;
+  height: 14px;
+  flex-basis: 14px;
+}
+.wm-resource,
+.wm-data {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.wm-icon {
+  display: inline-flex;
+  width: var(--wm-icon-size, 18px);
+  height: var(--wm-icon-size, 18px);
+  flex: 0 0 var(--wm-icon-size, 18px);
+}
+.wm-icon svg {
+  width: 100%;
+  height: 100%;
+}
+.wm-icon-text {
+  font-size: inherit;
+}
+.wm-value,
+.wm-speed-row {
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.wm-value {
+  width: 4ch;
+  text-align: right;
+}
+.wm-temperature .wm-value {
+  width: 5ch;
+}
+.wm-network {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.wm-speed-row {
+  display: grid;
+  grid-template-columns: 14px 6ch 5ch;
+  align-items: center;
+  font-size: 12px;
+}
+.wm-text-direction .wm-speed-row {
+  grid-template-columns: 2em 6ch 5ch;
+}
+.wm-direction {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  align-items: center;
+  justify-content: center;
+}
+.wm-direction svg {
+  width: 100%;
+  height: 100%;
+}
+.wm-direction-text {
+  font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  font-size: 12px;
+}
+.wm-speed-value {
+  text-align: right;
+  overflow: hidden;
+}
+.wm-speed-unit {
+  padding-left: 3px;
+}
+.wm-ring {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+}
+.wm-ring svg {
+  width: 100%;
+  height: 100%;
+}
+.wm-track {
+  stroke: var(--glass-border);
+}
+.wm-compact .wm-resource,
+.wm-compact .wm-data {
+  gap: 2px;
+}
+.wm-network.wm-single {
+  flex-direction: row;
+  gap: 8px;
+}
+.wm-resource.wm-double {
+  flex-direction: column;
+  gap: 2px;
+}
+.wm-resource.wm-double .wm-icon {
+  width: min(var(--wm-icon-size, 18px), 16px);
+  height: min(var(--wm-icon-size, 18px), 16px);
+  flex-basis: 16px;
+}
+.wm-resource.wm-double .wm-icon-text {
+  font-size: min(var(--wm-font-size, 14px), 14px);
+}
+.wm-resource.wm-double .wm-ring {
+  width: 16px;
+  height: 16px;
+  flex-basis: 16px;
+}
+@media (forced-colors: active) {
+  .wm-row {
+    color: CanvasText;
+  }
+  .wm-track {
+    stroke: GrayText;
+  }
+}

@@ -470,6 +470,27 @@ mod tests {
             applied_scancode_map: Some("AQIDBA==".into()),
             widget_config: WidgetConfig {
                 refresh_interval_secs: 4,
+                layout: crate::widget::WidgetLayoutSettings {
+                    metric_gap: 17,
+                    tray_gap: 24,
+                    ..Default::default()
+                },
+                metrics: vec![
+                    crate::WidgetMetricConfig {
+                        pair_with: Some(crate::WidgetMetricKind::Memory),
+                        kind: crate::WidgetMetricKind::Cpu,
+                        enabled: true,
+                        usage_scheme: crate::UsageScheme::Number,
+                        icon_style: crate::widget::WidgetIconStyle::Filled,
+                        row_layout: crate::widget::WidgetRowLayout::Single,
+                    },
+                    crate::WidgetMetricConfig {
+                        pair_with: Some(crate::WidgetMetricKind::Cpu),
+                        kind: crate::WidgetMetricKind::Memory,
+                        row_layout: crate::widget::WidgetRowLayout::Single,
+                        ..Default::default()
+                    },
+                ],
                 ..WidgetConfig::default()
             },
             key_mappings: vec![KeyMapping {
@@ -486,6 +507,24 @@ mod tests {
         assert_eq!(loaded.key_mappings[0].id, "stable-id");
         assert!(!loaded.key_mappings[0].enabled);
         assert_eq!(loaded.widget_config.refresh_interval_secs, 3);
+        assert_eq!(loaded.widget_config.layout.metric_gap, 17);
+        assert_eq!(loaded.widget_config.layout.tray_gap, 24);
+        assert_eq!(
+            loaded.widget_config.metrics[0].pair_with,
+            Some(crate::WidgetMetricKind::Memory)
+        );
+        assert_eq!(
+            loaded.widget_config.metrics[1].pair_with,
+            Some(crate::WidgetMetricKind::Cpu)
+        );
+        assert_eq!(
+            loaded.widget_config.metrics[0].usage_scheme,
+            crate::UsageScheme::Number
+        );
+        assert_eq!(
+            loaded.widget_config.metrics[0].icon_style,
+            crate::widget::WidgetIconStyle::Filled
+        );
         assert_eq!(loaded.applied_scancode_map.as_deref(), Some("AQIDBA=="));
         let _ = fs::remove_file(storage::test_backup_path(&path));
         let _ = fs::remove_file(path);

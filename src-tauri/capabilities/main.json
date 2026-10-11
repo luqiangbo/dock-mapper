@@ -45,6 +45,7 @@
     "allow-choose-screenshot-save-directory",
     "allow-export-diagnostics",
     "allow-get-widget-config",
+    "allow-refresh-widget-position",
     "allow-update-widget-config",
     "allow-get-minimize-to-tray",
     "allow-set-minimize-to-tray",

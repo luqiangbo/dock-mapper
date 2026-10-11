@@ -3,10 +3,34 @@ import { canDisableMetric, finishMetricDrag, reorderVisibleMetrics } from "./wid
 import type { WidgetMetricConfig, WidgetMetricKind } from "../types";
 import { createQueuedAutosave, waitForPendingAutosave } from "../hooks/queuedAutosave";
 const metrics: WidgetMetricConfig[] = [
-  { kind: "network", enabled: true, usage_scheme: "capsule" },
-  { kind: "battery", enabled: true, usage_scheme: "ring" },
-  { kind: "memory", enabled: true, usage_scheme: "gauge" },
-  { kind: "cpu", enabled: false, usage_scheme: "capsule" },
+  {
+    kind: "network",
+    enabled: true,
+    usage_scheme: "capsule",
+    icon_style: "outline",
+    row_layout: "double",
+  },
+  {
+    kind: "battery",
+    enabled: true,
+    usage_scheme: "ring",
+    icon_style: "outline",
+    row_layout: "single",
+  },
+  {
+    kind: "memory",
+    enabled: true,
+    usage_scheme: "number",
+    icon_style: "outline",
+    row_layout: "single",
+  },
+  {
+    kind: "cpu",
+    enabled: false,
+    usage_scheme: "capsule",
+    icon_style: "outline",
+    row_layout: "single",
+  },
 ];
 const visible: WidgetMetricKind[] = ["network", "memory", "cpu"];
 describe("指标排序", () => {
@@ -14,7 +38,7 @@ describe("指标排序", () => {
     const next = reorderVisibleMetrics(metrics, visible, "cpu", 0);
     expect(next.map((metric) => metric.kind)).toEqual(["cpu", "battery", "network", "memory"]);
     expect(next[1]).toBe(metrics[1]);
-    expect(next[3].usage_scheme).toBe("gauge");
+    expect(next[3].usage_scheme).toBe("number");
   });
   it("拖动取消或只点击手柄时不提交，完成拖动时提交一次新顺序", () => {
     expect(

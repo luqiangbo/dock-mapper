@@ -1,4 +1,4 @@
-use crate::{config, history, image_store, taskbar};
+use crate::{config, history, image_store, widget_layout};
 use std::{
     path::PathBuf,
     sync::{atomic::AtomicBool, Arc, Mutex},
@@ -15,7 +15,7 @@ pub struct AppState {
     pub(crate) images: image_store::ImageStore,
     pub(crate) history: Arc<history::HistoryStore>,
     pub(crate) config_path: PathBuf,
-    pub(crate) widget_layout: Mutex<taskbar::WidgetLayoutRequest>,
+    pub(crate) widget_layout: Mutex<widget_layout::WidgetLayoutController>,
     pub(crate) mutation_lock: Mutex<()>,
     pub(crate) admin_operation_in_progress: AtomicBool,
 }
@@ -31,7 +31,7 @@ impl AppState {
             images: image_store::ImageStore::default(),
             history,
             config_path,
-            widget_layout: Mutex::new(taskbar::WidgetLayoutRequest::default()),
+            widget_layout: Mutex::new(widget_layout::WidgetLayoutController::default()),
             mutation_lock: Mutex::new(()),
             admin_operation_in_progress: AtomicBool::new(false),
         }

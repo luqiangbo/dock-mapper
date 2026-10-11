@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import {
   Alert,
@@ -9,7 +9,6 @@ import {
   Form,
   Grid,
   Input,
-  InputNumber,
   Popconfirm,
   Row,
   Select,
@@ -17,15 +16,12 @@ import {
   Tag,
   Typography,
 } from "antd";
-import { Battery, Cpu, MemoryStick } from "lucide-react";
-import type {
-  SpeedUnit,
-  SysStatus,
-  WidgetConfig,
-  WidgetMetricConfig,
-  WidgetMetricKind,
-} from "../types";
-import { formatSpeedParts } from "../utils/format";
+
+import type { SpeedUnit, SysStatus, WidgetConfig } from "../types";
+import { WidgetLayoutControls } from "./WidgetLayoutControls";
+import type { WidgetLayoutBudget } from "../api/screenshotTypes";
+import { acceptWidgetBudget } from "../widgetPresentation";
+import { invokeCommand } from "../api/ipc";
 import styles from "./components.module.scss";
 import { errorMessage, MAIN_EVENTS, widgetApi } from "../api/commands";
 import { useQueuedAutosave } from "../hooks/useQueuedAutosave";
@@ -37,82 +33,16 @@ import { applyWidgetPreset, deleteWidgetPreset, saveCurrentWidgetPreset } from "
 
 const { Text } = Typography;
 const AUTO_SAVE_DELAY_MS = 400;
-const METRIC_LABELS = { network: "网速", cpu: "CPU", memory: "内存", battery: "电池" } as const;
-function metricValue(kind: Exclude<WidgetMetricKind, "network">, status: SysStatus): number {
-  if (kind === "cpu") return status.cpu_usage ?? 0;
-  if (kind === "battery") return status.battery?.percentage ?? 0;
-  return status.memory_usage;
-}
-
-function metricIcon(kind: Exclude<WidgetMetricKind, "network">): ReactNode {
-  if (kind === "cpu") return <Cpu size={13} />;
-  if (kind === "battery") return <Battery size={13} />;
-  return <MemoryStick size={13} />;
-}
-
-function WidgetPreview({ config, status }: { config: WidgetConfig; status: SysStatus | null }) {
-  if (!status)
-    return (
-      <div className={styles.widgetPreview} aria-label="任务栏挂件实时预览">
-        <Text type="secondary">等待最新系统采样…</Text>
-      </div>
-    );
-  const upload = status.network_available
-    ? formatSpeedParts(status.upload_speed, config.speed_unit)
-    : { value: "—", unit: "" };
-  const download = status.network_available
-    ? formatSpeedParts(status.download_speed, config.speed_unit)
-    : { value: "—", unit: "" };
-  const enabled = config.metrics.filter(
-    (metric) => metric.enabled && (metric.kind !== "battery" || status.battery != null),
-  );
-
-  return (
-    <div className={styles.widgetPreview} aria-label="任务栏挂件实时预览">
-      {enabled.map((metric) => {
-        if (metric.kind === "network") {
-          return (
-            <div className={styles.previewNetwork} key={metric.kind}>
-              <span>↑</span>
-              <b>{upload.value}</b>
-              <small>{upload.unit}</small>
-              <span>↓</span>
-              <b>{download.value}</b>
-              <small>{download.unit}</small>
-            </div>
-          );
-        }
-        const value = metricValue(metric.kind, status);
-        if (metric.usage_scheme === "ring") {
-          return (
-            <div className={styles.previewRing} key={metric.kind}>
-              {value.toFixed(0)}
-            </div>
-          );
-        }
-        if (metric.usage_scheme === "gauge") {
-          return (
-            <div className={styles.previewGauge} key={metric.kind}>
-              <span>
-                {[0, 1, 2, 3, 4].map((index) => (
-                  <i key={index} data-active={index < Math.ceil(value / 20)} />
-                ))}
-              </span>
-              <b>{value.toFixed(0)}%</b>
-            </div>
-          );
-        }
-        return (
-          <div className={styles.previewCompact} key={metric.kind}>
-            {metricIcon(metric.kind)}
-            <b>{value.toFixed(0)}%</b>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
+const METRIC_LABELS = {
+  network: "网速",
+  upload: "上传",
+  download: "下载",
+  cpu: "CPU",
+  cpu_temperature: "CPU 温度",
+  gpu_usage: "GPU 占用率",
+  memory: "内存",
+  battery: "电池",
+} as const;
 export default function WidgetSettings() {
   const screens = Grid.useBreakpoint();
   const [form] = Form.useForm<WidgetConfig>();
@@ -123,7 +53,7 @@ export default function WidgetSettings() {
   const freshness = useTelemetryFreshness(lastSampleAt);
   const [layoutReport, setLayoutReport] = useState<WidgetLayoutReport | null>(null);
   const [layoutError, setLayoutError] = useState<string | null>(null);
-  const layoutTimeout = useRef<number | null>(null);
+  const [nativeBudget, setNativeBudget] = useState<WidgetLayoutBudget | null>(null);
   const requestLayoutRef = useRef<(() => Promise<void>) | null>(null);
   const [presetName, setPresetName] = useState("");
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
@@ -195,7 +125,7 @@ export default function WidgetSettings() {
       })
       .catch((error) =>
         notification.warning({
-          message: "挂件预览暂不可用",
+          message: "系统采样暂不可用",
           description: errorMessage(error),
         }),
       );
@@ -207,45 +137,47 @@ export default function WidgetSettings() {
 
   useEffect(() => {
     let disposed = false;
-    let off: (() => void) | undefined;
-    const requestLayout = () => {
-      if (layoutTimeout.current !== null) window.clearTimeout(layoutTimeout.current);
-      layoutTimeout.current = window.setTimeout(() => {
-        layoutTimeout.current = null;
-        setLayoutError("任务栏挂件未返回空间状态");
-      }, 3_000);
-      return emit("widget-layout-request");
+    const cleanup: Array<() => void> = [];
+    const applyBudget = (next: WidgetLayoutBudget) => {
+      if (!disposed) {
+        setNativeBudget((current) => (current ? acceptWidgetBudget(current, next) : next));
+        setLayoutError(null);
+      }
+    };
+    const requestLayout = async () => {
+      const next = await invokeCommand("refresh_widget_position");
+      applyBudget(next);
+      await emit("widget-layout-request");
     };
     requestLayoutRef.current = requestLayout;
-    void listen<WidgetLayoutReport>("widget-layout-report", ({ payload }) => {
-      if (layoutTimeout.current !== null) window.clearTimeout(layoutTimeout.current);
-      layoutTimeout.current = null;
-      setLayoutError(null);
-      setLayoutReport(payload);
-    })
-      .then((unlisten) => {
-        if (disposed) {
-          unlisten();
-          return;
-        }
-        off = unlisten;
-        return requestLayout();
+    void Promise.all(
+      [
+        listen<WidgetLayoutReport>("widget-layout-report", ({ payload }) => {
+          if (!disposed)
+            setLayoutReport((current) =>
+              (payload.revision ?? 0) >= (current?.revision ?? 0) ? payload : current,
+            );
+        }),
+        listen<WidgetLayoutBudget>("widget-layout-budget", ({ payload }) => applyBudget(payload)),
+      ].map((registration) =>
+        registration.then((off) => {
+          if (disposed) off();
+          else cleanup.push(off);
+        }),
+      ),
+    )
+      .then(() => {
+        if (!disposed) return requestLayout();
       })
       .catch((error) => {
-        if (layoutTimeout.current !== null) window.clearTimeout(layoutTimeout.current);
-        layoutTimeout.current = null;
-        setLayoutError(errorMessage(error));
-        notification.warning({ message: "挂件空间状态读取失败", description: errorMessage(error) });
+        if (!disposed) setLayoutError(errorMessage(error));
       });
     return () => {
       disposed = true;
       requestLayoutRef.current = null;
-      off?.();
-      if (layoutTimeout.current !== null) window.clearTimeout(layoutTimeout.current);
-      layoutTimeout.current = null;
+      cleanup.forEach((off) => off());
     };
-  }, [notification]);
-
+  }, []);
   const dirty = useMemo(
     () => !!config && !!savedConfig && JSON.stringify(config) !== JSON.stringify(savedConfig),
     [config, savedConfig],
@@ -300,48 +232,64 @@ export default function WidgetSettings() {
 
   return (
     <Form form={form} layout="vertical" className={`${styles.page} ${styles.settingsForm}`}>
-      <Card className={styles.surfaceCard}>
-        <div className={styles.previewLayout}>
-          <aside className={styles.previewPane}>
-            <div className={styles.widgetPreviewHeader}>
-              <div>
-                <Typography.Title level={4} style={{ margin: 0 }}>
-                  任务栏挂件
-                </Typography.Title>
-                <span className={styles.description}>拖动指标调整顺序，修改后自动保存。</span>
-              </div>
-              <Tag
-                color={
-                  layoutError
-                    ? "error"
-                    : !layoutReport
-                      ? "processing"
-                      : layoutReport.visible
-                        ? "success"
-                        : "warning"
-                }
-              >
-                {layoutError
-                  ? "状态读取失败"
-                  : !layoutReport
-                    ? "读取状态"
-                    : layoutReport.visible
-                      ? "显示中"
-                      : "空间不足"}
-              </Tag>
-            </div>
-            <WidgetPreview config={config} status={freshness === "live" ? status : null} />
+      <Card
+        className={styles.surfaceCard}
+        title="任务栏挂件"
+        extra={
+          <Tag
+            color={
+              layoutError
+                ? "error"
+                : !nativeBudget
+                  ? "processing"
+                  : nativeBudget.error
+                    ? "warning"
+                    : nativeBudget.visible
+                      ? "success"
+                      : "warning"
+            }
+          >
+            {layoutError
+              ? "状态读取失败"
+              : !nativeBudget
+                ? "读取状态"
+                : nativeBudget.error
+                  ? nativeBudget.state === "probeFailed"
+                    ? "任务栏暂不可用"
+                    : "布局操作失败"
+                  : nativeBudget.visible
+                    ? "显示中"
+                    : nativeBudget.state === "insufficientSpace"
+                      ? "空间不足"
+                      : nativeBudget.state === "probeFailed"
+                        ? "任务栏暂不可用"
+                        : "正在恢复"}
+          </Tag>
+        }
+      >
+        <div className={`${styles.settingsGroup} ${styles.widgetSettingsGroup}`}>
+          <section className={styles.widgetStatusPane} aria-label="任务栏挂件运行状态">
+            <Text type="secondary">
+              在任务栏展示网速和资源数据；自由组合指标，直接在任务栏查看效果，修改后自动保存。
+            </Text>
             <Text type="secondary">
               {freshness === "stale" ? "系统采样已过期。" : ""}
               {layoutError
                 ? `挂件空间状态读取失败：${layoutError}。`
-                : !layoutReport
+                : !nativeBudget
                   ? "正在读取任务栏可用空间…"
-                  : !layoutReport.visible
-                    ? "任务栏空间不足，挂件当前不可见。"
-                    : layoutReport.hiddenKinds.length
-                      ? `当前显示：${layoutReport.visibleKinds.map((kind) => METRIC_LABELS[kind]).join("、")}；空间不足已收起：${layoutReport.hiddenKinds.map((kind) => METRIC_LABELS[kind]).join("、")}。可将重要指标上移。`
-                      : `当前全部显示${layoutReport.compact ? "（紧凑布局）" : ""}。`}
+                  : nativeBudget.error
+                    ? nativeBudget.error
+                    : !nativeBudget.visible
+                      ? (nativeBudget.error ??
+                        (nativeBudget.state === "insufficientSpace"
+                          ? "任务栏空间不足，空间稳定恢复后自动显示。"
+                          : "正在确认任务栏可用空间…"))
+                      : !layoutReport || layoutReport.revision !== nativeBudget.revision
+                        ? "挂件已显示，正在同步指标布局…"
+                        : layoutReport.hiddenKinds.length
+                          ? `当前显示：${layoutReport.visibleKinds.map((kind) => METRIC_LABELS[kind]).join("、")}；空间不足已收起：${layoutReport.hiddenKinds.map((kind) => METRIC_LABELS[kind]).join("、")}。可将重要指标上移。`
+                          : `当前全部显示${layoutReport.compact ? "（紧凑布局）" : ""}。`}
             </Text>
             {layoutError && (
               <Button
@@ -356,8 +304,12 @@ export default function WidgetSettings() {
                 重试读取空间状态
               </Button>
             )}
-          </aside>
+          </section>
           <div className={styles.configurationPane}>
+            <WidgetLayoutControls
+              value={config.layout}
+              onChange={(layout) => scheduleSave({ ...config, layout })}
+            />
             <WidgetMetricList
               metrics={config.metrics}
               batteryAvailable={status?.battery !== null}
@@ -373,6 +325,27 @@ export default function WidgetSettings() {
             />
             {freshness === "live" && status?.battery === null && (
               <Tag color="default">当前设备未检测到电池</Tag>
+            )}
+            {config.metrics.some(
+              (metric) => metric.kind === "cpu_temperature" && metric.enabled,
+            ) && (
+              <Text type="secondary">
+                {freshness !== "live"
+                  ? "正在等待 CPU 温度采样…"
+                  : status?.cpu_temperature_celsius == null
+                    ? (status?.cpu_temperature_error ??
+                      "未检测到温度源，不代表 CPU 不支持测温；请先运行 LibreHardwareMonitor / OpenHardwareMonitor。")
+                    : `CPU 温度：${status.cpu_temperature_celsius.toFixed(0)}℃`}
+              </Text>
+            )}
+            {config.metrics.some((metric) => metric.kind === "gpu_usage" && metric.enabled) && (
+              <Text type="secondary">
+                {freshness !== "live"
+                  ? "正在等待 GPU 占用率采样…"
+                  : status?.gpu_usage == null
+                    ? (status?.gpu_usage_error ?? "正在读取 GPU 占用率…")
+                    : `GPU 占用率：${status.gpu_usage.toFixed(0)}%（最繁忙引擎）`}
+              </Text>
             )}
             <Row gutter={[screens.lg ? 12 : 8, 8]}>
               <Col xs={24} md={12}>
@@ -414,61 +387,9 @@ export default function WidgetSettings() {
             </Row>
             <div className={styles.widgetOptionCard}>
               <div className={styles.settingCopy}>
-                <Text strong>本地指标提醒</Text>
-                <span className={styles.description}>
-                  主窗口收到连续 3 次越界采样后提醒；同一指标至少间隔 10 分钟。留空为关闭。
-                </span>
-              </div>
-              <Row gutter={[8, 8]}>
-                <Col>
-                  <InputNumber
-                    aria-label="CPU 超过百分比提醒"
-                    min={1}
-                    max={100}
-                    value={config.alerts.cpu_percent}
-                    placeholder="CPU %"
-                    onChange={(value) =>
-                      scheduleSave({ ...config, alerts: { ...config.alerts, cpu_percent: value } })
-                    }
-                  />
-                </Col>
-                <Col>
-                  <InputNumber
-                    aria-label="内存超过百分比提醒"
-                    min={1}
-                    max={100}
-                    value={config.alerts.memory_percent}
-                    placeholder="内存 %"
-                    onChange={(value) =>
-                      scheduleSave({
-                        ...config,
-                        alerts: { ...config.alerts, memory_percent: value },
-                      })
-                    }
-                  />
-                </Col>
-                <Col>
-                  <InputNumber
-                    aria-label="电池低于百分比提醒"
-                    min={1}
-                    max={100}
-                    value={config.alerts.battery_below_percent}
-                    placeholder="电池 %"
-                    onChange={(value) =>
-                      scheduleSave({
-                        ...config,
-                        alerts: { ...config.alerts, battery_below_percent: value },
-                      })
-                    }
-                  />
-                </Col>
-              </Row>
-            </div>
-            <div className={styles.widgetOptionCard}>
-              <div className={styles.settingCopy}>
                 <Text strong>挂件布局预设</Text>
                 <span className={styles.description}>
-                  保存当前指标顺序、样式、采样间隔与网速单位，最多 8 组。
+                  保存当前指标顺序、图标与展示样式、布局距离、采样间隔和网速单位，最多 8 组。
                 </span>
               </div>
               <Row gutter={[8, 8]} align="middle">

@@ -65,6 +65,13 @@ mod tests {
 
     #[test]
     fn widget_space_status_can_be_requested_and_reported_by_both_windows() {
+        let main: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/main.json")).unwrap();
+        assert!(main["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p == "allow-refresh-widget-position"));
         for (name, source) in [
             ("主窗口", include_str!("../capabilities/main.json")),
             ("任务栏挂件", include_str!("../capabilities/widget.json")),

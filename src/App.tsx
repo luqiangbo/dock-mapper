@@ -9,7 +9,7 @@ import {
   GithubOutlined,
   KeyOutlined,
   FontSizeOutlined,
-  MenuOutlined,
+  DesktopOutlined,
   MoonOutlined,
   SettingOutlined,
   SunOutlined,
@@ -59,7 +59,7 @@ const PAGES: PageItem[] = [
   { key: "keymapper", label: "按键映射", icon: <KeyOutlined /> },
   { key: "keyvisualizer", label: "按键展示", icon: <FontSizeOutlined /> },
   { key: "screenshot", label: "截图", icon: <CameraOutlined /> },
-  { key: "widget", label: "挂件设置", icon: <MenuOutlined /> },
+  { key: "widget", label: "任务栏挂件", icon: <DesktopOutlined /> },
   { key: "settings", label: "全局设置", icon: <SettingOutlined /> },
 ];
 const menuItem = ({ key, label, icon }: PageItem) => ({ key, label, icon });
@@ -208,18 +208,7 @@ export default function App() {
               selectedKeys={[activePage]}
               inlineCollapsed={compactNavigation}
               onClick={({ key }) => setActivePage(key as PageKey)}
-              items={[
-                {
-                  type: "group",
-                  label: compactNavigation ? null : "工具",
-                  children: PAGES.slice(0, 4).map(menuItem),
-                },
-                {
-                  type: "group",
-                  label: compactNavigation ? null : "配置",
-                  children: PAGES.slice(4, 5).map(menuItem),
-                },
-              ]}
+              items={PAGES.filter((page) => page.key !== "settings").map(menuItem)}
               className={styles.nav}
             />
             <Menu

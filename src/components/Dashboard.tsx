@@ -9,7 +9,6 @@ import {
   Grid,
   Row,
   Segmented,
-  Space,
   Spin,
   Typography,
 } from "antd";
@@ -20,7 +19,7 @@ import {
   DashboardOutlined,
   HistoryOutlined,
   KeyOutlined,
-  MenuOutlined,
+  DesktopOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
 import type { RuntimeHealth, ScancodeMapStatus, SysStatus } from "../types";
@@ -36,7 +35,6 @@ import MetricTrendChart from "./MetricTrendChart";
 import type { DashboardSample } from "./dashboardTelemetry";
 import { selectTelemetryArchive, type TrendRange } from "./telemetryArchive";
 import type { TelemetryFreshness } from "../utils/telemetryFreshness";
-import type { AlertEntry } from "./telemetryAlerts";
 import styles from "./components.module.scss";
 import { useTheme } from "../ThemeContext";
 import { accentColors, themePalettes } from "../themePalette";
@@ -48,8 +46,6 @@ interface Props {
   freshness: TelemetryFreshness;
   samples: DashboardSample[];
   archive: DashboardSample[];
-  alerts: AlertEntry[];
-  onMarkAlertsRead: () => void;
   onNavigate: (page: "keymapper" | "screenshot" | "widget", tab?: "history" | "settings") => void;
 }
 
@@ -67,27 +63,25 @@ function MetricCard({ icon, label, value }: { icon: ReactNode; label: string; va
   );
 }
 
-export default function Dashboard({
-  status,
-  freshness,
-  samples,
-  archive,
-  alerts,
-  onMarkAlertsRead,
-  onNavigate,
-}: Props) {
+export default function Dashboard({ status, freshness, samples, archive, onNavigate }: Props) {
   const { accentColor, resolved } = useTheme();
   const chartColor = accentColors(accentColor, resolved).foreground;
   const secondaryColor = themePalettes[resolved]["chart-secondary"];
   const warmColor = themePalettes[resolved]["chart-warm"];
-  const networkSeries = useMemo(() => [
-    { key: "upload" as const, name: "上传", color: warmColor },
-    { key: "download" as const, name: "下载", color: chartColor },
-  ], [chartColor, warmColor]);
-  const resourceSeries = useMemo(() => [
-    { key: "cpu" as const, name: "CPU", color: chartColor },
-    { key: "memory" as const, name: "内存", color: secondaryColor },
-  ], [chartColor, secondaryColor]);
+  const networkSeries = useMemo(
+    () => [
+      { key: "upload" as const, name: "上传", color: warmColor },
+      { key: "download" as const, name: "下载", color: chartColor },
+    ],
+    [chartColor, warmColor],
+  );
+  const resourceSeries = useMemo(
+    () => [
+      { key: "cpu" as const, name: "CPU", color: chartColor },
+      { key: "memory" as const, name: "内存", color: secondaryColor },
+    ],
+    [chartColor, secondaryColor],
+  );
   const screens = Grid.useBreakpoint();
   const gutter: [number, number] = [screens.lg ? 16 : 12, 12];
   const [mapStatus, setMapStatus] = useState<ScancodeMapStatus | null>(null);
@@ -95,7 +89,6 @@ export default function Dashboard({
   const [mapError, setMapError] = useState<string | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
   const [startingCapture, setStartingCapture] = useState(false);
-  const [showAllAlerts, setShowAllAlerts] = useState(false);
   const [trendRange, setTrendRange] = useState<TrendRange>("live");
   const archiveSamples = useMemo(
     () => (trendRange === "live" ? [] : selectTelemetryArchive(archive, trendRange, Date.now())),
@@ -344,8 +337,8 @@ export default function Dashboard({
               <Button icon={<KeyOutlined />} onClick={() => onNavigate("keymapper")}>
                 按键映射
               </Button>
-              <Button icon={<MenuOutlined />} onClick={() => onNavigate("widget")}>
-                挂件设置
+              <Button icon={<DesktopOutlined />} onClick={() => onNavigate("widget")}>
+                任务栏挂件
               </Button>
             </div>
           </Card>
@@ -400,52 +393,6 @@ export default function Dashboard({
           </Card>
         </Col>
       </Row>
-
-      <Card
-        className={styles.surfaceCard}
-        title={`本地提醒 · ${alerts.filter((item) => !item.read).length} 条未读`}
-        extra={
-          <Space>
-            {alerts.length > 5 && (
-              <Button size="small" onClick={() => setShowAllAlerts((value) => !value)}>
-                {showAllAlerts ? "收起" : "查看全部"}
-              </Button>
-            )}
-            <Button
-              size="small"
-              disabled={!alerts.some((item) => !item.read)}
-              onClick={onMarkAlertsRead}
-            >
-              全部标为已读
-            </Button>
-          </Space>
-        }
-      >
-        {alerts.length === 0 ? (
-          <Text type="secondary">暂无提醒；可在挂件设置中启用指标阈值。</Text>
-        ) : (
-          (showAllAlerts ? alerts : alerts.slice(-5))
-            .slice()
-            .reverse()
-            .map((alert) => (
-              <div key={alert.id} className={styles.dashboardStatusRow}>
-                <span>
-                  {alert.read ? "" : "● "}
-                  {alert.kind === "cpu" ? "CPU" : alert.kind === "memory" ? "内存" : "电池"}{" "}
-                  {alert.value.toFixed(0)}% · 阈值 {alert.threshold}%
-                </span>
-                <Text type="secondary">
-                  {new Intl.DateTimeFormat("zh-CN", {
-                    month: "numeric",
-                    day: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  }).format(alert.createdAt)}
-                </Text>
-              </div>
-            ))
-        )}
-      </Card>
     </div>
   );
 }

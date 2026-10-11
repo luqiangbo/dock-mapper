@@ -2,16 +2,10 @@ import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { App as AntApp } from "antd";
-import { MAIN_EVENTS, widgetApi } from "../api/commands";
+import { MAIN_EVENTS } from "../api/commands";
 import type { SysStatus } from "../types";
 import { appendDashboardSample } from "./dashboardTelemetry";
 import { updateTelemetryArchive, saveTelemetryArchive } from "./telemetryArchive";
-import {
-  evaluateTelemetryAlerts,
-  initialAlertState,
-  saveAlertInbox,
-  type AlertRules,
-} from "./telemetryAlerts";
 import { telemetryStore } from "./telemetryStore";
 import { observeTelemetryVisibility } from "./telemetryVisibility";
 export default function TelemetryCollector() {
@@ -19,12 +13,6 @@ export default function TelemetryCollector() {
   const archiveRef = useRef([...telemetryStore.getSnapshot().archive]);
   const archiveSavedAtRef = useRef(0);
   const publishedMinuteRef = useRef(-1);
-  const alertStateRef = useRef(initialAlertState(telemetryStore.getSnapshot().alerts));
-  const alertRulesRef = useRef<AlertRules>({
-    cpu_percent: null,
-    memory_percent: null,
-    battery_below_percent: null,
-  });
   useEffect(() => {
     let disposed = false;
     let off: (() => void) | undefined;
@@ -48,64 +36,10 @@ export default function TelemetryCollector() {
   }, [notification]);
   useEffect(() => {
     let disposed = false;
-    let off: (() => void) | undefined;
-    void widgetApi
-      .config()
-      .then((config) => {
-        if (!disposed) alertRulesRef.current = config.alerts;
-      })
-      .catch((error) =>
-        notification.warning({ message: "提醒规则读取失败", description: String(error) }),
-      );
-    void listen<{ alerts: AlertRules }>("widget-config-changed", ({ payload }) => {
-      if (JSON.stringify(alertRulesRef.current) !== JSON.stringify(payload.alerts)) {
-        alertStateRef.current = {
-          counts: initialAlertState().counts,
-          lastAlertAt: alertStateRef.current.lastAlertAt,
-        };
-      }
-      alertRulesRef.current = payload.alerts;
-    })
-      .then((unlisten) => {
-        if (disposed) unlisten();
-        else off = unlisten;
-      })
-      .catch((error) =>
-        notification.warning({ message: "提醒规则监听失败", description: String(error) }),
-      );
-    return () => {
-      disposed = true;
-      off?.();
-    };
-  }, [notification]);
-
-  useEffect(() => {
-    let disposed = false;
     let unlisten: (() => void) | undefined;
     void listen<SysStatus>(MAIN_EVENTS.systemStatus, ({ payload }) => {
       if (disposed) return;
       const now = Date.now();
-      const evaluated = evaluateTelemetryAlerts(
-        alertStateRef.current,
-        alertRulesRef.current,
-        payload,
-        now,
-      );
-      alertStateRef.current = evaluated.state;
-      if (evaluated.alerts.length) {
-        const nextAlerts = [...telemetryStore.getSnapshot().alerts, ...evaluated.alerts].slice(-50);
-        telemetryStore.update({ alerts: nextAlerts });
-        try {
-          saveAlertInbox(nextAlerts);
-        } catch (error) {
-          notification.warning({ message: "提醒记录保存失败", description: String(error) });
-        }
-        for (const alert of evaluated.alerts)
-          notification.warning({
-            message: "系统指标超过提醒阈值",
-            description: `${alert.kind === "cpu" ? "CPU" : alert.kind === "memory" ? "内存" : "电池"} ${alert.value.toFixed(0)}%`,
-          });
-      }
       telemetryStore.update({
         lastSampleAt: now,
         status: payload,

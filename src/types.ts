@@ -1,8 +1,27 @@
 export type KeyCode = string & { readonly __keyCode: unique symbol };
-export type MemoryScheme = "capsule" | "ring" | "gauge";
+export type MemoryScheme = "capsule" | "ring" | "number";
 export type UsageScheme = MemoryScheme;
+export type WidgetIconStyle = "outline" | "filled" | "text";
+export interface WidgetLayoutSettings {
+  mode: "auto" | "standard" | "compact";
+  metric_gap: number;
+  horizontal_padding: number;
+  task_list_gap: number;
+  tray_gap: number;
+  vertical_offset: number;
+  font_size: number;
+  icon_size: number;
+}
 export type SpeedUnit = "auto" | "kb" | "mb";
-export type WidgetMetricKind = "network" | "cpu" | "memory" | "battery";
+export type WidgetMetricKind =
+  | "network"
+  | "upload"
+  | "download"
+  | "cpu"
+  | "cpu_temperature"
+  | "gpu_usage"
+  | "memory"
+  | "battery";
 export type ThemeMode = "light" | "dark" | "system";
 export type KeyVisualizerCategory = "modifier" | "combination" | "character" | "other";
 
@@ -111,6 +130,7 @@ export interface AnnotationOutlineConfig {
 }
 
 export interface WidgetConfig {
+  layout: WidgetLayoutSettings;
   memory_scheme: MemoryScheme;
   metrics: WidgetMetricConfig[];
   refresh_interval_secs: number;
@@ -127,6 +147,7 @@ export interface WidgetAlertConfig {
 }
 
 export interface WidgetPreset {
+  layout: WidgetLayoutSettings;
   name: string;
   metrics: WidgetMetricConfig[];
   refresh_interval_secs: number;
@@ -134,6 +155,10 @@ export interface WidgetPreset {
 }
 
 export interface WidgetMetricConfig {
+  pair_with?: WidgetMetricKind | null;
+  /** Legacy field; complete metric rows now combine through pair_with. */
+  row_layout: "single" | "double";
+  icon_style: WidgetIconStyle;
   kind: WidgetMetricKind;
   enabled: boolean;
   usage_scheme: UsageScheme;
@@ -221,6 +246,10 @@ export interface SysStatus {
   memory_usage: number;
   network_available: boolean;
   cpu_usage?: number;
+  cpu_temperature_celsius?: number | null;
+  cpu_temperature_error?: string | null;
+  gpu_usage?: number | null;
+  gpu_usage_error?: string | null;
   battery?: { percentage: number; charging: boolean } | null;
 }
 
