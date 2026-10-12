@@ -62,7 +62,7 @@ CI 串行分配编号，tag 指向完整源码 SHA，草稿说明保存提交绑
 和锁文件中本项目条目，不运行 cargo update，不升级依赖，也不提交回 main。
 本地构建显示“开发版”，仓库 Cargo 版本不是下一次发布的版本。
 
-流程：PR 检查 → main 检查 → 最新提交校验 → 分配/恢复草稿 → 构建前再次校验
+流程：main 检查 → 最新提交校验 → 分配/恢复草稿 → 构建前再次校验
 → NSIS 与 Updater 签名 → 安装包、更新清单、SHA-256 和源码绑定校验
 → 发布前再次校验 → 正式 Release → 独立 Winget 提交。
 更新清单必须指向该版本安装包；build-info.json 保存版本、完整提交号及产物摘要。
@@ -78,14 +78,14 @@ Windows Authenticode 证书可选，配置时必须通过验证；Updater 签名
 
 ## 合并保护和失败处理
 
-日常开发在 `test`，正式发版将 `test` 通过 PR 合并到 `main`。Checks 在每次
-`test` 推送、目标为 `test` 或 `main` 的 PR 上执行，也支持手动运行。相同分支或
-PR 的新提交会取消过时检查；正式发布仍保持串行，不取消正在发布的任务。
+日常开发在 `test`，正式发版将 `test` 通过 PR 合并到 `main`。Checks 由 main
+上的 Release 调用，也支持在 main 手动运行。相同分支的新提交会取消过时检查；
+正式发布仍保持串行，不取消正在发布的任务。
 
 Checks 在安装依赖前解析工作流中的 PowerShell `run` 命令和发布 JavaScript
 脚本，只检查语法、不执行发布操作；后续运行前端和发布规则回归测试、Rust
 核心测试。语法检查不覆盖 YAML schema、GitHub 表达式语义、Action 输入或实际
-GitHub 权限。main 的必需检查配置见下文；test 上通过后仍要检查 PR 合并结果。
+GitHub 权限。合并到 main 后检查合并结果，PR 合并前不自动运行 CI。
 
 日常本地验证继续只执行 `pnpm typecheck`，然后在 `src-tauri` 执行
 `cargo test -- --skip model`。发版前需要显式执行更完整的脚本预检时，可运行
@@ -102,10 +102,11 @@ Updater 私钥/密码与应用公钥匹配检查、可选 Windows 证书检查�
 安装依赖后、设置 Rust 工具链及编译前执行。Secret、PAT 权限、Winget fork
 状态和网络故障仍需真实 GitHub 环境验证；本地测试通过不能保证这些步骤成功。
 
-在 Settings → Rules → Rulesets 为 main 创建规则，要求 Pull Request，禁止强推，
-添加本仓库 Checks 工作流的 **Quality gate** 为必需检查；先运行一次 PR 检查，
-再从 GitHub 展示的检查名称中选择。要求分支在合并前保持最新，避免测试旧基线。
-保护规则是 GitHub 设置，提交 YAML 不会自动启用；本轮不启用 merge queue。
+CI/CD 仅在 main 上执行：推送 main 触发 Release，Release 调用 Checks，
+质量检查通过后再构建和发布。其他分支推送和 Pull Request 不触发工作流。
+Checks 和 Release 仍支持手动运行，但选择非 main 分支时任务会跳过。
+若 main 的保护规则曾要求 PR 的 **Quality gate** 检查，需在 GitHub 设置中
+移除该必需检查，避免停用 PR 工作流后无法合并；提交 YAML 不会自动修改保护规则。
 
 临时网络故障：Actions → 对应运行 → Re-run failed jobs。它仍使用原提交 SHA。
 代码错误：修复 PR 或 revert PR 合并到 main，自动生成新的候选。

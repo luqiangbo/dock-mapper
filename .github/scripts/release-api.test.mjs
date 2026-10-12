@@ -131,7 +131,8 @@ test("重跑已有草稿时提供同一发布 ID 且不创建新发布", async (
   });
   assert.match(result.output, /release_id=42\n/);
   assert.match(result.output, /build=true\n/);
-  assert.match(result.output, /tag=v2026\.1002\.1\n/);
+  assert.match(result.output, /version=26\.1002\.1\n/);
+  assert.match(result.output, /tag=v26\.1002\.1\n/);
   assert.ok(result.calls.every((call) => call.method === "GET"));
 });
 test("GitHub 读取失败明确失败且不会创建正式发布", async () => {
