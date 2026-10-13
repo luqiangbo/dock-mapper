@@ -6,17 +6,17 @@ export function releaseDay(timestamp) {
   }).formatToParts(date);
   const part = (name) => Number(parts.find((item) => item.type === name).value);
   const year = part("year");
-  if (year < 2000 || year > 2099) throw new Error("Short release year requires 2000–2099");
-  return `${year - 2000}.${part("month") * 100 + part("day")}`;
+  if (year < 2000 || year > 9999) throw new Error("Release year requires four digits (2000–9999)");
+  return `${year}.${part("month") * 100 + part("day")}`;
 }
 
 export function parseReleaseTag(tag) {
-  const match = /^v(0|[1-9]\d?)\.([1-9]\d{2,3})\.([1-9]\d*)$/.exec(tag);
+  const match = /^v([2-9]\d{3})\.([1-9]\d{2,3})\.([1-9]\d*)$/.exec(tag);
   if (!match) return null;
   const [year, monthDay, revision] = match.slice(1).map(Number);
   const month = Math.floor(monthDay / 100), day = monthDay % 100;
-  const date = new Date(Date.UTC(2000 + year, month - 1, day));
-  if (date.getUTCFullYear() !== 2000 + year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
   if (!Number.isSafeInteger(revision) || revision > 65535) throw new Error("Release revision exceeds Windows version limit");
   return { day: `${year}.${monthDay}`, revision, version: tag.slice(1) };
 }

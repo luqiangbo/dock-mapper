@@ -13,20 +13,20 @@ async function verifyInstallerMetadata(overrides = {}, assetOverrides = {}) {
   const end = workflow.indexOf("          node .github/scripts/normalize-updater.mjs", start);
   assert.ok(start >= 0 && end > start, "Release metadata gate must exist");
   const metadata = {
-    id: 42, tag_name: "v26.1002.3", draft: true,
-    assets: [{ id: 123, name: "DockMapper_26.1002.3_x64-setup.exe", state: "uploaded", size: 10,
+    id: 42, tag_name: "v2026.1002.3", draft: true,
+    assets: [{ id: 123, name: "DockMapper_2026.1002.3_x64-setup.exe", state: "uploaded", size: 10,
       url: "https://api.github.com/repos/owner/repo/releases/assets/123",
-      browser_download_url: "https://github.com/owner/repo/releases/download/untagged-abc123/DockMapper_26.1002.3_x64-setup.exe",
+      browser_download_url: "https://github.com/owner/repo/releases/download/untagged-abc123/DockMapper_2026.1002.3_x64-setup.exe",
       ...assetOverrides }],
     ...overrides,
   };
   const result = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command",
     "$ErrorActionPreference = 'Stop'\n" +
     "$releaseJson = $env:TEST_RELEASE_METADATA\n" +
-    "$installerName = 'DockMapper_26.1002.3_x64-setup.exe'\n" +
+    "$installerName = 'DockMapper_2026.1002.3_x64-setup.exe'\n" +
     "$installer = @{ Length = 10 }\n" + workflow.slice(start, end)], {
     encoding: "utf8",
-    env: { ...process.env, GITHUB_REPOSITORY: "owner/repo", RELEASE_ID: "42", TAG_NAME: "v26.1002.3",
+    env: { ...process.env, GITHUB_REPOSITORY: "owner/repo", RELEASE_ID: "42", TAG_NAME: "v2026.1002.3",
       TEST_RELEASE_METADATA: JSON.stringify(metadata) },
   });
   assert.ifError(result.error);
@@ -40,7 +40,7 @@ test("草稿安装包使用临时浏览器地址仍能通过资源校验", async
 
 test("正式发布安装包也能通过同一资源校验", async () => {
   const result = await verifyInstallerMetadata({ draft: false }, {
-    browser_download_url: "https://github.com/owner/repo/releases/download/v26.1002.3/DockMapper_26.1002.3_x64-setup.exe",
+    browser_download_url: "https://github.com/owner/repo/releases/download/v2026.1002.3/DockMapper_2026.1002.3_x64-setup.exe",
   });
   assert.equal(result.status, 0, result.stderr);
 });
@@ -48,9 +48,9 @@ test("正式发布安装包也能通过同一资源校验", async () => {
 test("资源校验拒绝错误发布、重复安装包、错误 API 地址和未完成上传", async () => {
   const cases = [
     [{ id: 43 }, {}, /Release metadata does not match/],
-    [{ tag_name: "v26.1002.2" }, {}, /Release metadata does not match/],
+    [{ tag_name: "v2026.1002.2" }, {}, /Release metadata does not match/],
     [{ assets: [] }, {}, /Expected exactly one installer asset/],
-    [{ assets: [{ name: "DockMapper_26.1002.3_x64-setup.exe" }, { name: "DockMapper_26.1002.3_x64-setup.exe" }] }, {}, /Expected exactly one installer asset/],
+    [{ assets: [{ name: "DockMapper_2026.1002.3_x64-setup.exe" }, { name: "DockMapper_2026.1002.3_x64-setup.exe" }] }, {}, /Expected exactly one installer asset/],
     [{}, { id: 0 }, /Installer asset ID is missing or invalid/],
     [{}, { url: "https://api.github.com/repos/other/repo/releases/assets/123" }, /Installer asset API URL mismatch/],
     [{}, { state: "starter" }, /Installer asset is not uploaded or size mismatch/],
@@ -95,7 +95,7 @@ test("旧提交检查后不分配草稿或发布", async () => {
   assert.ok(result.calls.every((call) => call.method === "GET"));
 });
 test("已发布提交重跑仅返回原版本不写入 GitHub", async () => {
-  const release = { id: 1, tag_name: "v26.1002.1", body: sourceMarker(sha), draft: false };
+  const release = { id: 1, tag_name: "v2026.1002.1", body: sourceMarker(sha), draft: false };
   const result = await simulate("prepare", (path) => {
     if (path === "git/ref/heads/main") return { object: { sha: "b".repeat(40) } };
     if (path === "releases") return [release];
@@ -103,7 +103,7 @@ test("已发布提交重跑仅返回原版本不写入 GitHub", async () => {
     throw new Error(`Unexpected API: ${path}`);
   });
   assert.match(result.output, /published=true/);
-  assert.match(result.output, /version=26.1002.1/);
+  assert.match(result.output, /version=2026.1002.1/);
   assert.ok(result.calls.every((call) => call.method === "GET"));
 });
 test("草稿创建前中断留下的标签恢复为同一个编号", async () => {
@@ -111,18 +111,18 @@ test("草稿创建前中断留下的标签恢复为同一个编号", async () =>
     if (path === "git/ref/heads/main") return { object: { sha } };
     if (path === "releases" && options.method === "GET") return [];
     if (path === `commits/${sha}`) return { commit: { committer: { date: "2026-10-02T00:00:00Z" } } };
-    if (path === "tags") return [{ name: "v26.1002.1", commit: { sha } }];
+    if (path === "tags") return [{ name: "v2026.1002.1", commit: { sha } }];
     if (path === "releases" && options.method === "POST") return { id: 1, draft: true, ...JSON.parse(options.body) };
-    if (path === "git/ref/tags/v26.1002.1") return { object: { type: "commit", sha } };
+    if (path === "git/ref/tags/v2026.1002.1") return { object: { type: "commit", sha } };
     throw new Error(`Unexpected API: ${path}`);
   });
-  assert.match(result.output, /version=26.1002.1/);
+  assert.match(result.output, /version=2026.1002.1/);
   assert.equal(result.calls.filter((call) => call.method === "POST").length, 1);
   assert.match(result.output, /release_id=1\n/);
 });
 
 test("重跑已有草稿时提供同一发布 ID 且不创建新发布", async () => {
-  const draft = { id: 42, tag_name: "v26.1002.1", body: sourceMarker(sha), draft: true };
+  const draft = { id: 42, tag_name: "v2026.1002.1", body: sourceMarker(sha), draft: true };
   const result = await simulate("prepare", (path) => {
     if (path === "git/ref/heads/main") return { object: { sha } };
     if (path === "releases") return [draft];
@@ -131,21 +131,21 @@ test("重跑已有草稿时提供同一发布 ID 且不创建新发布", async (
   });
   assert.match(result.output, /release_id=42\n/);
   assert.match(result.output, /build=true\n/);
-  assert.match(result.output, /version=26\.1002\.1\n/);
-  assert.match(result.output, /tag=v26\.1002\.1\n/);
+  assert.match(result.output, /version=2026\.1002\.1\n/);
+  assert.match(result.output, /tag=v2026\.1002\.1\n/);
   assert.ok(result.calls.every((call) => call.method === "GET"));
 });
 test("GitHub 读取失败明确失败且不会创建正式发布", async () => {
   await assert.rejects(simulate("prepare", () => { throw new Error("GitHub unavailable"); }), /GitHub unavailable/);
 });
 test("发布前发现 main 已更新只保留草稿", async () => {
-  const release = { tag_name: "v26.1002.1", body: sourceMarker(sha), draft: true };
+  const release = { tag_name: "v2026.1002.1", body: sourceMarker(sha), draft: true };
   const result = await simulate("publish", (path) => path === "git/ref/heads/main" ? { object: { sha: "b".repeat(40) } } : [release]);
   assert.match(result.output, /published=false/);
   assert.ok(result.calls.every((call) => call.method === "GET"));
 });
 test("草稿标签被移动后禁止发布", async () => {
-  const release = { tag_name: "v26.1002.1", body: sourceMarker(sha), draft: true };
+  const release = { tag_name: "v2026.1002.1", body: sourceMarker(sha), draft: true };
   const writes = [];
   await assert.rejects(simulate("publish", (path, options) => {
     if (options.method !== "GET") writes.push(path);
@@ -156,15 +156,15 @@ test("草稿标签被移动后禁止发布", async () => {
   assert.deepEqual(writes, []);
 });
 test("重新读取较高正式版后禁止发布旧草稿", async () => {
-  const draft = { tag_name: "v26.1002.1", body: sourceMarker(sha), draft: true };
+  const draft = { tag_name: "v2026.1002.1", body: sourceMarker(sha), draft: true };
   await assert.rejects(simulate("publish", (path) => {
     if (path === "git/ref/heads/main") return { object: { sha } };
-    if (path === "releases") return [draft, { tag_name: "v26.1003.1", body: "", draft: false, prerelease: false }];
+    if (path === "releases") return [draft, { tag_name: "v2026.1003.1", body: "", draft: false, prerelease: false }];
     return { object: { type: "commit", sha } };
   }), /exceed every published/);
 });
 test("构建失败没有产物时不执行正式发布写入", async () => {
-  const draft = { tag_name: "v26.1002.1", body: sourceMarker(sha), draft: true };
+  const draft = { tag_name: "v2026.1002.1", body: sourceMarker(sha), draft: true };
   const writes = [];
   await assert.rejects(simulate("publish", (path, options) => {
     if (options.method !== "GET") writes.push(path);
@@ -175,21 +175,52 @@ test("构建失败没有产物时不执行正式发布写入", async () => {
   assert.deepEqual(writes, []);
 });
 
-test("旧年份正式版和草稿不参与新格式编号与发布版本比较", async () => {
+test("恢复四位年份时复用同一提交草稿而不分配较小版本", async () => {
   const result = await simulate("prepare", (path, options) => {
     if (path === "git/ref/heads/main") return { object: { sha } };
     if (path === "releases" && options.method === "GET") return [
       { tag_name: "v2026.1012.1", draft: false, prerelease: false },
-      { tag_name: "v2026.1012.2", body: sourceMarker(sha), draft: true },
+      { id: 42, tag_name: "v2026.1012.2", body: sourceMarker(sha), draft: true },
     ];
     if (path === `commits/${sha}`) return { commit: { committer: { date: "2026-10-12T00:00:00Z" } } };
     if (path === "tags") return [{ name: "v2026.1012.2", commit: { sha } }];
     if (path === "git/refs") return {};
     if (path === "releases" && options.method === "POST") return { id: 42, ...JSON.parse(options.body) };
-    if (path === "git/ref/tags/v26.1012.1") return { object: { type: "commit", sha } };
+    if (path === "git/ref/tags/v2026.1012.2") return { object: { type: "commit", sha } };
     throw new Error(`Unexpected API: ${path}`);
   });
-  assert.match(result.output, /version=26\.1012\.1\n/);
-  assert.match(result.output, /tag=v26\.1012\.1\n/);
-  assert.equal(result.calls.find((call) => call.path === "git/refs").body.ref, "refs/tags/v26.1012.1");
+  assert.match(result.output, /version=2026\.1012\.2\n/);
+  assert.match(result.output, /tag=v2026\.1012\.2\n/);
+  assert.ok(result.calls.every((call) => call.method === "GET"));
+});
+
+test("恢复四位年份后沿用历史同日序号且高于短年份正式版", async () => {
+  const result = await simulate("prepare", (path, options) => {
+    if (path === "git/ref/heads/main") return { object: { sha } };
+    if (path === "releases" && options.method === "GET") return [
+      { tag_name: "v2026.1012.1", draft: false, prerelease: false },
+      { tag_name: "v26.1012.1", draft: false, prerelease: false },
+    ];
+    if (path === `commits/${sha}`) return { commit: { committer: { date: "2026-10-12T00:00:00Z" } } };
+    if (path === "tags") return [{ name: "v2026.1012.1", commit: { sha: "b".repeat(40) } }];
+    if (path === "git/refs") return {};
+    if (path === "releases" && options.method === "POST") return { id: 42, draft: true, ...JSON.parse(options.body) };
+    if (path === "git/ref/tags/v2026.1012.2") return { object: { type: "commit", sha } };
+    throw new Error(`Unexpected API: ${path}`);
+  });
+  assert.match(result.output, /version=2026\.1012\.2\n/);
+  assert.equal(result.calls.find((call) => call.path === "git/refs").body.ref, "refs/tags/v2026.1012.2");
+});
+
+test("四位年份历史正式版阻止旧日期提交创建倒退版本", async () => {
+  const writes = [];
+  await assert.rejects(simulate("prepare", (path, options) => {
+    if (options.method !== "GET") writes.push(path);
+    if (path === "git/ref/heads/main") return { object: { sha } };
+    if (path === "releases") return [{ tag_name: "v2026.1013.1", draft: false, prerelease: false }];
+    if (path === `commits/${sha}`) return { commit: { committer: { date: "2026-10-12T00:00:00Z" } } };
+    if (path === "tags") return [];
+    throw new Error(`Unexpected API: ${path}`);
+  }), /regress the published version/);
+  assert.deepEqual(writes, []);
 });

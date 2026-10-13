@@ -22,7 +22,7 @@ test("产物目录为空时说明下载前置条件并以失败状态退出", as
 
 test("指定完整参数时也会说明缺失产物的准备方式", async () => {
   const directory = await mkdtemp(join(tmpdir(), "dockmapper-missing-assets-"));
-  const options = { directory, repo: "owner/repo", version: "26.1002.1", sha: "a".repeat(40) };
+  const options = { directory, repo: "owner/repo", version: "2026.1002.1", sha: "a".repeat(40) };
   await assert.rejects(verifyReleaseAssets(options), (error) => {
     assert.match(error.message, /缺少发布产物：.*build-info\.json.*ENOENT/);
     assert.equal(error.code, "ENOENT");
@@ -71,7 +71,7 @@ test("接受 Tauri 非预哈希签名并拒绝损坏的编码", () => {
   assert.throws(() => verifyUpdaterSignature(content, "not base64", encodedKey), /encoding/);
 });
 
-const version = "26.1002.1";
+const version = "2026.1002.1";
 const repo = "owner/repo";
 const url = `https://github.com/${repo}/releases/download/v${version}/DockMapper_${version}_x64-setup.exe`;
 const updater = () => ({ version, platforms: { "windows-x86_64": { url, signature } } });
