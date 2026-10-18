@@ -1,3 +1,4 @@
+import "./utils/disableBrowserContextMenu";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import "./global.scss";

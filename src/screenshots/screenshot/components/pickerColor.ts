@@ -54,7 +54,10 @@ function rgbToHsv(red: number, green: number, blue: number): [number, number, nu
   ];
 }
 
-export function formatPickerColor(sample: PickerSample, format: ColorCopyFormat): string {
+export function formatPickerColor(
+  sample: Pick<PickerSample, "hex" | "red" | "green" | "blue">,
+  format: ColorCopyFormat,
+): string {
   const { red, green, blue } = sample;
   if (format === "hex") return `#${sample.hex}`;
   if (format === "rgb") return `rgb(${red}, ${green}, ${blue})`;
@@ -66,4 +69,18 @@ export function formatPickerColor(sample: PickerSample, format: ColorCopyFormat)
   }
   const [hue, saturation, value] = rgbToHsv(red, green, blue);
   return `hsv(${hue} ${saturation}% ${value}%)`;
+}
+
+export function formatPaletteColor(color: string, format: ColorCopyFormat): string {
+  const hex = color.replace(/^#/, "").toUpperCase();
+  if (!/^[0-9A-F]{6}$/.test(hex)) throw new Error("颜色必须为 #RRGGBB");
+  return formatPickerColor(
+    {
+      hex,
+      red: parseInt(hex.slice(0, 2), 16),
+      green: parseInt(hex.slice(2, 4), 16),
+      blue: parseInt(hex.slice(4, 6), 16),
+    },
+    format,
+  );
 }

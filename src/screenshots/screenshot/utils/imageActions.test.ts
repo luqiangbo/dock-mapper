@@ -1,7 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
-import { runImageAction } from "./imageActions";
+import { runImageAction, ImageActionGate } from "./imageActions";
 
 describe("screenshot image actions", () => {
+  it("复制处理中阻止重复提交，取消后新截图不被旧任务阻塞", () => {
+    const gate = new ImageActionGate();
+    const first = gate.begin(0)!;
+    expect(gate.begin(first)).toBeNull();
+    const next = gate.begin(first + 1)!;
+    gate.finish(first);
+    expect(gate.begin(next)).toBeNull();
+    gate.finish(next);
+    expect(gate.begin(next)).not.toBeNull();
+  });
   it("restores busy state and reports an upload or consume failure", async () => {
     const busy: boolean[] = [];
     const errors: string[] = [];

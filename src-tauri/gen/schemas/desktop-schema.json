@@ -345,6 +345,18 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the append_runtime_log command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-append-runtime-log",
+          "markdownDescription": "Enables the append_runtime_log command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the application_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-application-ready",
+          "markdownDescription": "Enables the application_ready command without any pre-configured scope."
+        },
+        {
           "description": "Enables the apply_scancode_map command without any pre-configured scope.",
           "type": "string",
           "const": "allow-apply-scancode-map",
@@ -363,10 +375,22 @@
           "markdownDescription": "Enables the choose_screenshot_save_directory command without any pre-configured scope."
         },
         {
+          "description": "Enables the clear_legacy_key_mappings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-legacy-key-mappings",
+          "markdownDescription": "Enables the clear_legacy_key_mappings command without any pre-configured scope."
+        },
+        {
           "description": "Enables the clear_recent_palette command without any pre-configured scope.",
           "type": "string",
           "const": "allow-clear-recent-palette",
           "markdownDescription": "Enables the clear_recent_palette command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the clear_runtime_logs command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-runtime-logs",
+          "markdownDescription": "Enables the clear_runtime_logs command without any pre-configured scope."
         },
         {
           "description": "Enables the close_overlay command without any pre-configured scope.",
@@ -441,6 +465,12 @@
           "markdownDescription": "Enables the get_full_screenshot command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_key_mapping_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-key-mapping-status",
+          "markdownDescription": "Enables the get_key_mapping_status command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_key_mappings command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-key-mappings",
@@ -471,6 +501,12 @@
           "markdownDescription": "Enables the get_key_visualizer_status command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_legacy_key_mappings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-legacy-key-mappings",
+          "markdownDescription": "Enables the get_legacy_key_mappings command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_minimize_to_tray command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-minimize-to-tray",
@@ -499,6 +535,18 @@
           "type": "string",
           "const": "allow-get-runtime-health",
           "markdownDescription": "Enables the get_runtime_health command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_runtime_log_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-runtime-log-text",
+          "markdownDescription": "Enables the get_runtime_log_text command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_runtime_logs command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-runtime-logs",
+          "markdownDescription": "Enables the get_runtime_logs command without any pre-configured scope."
         },
         {
           "description": "Enables the get_scancode_map_status command without any pre-configured scope.",
@@ -549,6 +597,12 @@
           "markdownDescription": "Enables the get_widget_config command without any pre-configured scope."
         },
         {
+          "description": "Enables the initialize_defaults command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-initialize-defaults",
+          "markdownDescription": "Enables the initialize_defaults command without any pre-configured scope."
+        },
+        {
           "description": "Enables the key_visualizer_effects_ready command without any pre-configured scope.",
           "type": "string",
           "const": "allow-key-visualizer-effects-ready",
@@ -571,6 +625,12 @@
           "type": "string",
           "const": "allow-locate-key-visualizer-mouse",
           "markdownDescription": "Enables the locate_key_visualizer_mouse command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the navigate_screenshot_history_preview command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-navigate-screenshot-history-preview",
+          "markdownDescription": "Enables the navigate_screenshot_history_preview command without any pre-configured scope."
         },
         {
           "description": "Enables the open_screenshot_history_preview command without any pre-configured scope.",
@@ -633,6 +693,12 @@
           "markdownDescription": "Enables the release_image command without any pre-configured scope."
         },
         {
+          "description": "Enables the report_capture_failed command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-report-capture-failed",
+          "markdownDescription": "Enables the report_capture_failed command without any pre-configured scope."
+        },
+        {
           "description": "Enables the report_capture_rendered command without any pre-configured scope.",
           "type": "string",
           "const": "allow-report-capture-rendered",
@@ -667,6 +733,12 @@
           "type": "string",
           "const": "allow-save-pin-image",
           "markdownDescription": "Enables the save_pin_image command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_key_mapping_enabled command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-key-mapping-enabled",
+          "markdownDescription": "Enables the set_key_mapping_enabled command without any pre-configured scope."
         },
         {
           "description": "Enables the set_minimize_to_tray command without any pre-configured scope.",
@@ -771,6 +843,18 @@
           "markdownDescription": "Enables the upload_image command without any pre-configured scope."
         },
         {
+          "description": "Denies the append_runtime_log command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-append-runtime-log",
+          "markdownDescription": "Denies the append_runtime_log command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the application_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-application-ready",
+          "markdownDescription": "Denies the application_ready command without any pre-configured scope."
+        },
+        {
           "description": "Denies the apply_scancode_map command without any pre-configured scope.",
           "type": "string",
           "const": "deny-apply-scancode-map",
@@ -789,10 +873,22 @@
           "markdownDescription": "Denies the choose_screenshot_save_directory command without any pre-configured scope."
         },
         {
+          "description": "Denies the clear_legacy_key_mappings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-legacy-key-mappings",
+          "markdownDescription": "Denies the clear_legacy_key_mappings command without any pre-configured scope."
+        },
+        {
           "description": "Denies the clear_recent_palette command without any pre-configured scope.",
           "type": "string",
           "const": "deny-clear-recent-palette",
           "markdownDescription": "Denies the clear_recent_palette command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clear_runtime_logs command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-runtime-logs",
+          "markdownDescription": "Denies the clear_runtime_logs command without any pre-configured scope."
         },
         {
           "description": "Denies the close_overlay command without any pre-configured scope.",
@@ -867,6 +963,12 @@
           "markdownDescription": "Denies the get_full_screenshot command without any pre-configured scope."
         },
         {
+          "description": "Denies the get_key_mapping_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-key-mapping-status",
+          "markdownDescription": "Denies the get_key_mapping_status command without any pre-configured scope."
+        },
+        {
           "description": "Denies the get_key_mappings command without any pre-configured scope.",
           "type": "string",
           "const": "deny-get-key-mappings",
@@ -897,6 +999,12 @@
           "markdownDescription": "Denies the get_key_visualizer_status command without any pre-configured scope."
         },
         {
+          "description": "Denies the get_legacy_key_mappings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-legacy-key-mappings",
+          "markdownDescription": "Denies the get_legacy_key_mappings command without any pre-configured scope."
+        },
+        {
           "description": "Denies the get_minimize_to_tray command without any pre-configured scope.",
           "type": "string",
           "const": "deny-get-minimize-to-tray",
@@ -925,6 +1033,18 @@
           "type": "string",
           "const": "deny-get-runtime-health",
           "markdownDescription": "Denies the get_runtime_health command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_runtime_log_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-runtime-log-text",
+          "markdownDescription": "Denies the get_runtime_log_text command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_runtime_logs command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-runtime-logs",
+          "markdownDescription": "Denies the get_runtime_logs command without any pre-configured scope."
         },
         {
           "description": "Denies the get_scancode_map_status command without any pre-configured scope.",
@@ -975,6 +1095,12 @@
           "markdownDescription": "Denies the get_widget_config command without any pre-configured scope."
         },
         {
+          "description": "Denies the initialize_defaults command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-initialize-defaults",
+          "markdownDescription": "Denies the initialize_defaults command without any pre-configured scope."
+        },
+        {
           "description": "Denies the key_visualizer_effects_ready command without any pre-configured scope.",
           "type": "string",
           "const": "deny-key-visualizer-effects-ready",
@@ -997,6 +1123,12 @@
           "type": "string",
           "const": "deny-locate-key-visualizer-mouse",
           "markdownDescription": "Denies the locate_key_visualizer_mouse command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the navigate_screenshot_history_preview command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-navigate-screenshot-history-preview",
+          "markdownDescription": "Denies the navigate_screenshot_history_preview command without any pre-configured scope."
         },
         {
           "description": "Denies the open_screenshot_history_preview command without any pre-configured scope.",
@@ -1059,6 +1191,12 @@
           "markdownDescription": "Denies the release_image command without any pre-configured scope."
         },
         {
+          "description": "Denies the report_capture_failed command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-report-capture-failed",
+          "markdownDescription": "Denies the report_capture_failed command without any pre-configured scope."
+        },
+        {
           "description": "Denies the report_capture_rendered command without any pre-configured scope.",
           "type": "string",
           "const": "deny-report-capture-rendered",
@@ -1093,6 +1231,12 @@
           "type": "string",
           "const": "deny-save-pin-image",
           "markdownDescription": "Denies the save_pin_image command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_key_mapping_enabled command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-key-mapping-enabled",
+          "markdownDescription": "Denies the set_key_mapping_enabled command without any pre-configured scope."
         },
         {
           "description": "Denies the set_minimize_to_tray command without any pre-configured scope.",

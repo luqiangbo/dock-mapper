@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-append-runtime-log"
+description = "Enables the append_runtime_log command without any pre-configured scope."
+commands.allow = ["append_runtime_log"]
+
+[[permission]]
+identifier = "deny-append-runtime-log"
+description = "Denies the append_runtime_log command without any pre-configured scope."
+commands.deny = ["append_runtime_log"]

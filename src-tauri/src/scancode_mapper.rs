@@ -1,6 +1,7 @@
 //! Windows Keyboard Layout\Scancode Map support.  Unlike a low-level hook this
 //! is consumed by the keyboard driver after the next sign-in and remains active
 //! when DockMapper is not running.
+#[cfg(test)]
 use crate::KeyMapping;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use windows::{
@@ -19,6 +20,7 @@ const VALUE_NAME: windows::core::PCWSTR = w!("Scancode Map");
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ScanCode(pub u16);
 
+#[cfg(test)]
 impl ScanCode {
     pub fn bytes(self) -> [u8; 2] {
         self.0.to_le_bytes()
@@ -40,6 +42,7 @@ pub fn scan_code(code: crate::KeyCode) -> Option<ScanCode> {
         ControlLeft => 0x1d,
         ControlRight => 0xe01d,
         Alt => 0x38,
+        AltRight => 0xe038,
         MetaLeft => 0xe05b,
         MetaRight => 0xe05c,
         Insert => 0xe052,
@@ -110,11 +113,13 @@ pub fn scan_code(code: crate::KeyCode) -> Option<ScanCode> {
         Kp7 => 0x47,
         Kp8 => 0x48,
         Kp9 => 0x49,
-        // AltGr is emitted as a multi-byte sequence and cannot be represented by Scancode Map.
+        // Preserve the legacy AltGr identifier as unsupported combination semantics.
+        // Ordinary physical right Alt is represented separately by AltRight (E0 38).
         AltGr => return None,
     }))
 }
 
+#[cfg(test)]
 pub fn encode(mappings: &[KeyMapping]) -> Result<Vec<u8>, String> {
     let enabled: Vec<_> = mappings.iter().filter(|item| item.enabled).collect();
     let mut seen = std::collections::HashSet::new();
@@ -151,33 +156,52 @@ fn open(access: windows::Win32::System::Registry::REG_SAM_FLAGS) -> Result<HKEY,
 
 pub fn read() -> Result<Option<Vec<u8>>, String> {
     let key = open(KEY_READ)?;
-    let mut size = 0;
-    let result = unsafe { RegQueryValueExW(key, VALUE_NAME, None, None, None, Some(&mut size)) };
-    if result.0 == 2 {
-        unsafe {
-            let _ = RegCloseKey(key);
+    let result = (|| {
+        let mut size = 0;
+        let mut kind = REG_BINARY;
+        let result = unsafe {
+            RegQueryValueExW(
+                key,
+                VALUE_NAME,
+                None,
+                Some(&mut kind),
+                None,
+                Some(&mut size),
+            )
+        };
+        if result.0 == 2 {
+            return Ok(None);
         }
-        return Ok(None);
-    }
-    result.ok().map_err(|error| error.to_string())?;
-    let mut bytes = vec![0; size as usize];
-    unsafe {
-        RegQueryValueExW(
-            key,
-            VALUE_NAME,
-            None,
-            None,
-            Some(bytes.as_mut_ptr()),
-            Some(&mut size),
-        )
-    }
-    .ok()
-    .map_err(|error| error.to_string())?;
+        result.ok().map_err(|error| error.to_string())?;
+        if kind != REG_BINARY {
+            return Err("Scancode Map 类型异常，不能视为没有映射；请先检查注册表值类型".into());
+        }
+        if size > 1024 * 1024 {
+            return Err("Scancode Map 超出安全读取范围，已暂停运行时映射".into());
+        }
+        let mut bytes = vec![0; size as usize];
+        unsafe {
+            RegQueryValueExW(
+                key,
+                VALUE_NAME,
+                None,
+                Some(&mut kind),
+                Some(bytes.as_mut_ptr()),
+                Some(&mut size),
+            )
+        }
+        .ok()
+        .map_err(|error| error.to_string())?;
+        if kind != REG_BINARY {
+            return Err("系统映射在读取期间发生变化，请刷新后重试".into());
+        }
+        bytes.truncate(size as usize);
+        Ok(Some(bytes))
+    })();
     unsafe {
         let _ = RegCloseKey(key);
     }
-    bytes.truncate(size as usize);
-    Ok(Some(bytes))
+    result
 }
 
 pub fn write(value: Option<&[u8]>) -> Result<(), String> {
@@ -217,7 +241,7 @@ pub fn backup_encode(value: Option<&[u8]>) -> Option<String> {
 }
 pub fn backup_decode(value: Option<&str>) -> Result<Option<Vec<u8>>, String> {
     match value {
-        Some("") | None => Ok(None),
+        None => Ok(None),
         Some(value) => BASE64
             .decode(value)
             .map(Some)
@@ -229,6 +253,15 @@ pub fn backup_decode(value: Option<&str>) -> Result<Option<Vec<u8>>, String> {
 mod tests {
     use super::*;
     use crate::KeyCode;
+    #[test]
+    fn empty_registry_value_remains_distinct_from_missing_value_for_cleanup_confirmation() {
+        assert_eq!(
+            backup_decode(backup_encode(Some(&[])).as_deref()).unwrap(),
+            Some(vec![])
+        );
+        assert_eq!(backup_decode(backup_encode(None).as_deref()).unwrap(), None);
+        assert!(backup_decode(Some("invalid!")).is_err());
+    }
     #[test]
     fn scancode_map_has_header_and_terminator() {
         let mapping = KeyMapping {

@@ -539,11 +539,11 @@ fn reanchor_enabled_window(app: &AppHandle) {
     }
 }
 
-pub fn setup_window(app: &tauri::App) -> Result<(), String> {
+pub fn setup_window(app: &tauri::AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window(WINDOW_LABEL)
         .ok_or_else(|| "按键文本窗口不存在".to_string())?;
-    let app_handle = app.handle().clone();
+    let app_handle = app.clone();
     window.on_window_event(move |event| {
         if !matches!(
             event,
@@ -555,7 +555,7 @@ pub fn setup_window(app: &tauri::App) -> Result<(), String> {
         }
         reanchor_enabled_window(&app_handle);
     });
-    let recovery_app = app.handle().clone();
+    let recovery_app = app.clone();
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(15)).await;

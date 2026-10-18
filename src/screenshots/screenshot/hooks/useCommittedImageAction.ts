@@ -1,5 +1,5 @@
-import { useCallback, type MutableRefObject } from "react";
-import { runImageAction } from "../utils/imageActions";
+import { useCallback, useRef, type MutableRefObject } from "react";
+import { runImageAction, ImageActionGate } from "../utils/imageActions";
 
 interface CommittedImageActionOptions {
   pendingAction: MutableRefObject<number>;
@@ -18,6 +18,7 @@ export function useCommittedImageAction({
   setBusy,
   fail,
 }: CommittedImageActionOptions) {
+  const gate = useRef(new ImageActionGate());
   const persistHistory = useCallback(async (resultPng: Uint8Array): Promise<void> => {
     let resultImageId: string | null = null;
     try {
@@ -32,7 +33,9 @@ export function useCommittedImageAction({
 
   return useCallback(
     (consumeImage: (imageId: string) => Promise<unknown>, fallbackError: string) => {
-      const action = ++pendingAction.current;
+      const action = gate.current.begin(pendingAction.current);
+      if (action === null) return Promise.resolve(false);
+      pendingAction.current = action;
       return runImageAction({
         exportPng: async () => {
           const png = await exportPng();
@@ -59,6 +62,8 @@ export function useCommittedImageAction({
           if (action === pendingAction.current) fail(message, "editing");
         },
         fallbackError,
+      }).finally(() => {
+        gate.current.finish(action);
       });
     },
     [beginCommit, exportPng, fail, pendingAction, persistHistory, restoreEditing, setBusy],

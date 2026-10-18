@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-clear-runtime-logs"
+description = "Enables the clear_runtime_logs command without any pre-configured scope."
+commands.allow = ["clear_runtime_logs"]
+
+[[permission]]
+identifier = "deny-clear-runtime-logs"
+description = "Denies the clear_runtime_logs command without any pre-configured scope."
+commands.deny = ["clear_runtime_logs"]

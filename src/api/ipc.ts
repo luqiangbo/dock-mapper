@@ -1,8 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { RuntimeLogSnapshot, RuntimeLogRecord } from "./runtimeLogs";
 import ipcContract from "../../ipc-contract.json";
 import { IPC_COMMAND_NAMES } from "./ipcCommandNames";
 import type {
-  ApplyScancodeMapResult,
+  LegacyMappingPreview,
   AnnotationOutlineConfig,
   ScreenshotAnnotationStyles,
   ColorPaletteConfig,
@@ -12,7 +13,7 @@ import type {
   KeyVisualizerSession,
   KeyVisualizerStatus,
   RuntimeHealth,
-  ScancodeMapStatus,
+  KeyMappingStatus,
   ScreenshotConfig,
   ShortcutRuntimeStatus,
   SupportedKey,
@@ -33,17 +34,32 @@ import type {
 export interface HistoryPreviewSession {
   id: string;
   generation: number;
+  ids: string[];
 }
 
 interface CommandContract {
-  open_screenshot_history_preview: { args: { id: string }; result: void };
+  initialize_defaults: {
+    args: { buildId: string; activate: boolean };
+    result: { reset: boolean; identity: string; restartRequired: boolean };
+  };
+  application_ready: { args: undefined; result: boolean };
+  get_runtime_logs: { args: undefined; result: RuntimeLogSnapshot };
+  get_runtime_log_text: { args: undefined; result: string };
+  clear_runtime_logs: { args: undefined; result: void };
+  append_runtime_log: { args: RuntimeLogRecord; result: void };
+  open_screenshot_history_preview: { args: { id: string; ids?: string[] }; result: void };
+  navigate_screenshot_history_preview: {
+    args: { generation: number; direction: -1 | 1 };
+    result: HistoryPreviewSession;
+  };
   get_screenshot_history_preview_session: { args: undefined; result: HistoryPreviewSession | null };
   get_supported_keys: { args: undefined; result: SupportedKey[] };
   get_key_mappings: { args: undefined; result: KeyMapping[] };
-  get_scancode_map_status: { args: undefined; result: ScancodeMapStatus };
+  get_key_mapping_status: { args: undefined; result: KeyMappingStatus };
   sync_key_mappings: { args: { mappings: KeyMapping[] }; result: void };
-  apply_scancode_map: { args: { confirmTakeover: boolean }; result: ApplyScancodeMapResult };
-  restore_scancode_map: { args: undefined; result: ScancodeMapStatus };
+  set_key_mapping_enabled: { args: { enabled: boolean }; result: void };
+  get_legacy_key_mappings: { args: undefined; result: LegacyMappingPreview };
+  clear_legacy_key_mappings: { args: { expectedValue: string | null }; result: void };
   list_screenshot_history: { args: undefined; result: ScreenshotHistorySummary[] };
   get_screenshot_history_image: { args: { id: string }; result: unknown };
   get_screenshot_history_thumbnail: { args: { id: string }; result: unknown };
@@ -72,8 +88,8 @@ interface CommandContract {
   get_screenshot_shortcut_statuses: { args: undefined; result: ShortcutRuntimeStatus[] };
   reset_screenshot_shortcuts: { args: undefined; result: ScreenshotConfig };
   choose_screenshot_save_directory: { args: undefined; result: string | null };
-  start_screenshot: { args: undefined; result: void };
-  start_quick_ocr: { args: undefined; result: void };
+  start_screenshot: { args: undefined; result: number };
+  start_quick_ocr: { args: undefined; result: number };
   get_color_palette: { args: undefined; result: ColorPaletteConfig };
   record_palette_color: { args: { color: string }; result: ColorPaletteConfig };
   set_palette_favorite: {
@@ -110,6 +126,10 @@ interface CommandContract {
   get_full_screenshot: { args: { label: string }; result: FullScreenshot };
   report_capture_rendered: {
     args: { generation: number; label: string; trace?: CaptureSelectionTrace };
+    result: boolean;
+  };
+  report_capture_failed: {
+    args: { label: string; generation?: number; error: string };
     result: boolean;
   };
   check_screen_permission: { args: undefined; result: { granted: boolean; status: string } };

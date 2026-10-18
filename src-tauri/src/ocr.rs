@@ -296,14 +296,14 @@ impl OcrService {
         thread::Builder::new()
             .name("dockmapper-ocr".into())
             .spawn(move || {
-                let mut engine: Option<Result<OcrEngine, String>> = None;
+                let mut engine = crate::ocr_engine_state::EngineState::<OcrEngine>::Empty;
                 let mut last_used = Instant::now();
                 loop {
                     let job = match receiver.recv_timeout(Duration::from_secs(30)) {
                         Ok(job) => job,
                         Err(RecvTimeoutError::Timeout) => {
-                            if engine.is_some() && last_used.elapsed() >= Duration::from_secs(600) {
-                                engine = None;
+                            if matches!(engine, crate::ocr_engine_state::EngineState::Ready(_)) && last_used.elapsed() >= Duration::from_secs(600) {
+                                engine = crate::ocr_engine_state::EngineState::Empty;
                                 tracing::info!(target: "dock_mapper::ocr", "OCR engine released after inactivity");
                             }
                             continue;
@@ -314,11 +314,7 @@ impl OcrService {
                         worker_queued.fetch_sub(1, Ordering::AcqRel);
                     }
                     if matches!(&job, OcrJob::Prepare) {
-                        if engine.is_none() {
-                            let initialized = Instant::now();
-                            engine = Some(load_engine(&root));
-                            tracing::info!(target: "dock_mapper::ocr", elapsed_ms = initialized.elapsed().as_millis(), success = engine.as_ref().is_some_and(Result::is_ok), "OCR engine prepared for quick OCR");
-                        }
+                        let _ = engine.ensure(Instant::now(), true, || load_engine(&root));
                         last_used = Instant::now();
                         continue;
                     }
@@ -333,22 +329,22 @@ impl OcrService {
                         let _ = reply.send(Err("OCR 请求已取消".into()));
                         continue;
                     }
-                    if engine.is_none() {
-                        let initialized = Instant::now();
-                        engine = Some(load_engine(&root));
-                        tracing::info!(
-                            target: "dock_mapper::ocr",
-                            elapsed_ms = initialized.elapsed().as_millis(),
-                            success = engine.as_ref().is_some_and(Result::is_ok),
-                            "OCR engine initialized on demand"
-                        );
-                    }
-                    let result = match engine.as_mut() {
-                        Some(Ok(engine)) => recognize_with_engine(engine, png),
-                        Some(Err(error)) => Err(error.clone()),
-                        None => Err("OCR 引擎状态异常".into()),
-                    };
+                    let result = engine.recognize(
+                        Instant::now(),
+                        || worker_generation.load(Ordering::Acquire) == generation,
+                        || {
+                            let initialized = Instant::now();
+                            let loaded = load_engine(&root);
+                            tracing::info!(target: "dock_mapper::ocr", elapsed_ms = initialized.elapsed().as_millis(), success = loaded.is_ok(), "OCR engine initialization attempted");
+                            loaded
+                        },
+                        |engine| recognize_with_engine(engine, png),
+                    );
                     last_used = Instant::now();
+                    match &result {
+                        Ok(_) => tracing::info!(target: "dock_mapper::ocr", "OCR recognition completed"),
+                        Err(error) => tracing::warn!(target: "dock_mapper::ocr", error = %crate::diagnostics::redact_sensitive_text(error), "OCR recognition failed or cancelled"),
+                    }
                     if worker_generation.load(Ordering::Acquire) == generation {
                         let _ = reply.send(result);
                     } else {

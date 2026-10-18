@@ -9,6 +9,7 @@ pub struct RuntimeHealth {
     history_count: usize,
     transient_image_count: usize,
     transient_image_bytes: usize,
+    sampling: crate::sampling_metrics::SamplingSnapshot,
 }
 
 #[tauri::command]
@@ -21,5 +22,9 @@ pub async fn get_runtime_health(app: AppHandle) -> Result<RuntimeHealth, String>
         history_count: state.history.count(),
         transient_image_count,
         transient_image_bytes,
+        sampling: app
+            .state::<crate::sys_monitor::SysMonitorControl>()
+            .metrics
+            .snapshot()?,
     })
 }

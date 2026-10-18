@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef } from "react";
+import { usePageActive } from "./PageActivity";
 import * as echarts from "echarts/core";
 import { LineChart, type LineSeriesOption } from "echarts/charts";
 import {
@@ -48,11 +49,13 @@ function MetricTrendChart({
   series: SeriesDefinition[];
   percent?: boolean;
 }) {
+  const active = usePageActive();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<EChartsType | null>(null);
   const { resolved } = useTheme();
 
   useEffect(() => {
+    if (!active) return;
     const container = containerRef.current;
     if (!container) return;
     const chart = echarts.init(container, undefined, { renderer: "svg" });
@@ -79,7 +82,7 @@ function MetricTrendChart({
       chartRef.current = null;
       chart.dispose();
     };
-  }, []);
+  }, [active]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -124,7 +127,7 @@ function MetricTrendChart({
       })),
     };
     chart.setOption(option);
-  }, [percent, resolved, series, title]);
+  }, [percent, resolved, series, title, active]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -135,7 +138,7 @@ function MetricTrendChart({
         data: samples.map((sample) => [sample.timestamp, sample[item.key]]),
       })),
     });
-  }, [samples, series]);
+  }, [samples, series, active]);
 
   return <div ref={containerRef} className={styles.trendChart} role="img" aria-label={title} />;
 }

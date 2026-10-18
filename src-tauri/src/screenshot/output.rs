@@ -37,14 +37,17 @@ pub fn copy_image(
     config_state: State<'_, crate::AppState>,
     image_id: String,
 ) -> Result<bool, String> {
+    tracing::info!(target: "dock_mapper::screenshot", "copy screenshot started");
     let data = config_state.images.take(&image_id)?;
     hide_overlay_for_commit(&app);
     if let Err(error) = clipboard::write_png(&data) {
+        tracing::error!(target: "dock_mapper::screenshot", error = %crate::diagnostics::redact_sensitive_text(&error), "copy screenshot failed");
         restore_overlay_after_commit_failure(&app);
         return Err(error);
     }
     remember_confirmed_image(&app, data);
     finish_overlay_commit(&app);
+    tracing::info!(target: "dock_mapper::screenshot", "copy screenshot completed");
     Ok(true)
 }
 
@@ -54,6 +57,7 @@ pub fn save_image(
     config_state: State<'_, crate::AppState>,
     image_id: String,
 ) -> Result<bool, String> {
+    tracing::info!(target: "dock_mapper::screenshot", "save screenshot started");
     let data = config_state.images.take(&image_id)?;
     hide_overlay_for_commit(&app);
     if let Err(error) = clipboard::write_png(&data) {
@@ -83,14 +87,17 @@ pub fn save_image(
         }
     }
     let Some(path) = dialog.save_file() else {
+        tracing::info!(target: "dock_mapper::screenshot", "save screenshot cancelled");
         restore_overlay_after_commit_failure(&app);
         return Ok(false);
     };
     if let Err(error) = fs::write(path, data.as_ref()) {
+        tracing::error!(target: "dock_mapper::screenshot", error = %crate::diagnostics::redact_sensitive_text(&error.to_string()), "save screenshot failed");
         restore_overlay_after_commit_failure(&app);
         return Err(error.to_string());
     }
     finish_overlay_commit(&app);
+    tracing::info!(target: "dock_mapper::screenshot", "save screenshot completed");
     Ok(true)
 }
 

@@ -30,8 +30,7 @@ static REQUEST_GENERATION: AtomicU64 = AtomicU64::new(0);
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
 pub enum AdminAction {
-    Apply { confirm_takeover: bool },
-    Restore,
+    ClearLegacy { expected_value: Option<String> },
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -142,50 +141,17 @@ fn execute_action(
     config_path: &Path,
     action: AdminAction,
 ) -> Result<crate::ScancodeMapStatus, String> {
-    let config = crate::config::load_for_mutation(config_path)?;
-    let current = crate::scancode_mapper::read()?;
     match action {
-        AdminAction::Apply { confirm_takeover } => {
-            let desired = crate::scancode_mapper::encode(&config.key_mappings)?;
-            let status = crate::key_mapping::scancode_map_status(&config, current.as_deref())?;
-            if status.state == crate::ScancodeMapState::SystemChanged && !confirm_takeover {
-                return Err("系统已存在其他工具写入的 Scancode Map；请确认备份后接管".into());
-            }
-            let mut next_config = config;
-            if next_config.scancode_map_backup.is_none()
-                || status.state == crate::ScancodeMapState::SystemChanged
-            {
-                next_config.scancode_map_backup = Some(
-                    crate::scancode_mapper::backup_encode(current.as_deref()).unwrap_or_default(),
-                );
-            }
-            next_config.applied_scancode_map =
-                crate::scancode_mapper::backup_encode(Some(&desired));
-            crate::commit_scancode_change_at_path(
-                config_path,
-                current.as_deref(),
-                Some(&desired),
-                &next_config,
-            )?;
-            crate::key_mapping::scancode_map_status(&next_config, Some(&desired))
-        }
-        AdminAction::Restore => {
-            let backup = crate::key_mapping::required_scancode_backup(
-                config.scancode_map_backup.as_deref(),
-            )?;
-            let mut next_config = config;
-            next_config.applied_scancode_map = None;
-            crate::commit_scancode_change_at_path(
-                config_path,
-                current.as_deref(),
-                backup.as_deref(),
-                &next_config,
-            )?;
-            crate::key_mapping::scancode_map_status(&next_config, backup.as_deref())
+        AdminAction::ClearLegacy { expected_value } => {
+            let expected = crate::scancode_mapper::backup_decode(expected_value.as_deref())?;
+            crate::legacy_key_mapping::clear(config_path, expected.as_deref())?;
+            Ok(crate::ScancodeMapStatus {
+                state: crate::ScancodeMapState::NotApplied,
+                backup_available: true,
+            })
         }
     }
 }
-
 fn application_data_dir() -> Result<PathBuf, String> {
     directories::BaseDirs::new()
         .map(|directories| directories.data_dir().join(APP_IDENTIFIER))
@@ -356,10 +322,21 @@ mod tests {
     #[test]
     fn launcher_failure_removes_request_files() {
         let root = temporary_root("cleanup");
-        let result = invoke_helper_at(&root, AdminAction::Restore, |_| {
-            Err("用户取消了管理员授权".into())
-        });
+        let recovery = root.join("keyboard-recovery");
+        fs::create_dir_all(&recovery).unwrap();
+        fs::write(recovery.join("prepare.json"), b"existing recovery").unwrap();
+        let result = invoke_helper_at(
+            &root,
+            AdminAction::ClearLegacy {
+                expected_value: None,
+            },
+            |_| Err("用户取消了管理员授权".into()),
+        );
         assert!(result.is_err());
+        assert_eq!(
+            fs::read(recovery.join("prepare.json")).unwrap(),
+            b"existing recovery"
+        );
         assert!(fs::read_dir(root.join(REQUEST_DIRECTORY))
             .unwrap()
             .next()
@@ -371,20 +348,26 @@ mod tests {
     fn successful_helper_result_is_read_and_cleaned_up() {
         let root = temporary_root("success");
         let root_for_helper = root.clone();
-        let status = invoke_helper_at(&root, AdminAction::Restore, move |id| {
-            let request_dir = root_for_helper.join(REQUEST_DIRECTORY);
-            write_new_json(
-                &response_path(&request_dir, id)?,
-                &AdminResponse {
-                    status: Some(crate::ScancodeMapStatus {
-                        state: crate::ScancodeMapState::NotApplied,
-                        backup_available: true,
-                    }),
-                    error: None,
-                },
-            )?;
-            Ok(0)
-        })
+        let status = invoke_helper_at(
+            &root,
+            AdminAction::ClearLegacy {
+                expected_value: None,
+            },
+            move |id| {
+                let request_dir = root_for_helper.join(REQUEST_DIRECTORY);
+                write_new_json(
+                    &response_path(&request_dir, id)?,
+                    &AdminResponse {
+                        status: Some(crate::ScancodeMapStatus {
+                            state: crate::ScancodeMapState::NotApplied,
+                            backup_available: true,
+                        }),
+                        error: None,
+                    },
+                )?;
+                Ok(0)
+            },
+        )
         .unwrap();
         assert_eq!(status.state, crate::ScancodeMapState::NotApplied);
         assert!(status.backup_available);
@@ -397,6 +380,11 @@ mod tests {
 
     #[test]
     fn request_json_rejects_unknown_actions_and_fields() {
+        for action in ["apply", "restore"] {
+            assert!(
+                serde_json::from_value::<AdminAction>(serde_json::json!({"type":action})).is_err()
+            );
+        }
         let unknown_action = serde_json::json!({
             "id": next_request_id(),
             "action": { "type": "deleteEverything" }

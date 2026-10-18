@@ -15,6 +15,7 @@
     "allow-overlay-ready",
     "allow-get-full-screenshot",
     "allow-report-capture-rendered",
+    "allow-report-capture-failed",
     "allow-check-screen-permission",
     "allow-copy-image",
     "allow-copy-text",

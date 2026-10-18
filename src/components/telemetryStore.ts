@@ -1,14 +1,12 @@
 import type { SysStatus } from "../types";
 import type { DashboardSample } from "./dashboardTelemetry";
 import { loadTelemetryArchive } from "./telemetryArchive";
-import { loadAlertInbox, type AlertEntry } from "./telemetryAlerts";
 
 export interface TelemetrySnapshot {
   status: SysStatus | null;
   lastSampleAt: number | null;
   samples: DashboardSample[];
   archive: DashboardSample[];
-  alerts: AlertEntry[];
 }
 export function createTelemetryStore(initial: TelemetrySnapshot) {
   let current = initial;
@@ -44,5 +42,4 @@ export const telemetryStore = createTelemetryStore({
   lastSampleAt: null,
   samples: [],
   archive: loadTelemetryArchive(),
-  alerts: loadAlertInbox(),
 });

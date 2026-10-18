@@ -25,6 +25,7 @@ import { invokeCommand } from "../api/ipc";
 import styles from "./components.module.scss";
 import { errorMessage, MAIN_EVENTS, widgetApi } from "../api/commands";
 import { useQueuedAutosave } from "../hooks/useQueuedAutosave";
+import { usePageActive, usePageReadGuard, usePageRefresh } from "./PageActivity";
 import { takeDetachedAutosaveError, waitForPendingAutosave } from "../hooks/queuedAutosave";
 import { useTelemetryFreshness } from "../utils/telemetryFreshness";
 import type { WidgetLayoutReport } from "../widgetLayout";
@@ -38,19 +39,20 @@ const METRIC_LABELS = {
   upload: "上传",
   download: "下载",
   cpu: "CPU",
-  cpu_temperature: "CPU 温度",
-  gpu_usage: "GPU 占用率",
   memory: "内存",
   battery: "电池",
 } as const;
 export default function WidgetSettings() {
+  const active = usePageActive();
+  const reads = usePageReadGuard();
+  const loaded = useRef(false);
   const screens = Grid.useBreakpoint();
   const [form] = Form.useForm<WidgetConfig>();
   const [config, setConfig] = useState<WidgetConfig | null>(null);
   const [savedConfig, setSavedConfig] = useState<WidgetConfig | null>(null);
   const [status, setStatus] = useState<SysStatus | null>(null);
   const [lastSampleAt, setLastSampleAt] = useState<number | null>(null);
-  const freshness = useTelemetryFreshness(lastSampleAt);
+  const freshness = useTelemetryFreshness(lastSampleAt, active);
   const [layoutReport, setLayoutReport] = useState<WidgetLayoutReport | null>(null);
   const [layoutError, setLayoutError] = useState<string | null>(null);
   const [nativeBudget, setNativeBudget] = useState<WidgetLayoutBudget | null>(null);
@@ -89,33 +91,33 @@ export default function WidgetSettings() {
   });
 
   const load = useCallback(async () => {
+    const request = reads.begin();
     const revision = invalidateSave();
-    setLoading(true);
+    if (!loaded.current) setLoading(true);
     setLoadError(null);
     try {
       await waitForPendingAutosave("widget-settings");
       const next = await widgetApi.config();
-      if (!isSaveCurrent(revision)) return;
+      if (!reads.isCurrent(request) || !isSaveCurrent(revision)) return;
+      loaded.current = true;
       const pendingError = takeDetachedAutosaveError("widget-settings");
       if (pendingError) setSaveError(errorMessage(pendingError));
       setConfig(next);
       setSavedConfig(next);
       form.setFieldsValue(next);
     } catch (error) {
-      if (isSaveCurrent(revision)) setLoadError(errorMessage(error));
+      if (reads.isCurrent(request) && isSaveCurrent(revision)) setLoadError(errorMessage(error));
     } finally {
-      if (isSaveCurrent(revision)) setLoading(false);
+      if (reads.isCurrent(request)) setLoading(false);
     }
-  }, [form, invalidateSave, isSaveCurrent]);
+  }, [form, invalidateSave, isSaveCurrent, reads]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
-
-  useEffect(() => {
+    if (!active) return;
     let disposed = false;
     let unlisten: (() => void) | undefined;
     void listen<SysStatus>(MAIN_EVENTS.systemStatus, (event) => {
+      if (disposed) return;
       setStatus(event.payload);
       setLastSampleAt(Date.now());
     })
@@ -123,19 +125,21 @@ export default function WidgetSettings() {
         if (disposed) dispose();
         else unlisten = dispose;
       })
-      .catch((error) =>
-        notification.warning({
-          message: "系统采样暂不可用",
-          description: errorMessage(error),
-        }),
-      );
+      .catch((error) => {
+        if (!disposed)
+          notification.warning({
+            message: "系统采样暂不可用",
+            description: errorMessage(error),
+          });
+      });
     return () => {
       disposed = true;
       unlisten?.();
     };
-  }, [notification]);
+  }, [notification, active]);
 
   useEffect(() => {
+    if (!active) return;
     let disposed = false;
     const cleanup: Array<() => void> = [];
     const applyBudget = (next: WidgetLayoutBudget) => {
@@ -177,11 +181,12 @@ export default function WidgetSettings() {
       requestLayoutRef.current = null;
       cleanup.forEach((off) => off());
     };
-  }, []);
+  }, [active]);
   const dirty = useMemo(
     () => !!config && !!savedConfig && JSON.stringify(config) !== JSON.stringify(savedConfig),
     [config, savedConfig],
   );
+  usePageRefresh(load, dirty || saving || !!saveError);
 
   const scheduleSave = useCallback(
     (next: WidgetConfig, delay = AUTO_SAVE_DELAY_MS) => {
@@ -232,6 +237,19 @@ export default function WidgetSettings() {
 
   return (
     <Form form={form} layout="vertical" className={`${styles.page} ${styles.settingsForm}`}>
+      {loadError && (
+        <Alert
+          type="warning"
+          showIcon
+          message="挂件设置刷新失败"
+          description={loadError}
+          action={
+            <Button disabled={dirty || saving} onClick={() => void load()}>
+              重试读取
+            </Button>
+          }
+        />
+      )}
       <Card
         className={styles.surfaceCard}
         title="任务栏挂件"
@@ -325,27 +343,6 @@ export default function WidgetSettings() {
             />
             {freshness === "live" && status?.battery === null && (
               <Tag color="default">当前设备未检测到电池</Tag>
-            )}
-            {config.metrics.some(
-              (metric) => metric.kind === "cpu_temperature" && metric.enabled,
-            ) && (
-              <Text type="secondary">
-                {freshness !== "live"
-                  ? "正在等待 CPU 温度采样…"
-                  : status?.cpu_temperature_celsius == null
-                    ? (status?.cpu_temperature_error ??
-                      "未检测到温度源，不代表 CPU 不支持测温；请先运行 LibreHardwareMonitor / OpenHardwareMonitor。")
-                    : `CPU 温度：${status.cpu_temperature_celsius.toFixed(0)}℃`}
-              </Text>
-            )}
-            {config.metrics.some((metric) => metric.kind === "gpu_usage" && metric.enabled) && (
-              <Text type="secondary">
-                {freshness !== "live"
-                  ? "正在等待 GPU 占用率采样…"
-                  : status?.gpu_usage == null
-                    ? (status?.gpu_usage_error ?? "正在读取 GPU 占用率…")
-                    : `GPU 占用率：${status.gpu_usage.toFixed(0)}%（最繁忙引擎）`}
-              </Text>
             )}
             <Row gutter={[screens.lg ? 12 : 8, 8]}>
               <Col xs={24} md={12}>

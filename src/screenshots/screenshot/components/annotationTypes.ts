@@ -8,9 +8,17 @@ import type {
   MosaicEffect,
 } from "../../../types";
 export type ArrowPreset = AnnotationArrowType;
-export type ArrowStyle = ArrowPreset
-  | "straight" | "segmented" | "double"
-  | "zigzag" | "loop" | "sweep" | "curve" | "block" | "lightning"
+export type ArrowStyle =
+  | ArrowPreset
+  | "straight"
+  | "segmented"
+  | "double"
+  | "zigzag"
+  | "loop"
+  | "sweep"
+  | "curve"
+  | "block"
+  | "lightning"
   // Kept only for in-memory compatibility with an annotation being edited
   // while the toolbar code hot-reloads. It is no longer exposed as a preset.
   | "label";
@@ -31,7 +39,7 @@ export const DEFAULT_LINE_STYLE: LineStyle = "solid";
 const EXCALIDRAW_STROKE_WIDTHS = [1, 2, 3, 4, 6, 8, 12] as const;
 export function normalizeExcalidrawStrokeWidth(value: number): number {
   return EXCALIDRAW_STROKE_WIDTHS.reduce((closest, candidate) =>
-    Math.abs(candidate - value) < Math.abs(closest - value) ? candidate : closest
+    Math.abs(candidate - value) < Math.abs(closest - value) ? candidate : closest,
   );
 }
 export const LINE_STYLE_OPTIONS: ReadonlyArray<{ value: LineStyle; label: string }> = [
@@ -47,24 +55,15 @@ export const FILL_STYLE_OPTIONS: ReadonlyArray<{ value: FillStyle; label: string
   { value: "zigzag" as FillStyle, label: "锯齿" },
 ];
 export const ROUGHNESS_OPTIONS: ReadonlyArray<{ value: Roughness; label: string }> = [
-  { value: 0, label: "精准" },
-  { value: 1, label: "手绘" },
-  { value: 2, label: "粗糙" },
+  { value: 0, label: "规整" },
+  { value: 2, label: "手绘" },
 ];
 export const ARROWHEAD_OPTIONS: ReadonlyArray<{ value: Arrowhead; label: string }> = [
   { value: "none", label: "无" },
   { value: "arrow", label: "箭头" },
   { value: "triangle", label: "实心三角" },
   { value: "circle", label: "实心圆" },
-  { value: "diamond", label: "实心菱形" },
   { value: "bar", label: "横杠" },
-  { value: "dot" as Arrowhead, label: "圆点" },
-  { value: "circle_outline" as Arrowhead, label: "空心圆" },
-  { value: "triangle_outline" as Arrowhead, label: "空心三角" },
-  { value: "diamond_outline" as Arrowhead, label: "空心菱形" },
-  { value: "crowfoot_one" as Arrowhead, label: "Crowfoot 1" },
-  { value: "crowfoot_many" as Arrowhead, label: "Crowfoot 多" },
-  { value: "crowfoot_one_or_many" as Arrowhead, label: "Crowfoot 1/多" },
 ];
 
 /** Read old hot-reload/undo objects without keeping their renderer alive. */
@@ -81,6 +80,7 @@ export function normalizeLineStyle(
   return DEFAULT_LINE_STYLE;
 }
 export type TextFont =
+  | (string & {})
   | "virgil"
   | "helvetica"
   | "cascadia"
@@ -157,9 +157,9 @@ export interface ToolSettings {
 }
 
 export const DEFAULT_TEXT_STYLE: TextStyle = {
-  fontSize: 20,
+  fontSize: 24,
   color: "#e03131",
-  font: "helvetica",
+  font: "microsoft-yahei",
   textAlign: "left",
   opacity: 100,
   bold: false,
@@ -167,8 +167,8 @@ export const DEFAULT_TEXT_STYLE: TextStyle = {
   strokeWidth: 0,
 };
 export const DEFAULT_NUMBER_STYLE: NumberStyle = {
-  backgroundColor: "#ef4444",
+  backgroundColor: "#e03131",
   textColor: "#ffffff",
-  size: 32,
+  size: 36,
   outline: { enabled: true, color: "#ffffff", width: 1 },
 };

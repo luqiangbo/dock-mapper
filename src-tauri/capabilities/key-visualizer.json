@@ -6,6 +6,7 @@
     "key_visualizer"
   ],
   "permissions": [
+    "allow-application-ready",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "allow-get-key-visualizer-config",

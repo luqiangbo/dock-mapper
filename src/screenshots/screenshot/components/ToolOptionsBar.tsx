@@ -1,4 +1,5 @@
-import { ColorPicker, Select } from "antd";
+import { Button, ColorPicker, Select } from "antd";
+import { PaletteBrowser } from "./PaletteBrowser";
 import {
   forwardRef,
   useCallback,
@@ -7,11 +8,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import type {
-  AnnotationOutlineConfig,
-  ColorPaletteConfig,
-  ScreenshotConfig,
-} from "../../../types";
+import type { AnnotationOutlineConfig, ColorPaletteConfig, ScreenshotConfig } from "../../../types";
 import { STROKE_COLORS, type AnnotTool } from "./AnnotationToolbar";
 import { excalidrawStyleCapabilities } from "./excalidrawScreenshotAdapter";
 import {
@@ -30,7 +27,13 @@ import {
   type ToolSettings,
 } from "./annotationTypes";
 import { ARROW_SHAPE_CHOICES } from "./ArrowOptionThumbs";
-import { normalizeHexColor, selectNumber } from "./toolOptionValues";
+import {
+  normalizeHexColor,
+  selectNumber,
+  defaultFirst,
+  defaultOptionValue,
+} from "./toolOptionValues";
+import { SYSTEM_FONTS, systemFontOptions } from "./systemFonts";
 
 interface Props {
   tool: Exclude<AnnotTool, null>;
@@ -47,9 +50,14 @@ interface Props {
   onPopupOpenChange: (open: boolean) => void;
   palette?: ColorPaletteConfig;
   paletteBusy?: boolean;
-  onPaletteCopy?: (color: string) => void;
-  onPaletteFavorite?: (color: string, favorite: boolean) => void;
+  paletteLoading?: boolean;
+  paletteSessionKey?: number;
+  paletteError?: string | null;
+  onPaletteReload?: () => Promise<void>;
+  onPaletteCopy?: (color: string) => Promise<void>;
+  onPaletteFavorite?: (color: string, favorite: boolean) => Promise<boolean>;
   selectedTools?: AnnotTool[];
+  fontFavorites?: string[];
   style?: CSSProperties;
 }
 
@@ -81,23 +89,21 @@ function Outline({
         placement="bottom"
         onOpenChange={(open) => popup("annotation-outline", open)}
         onChange={(color) => change(applyColor(normalizeHexColor(color.toHexString())))}
-        onChangeComplete={(color) =>
-          commit?.(applyColor(normalizeHexColor(color.toHexString())))
-        }
+        onChangeComplete={(color) => commit?.(applyColor(normalizeHexColor(color.toHexString())))}
         onClear={() => {
           const next = { ...value, enabled: false };
           change(next);
           commit?.(next);
         }}
       >
-        <button
-          type="button"
+        <Button
+          type="text"
           className={`tool-options__outline-trigger${value.enabled ? "" : " is-disabled"}`}
           aria-label={value.enabled ? `描边：${value.color}` : "描边：无"}
           title={value.enabled ? `描边 ${value.color}` : "无描边"}
         >
           <span style={{ borderColor: value.color }} />
-        </button>
+        </Button>
       </ColorPicker>
     </span>
   );
@@ -120,16 +126,6 @@ const TEXT_ALIGN_OPTIONS = [
   { value: "left", label: "左对齐" },
   { value: "center", label: "居中" },
   { value: "right", label: "右对齐" },
-];
-const FONT_OPTIONS: Array<{ value: TextStyle["font"]; label: string }> = [
-  { value: "virgil", label: "Virgil" },
-  { value: "helvetica", label: "Helvetica" },
-  { value: "cascadia", label: "Cascadia" },
-  { value: "excalifont", label: "Excalifont" },
-  { value: "nunito", label: "Nunito" },
-  { value: "lilita", label: "Lilita One" },
-  { value: "comic-shanns", label: "Comic Shanns" },
-  { value: "liberation-sans", label: "Liberation Sans" },
 ];
 const PRESETS = [{ label: "快捷色", colors: [...STROKE_COLORS] }];
 const FORMATS: Array<{ value: ScreenshotConfig["color_copy_format"]; label: string }> = [
@@ -162,6 +158,8 @@ function Color({
   quickColors = STROKE_COLORS,
   presetLabel = "快捷色",
   compact = false,
+  empty = false,
+  clear,
 }: {
   label: string;
   value: string;
@@ -173,6 +171,8 @@ function Color({
   quickColors?: readonly string[];
   presetLabel?: string;
   compact?: boolean;
+  empty?: boolean;
+  clear?: () => void;
 }) {
   const presets = [
     { label: presetLabel, colors: [...quickColors] },
@@ -184,23 +184,32 @@ function Color({
   const picker = (
     <ColorPicker
       mode="single"
-      value={value}
+      value={empty ? "transparent" : value}
+      allowClear={Boolean(clear)}
+      onClear={clear}
       disabledAlpha
       disabledFormat
       presets={presets}
       placement="bottom"
       onOpenChange={(open) => popup(name, open)}
-      onChange={(color) => change(normalizeHexColor(color.toHexString()))}
-      onChangeComplete={(color) => commit?.(normalizeHexColor(color.toHexString()))}
+      onChange={(color) => {
+        if (!color.cleared) change(normalizeHexColor(color.toHexString()));
+      }}
+      onChangeComplete={(color) => {
+        if (!color.cleared) commit?.(normalizeHexColor(color.toHexString()));
+      }}
     >
-      <button
-        type="button"
+      <Button
+        type="text"
         className="tool-options__color-trigger"
-        aria-label={`${label}：${value}`}
-        title={`${label} ${value}`}
+        aria-label={`${label}：${empty ? "无填充" : value}`}
+        title={`${label} ${empty ? "无填充" : value}`}
       >
-        <span className="tool-options__color-swatch" style={{ backgroundColor: value }} />
-      </button>
+        <span
+          className={`tool-options__color-swatch${empty ? " tool-options__color-swatch--empty" : ""}`}
+          style={{ backgroundColor: empty ? "transparent" : value }}
+        />
+      </Button>
     </ColorPicker>
   );
   return compact ? (
@@ -235,65 +244,22 @@ function Choice({
         aria-label={label}
         value={mixed ? undefined : value}
         placeholder={mixed ? "混合" : undefined}
-        options={options}
+        options={defaultFirst(options, defaultOptionValue(name)).map((option) => ({
+          ...option,
+          label:
+            option.value === defaultOptionValue(name) ? <>{option.label}（默认）</> : option.label,
+        }))}
+        labelRender={({ label, value }) =>
+          options.find((option) => option.value === value)?.label ??
+          label ??
+          SYSTEM_FONTS.find((font) => font.key === value)?.label ??
+          value
+        }
         style={{ width: compactWidth ?? 68 }}
         popupMatchSelectWidth={false}
         onOpenChange={(open) => popup(name, open)}
         onChange={change}
       />
-    </Group>
-  );
-}
-
-function PaletteGroup({
-  label,
-  colors,
-  favorites,
-  busy,
-  onCopy,
-  onFavorite,
-}: {
-  label: string;
-  colors: string[];
-  favorites: string[];
-  busy?: boolean;
-  onCopy?: (color: string) => void;
-  onFavorite?: (color: string, favorite: boolean) => void;
-}): React.JSX.Element {
-  return (
-    <Group label={label}>
-      <span className="palette-strip" aria-label={`${label}颜色`}>
-        {colors.length === 0 ? (
-          <span className="palette-strip__empty">—</span>
-        ) : (
-          colors.slice(0, 5).map((color) => {
-            const saved = favorites.includes(color);
-            return (
-              <span className="palette-strip__item" key={color}>
-                <button
-                  type="button"
-                  className="palette-strip__swatch"
-                  style={{ backgroundColor: color }}
-                  title={`复制 ${color}`}
-                  aria-label={`复制 ${color}`}
-                  disabled={busy}
-                  onClick={() => onCopy?.(color)}
-                />
-                <button
-                  type="button"
-                  className={`palette-strip__star${saved ? " is-saved" : ""}`}
-                  title={saved ? "取消收藏" : "收藏颜色"}
-                  aria-label={saved ? `取消收藏 ${color}` : `收藏 ${color}`}
-                  disabled={busy}
-                  onClick={() => onFavorite?.(color, !saved)}
-                >
-                  {saved ? "★" : "☆"}
-                </button>
-              </span>
-            );
-          })
-        )}
-      </span>
     </Group>
   );
 }
@@ -314,23 +280,27 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
     onPopupOpenChange,
     palette = { recent: [], favorites: [] },
     paletteBusy,
+    paletteLoading,
+    paletteSessionKey,
+    paletteError,
+    onPaletteReload,
     onPaletteCopy,
     onPaletteFavorite,
     selectedTools = [],
+    fontFavorites,
     style,
   },
   ref,
 ) {
   const opened = useRef(new Set<string>());
-  useEffect(() => () => onPopupOpenChange(false), [onPopupOpenChange]);
-  const popup = useCallback(
-    (key: string, open: boolean) => {
-      if (open) opened.current.add(key);
-      else opened.current.delete(key);
-      onPopupOpenChange(opened.current.size > 0);
-    },
-    [onPopupOpenChange],
-  );
+  const popupCallback = useRef(onPopupOpenChange);
+  popupCallback.current = onPopupOpenChange;
+  useEffect(() => () => popupCallback.current(false), []);
+  const popup = useCallback((key: string, open: boolean) => {
+    if (open) opened.current.add(key);
+    else opened.current.delete(key);
+    popupCallback.current(opened.current.size > 0);
+  }, []);
   const isMixed = (property: string) => settings.mixedProperties?.includes(property) ?? false;
   const previewChange = onPreviewChange ?? onChange;
   const fillColorChanges = (fillColor: string): Partial<ToolSettings> => ({
@@ -369,7 +339,7 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
   );
   const opacity = (
     <Choice
-      label="透明度"
+      label="不透明度"
       value={settings.opacity}
       options={OPACITIES}
       name={`${tool}-opacity`}
@@ -378,18 +348,21 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
       mixed={isMixed("opacity")}
     />
   );
-  const selectedKinds = [...new Set(selectedTools.filter((value): value is Exclude<AnnotTool, null> => value !== null))];
+  const selectedKinds = [
+    ...new Set(selectedTools.filter((value): value is Exclude<AnnotTool, null> => value !== null)),
+  ];
   const capabilities = excalidrawStyleCapabilities(selectedKinds);
   const mixedKinds = selectedKinds.length > 1;
   const sharedOptions = mixedKinds ? (
     <>
       {color}
-      {capabilities.strokeWidth && width}
       {capabilities.fill && (
         <>
           <Color
             label="填充"
             value={settings.fillColor}
+            empty={settings.fillStyle === "none"}
+            clear={() => onChange({ fillStyle: "none" })}
             name="shared-fill-color"
             change={(fillColor) => previewChange(fillColorChanges(fillColor))}
             commit={(fillColor) => onChange(fillColorChanges(fillColor))}
@@ -397,6 +370,11 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             palette={palette}
             compact
           />
+        </>
+      )}
+      {capabilities.strokeWidth && width}
+      {capabilities.fill && (
+        <>
           <Choice
             label="填充"
             value={settings.fillStyle}
@@ -421,8 +399,8 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             mixed={isMixed("lineStyle")}
           />
           <Choice
-            label="粗糙度"
-            value={settings.roughness}
+            label="笔触"
+            value={settings.roughness === 0 ? 0 : 2}
             options={[...ROUGHNESS_OPTIONS]}
             name="shared-roughness"
             change={(value) => onChange({ roughness: value as Roughness })}
@@ -442,16 +420,106 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
       onPointerDown={(e) => e.stopPropagation()}
     >
       {settings.mixedProperties?.length ? (
-        <span className="tool-options__mixed" title={`混合属性：${settings.mixedProperties.join("、")}`}>混合</span>
+        <span
+          className="tool-options__mixed"
+          title={`混合属性：${settings.mixedProperties.join("、")}`}
+        >
+          混合
+        </span>
       ) : null}
       {styleSaveFailed && (
         <span role="status" className="tool-options__hint">
-          样式保存失败
-          <button type="button" className="tool-options__retry" disabled={styleSaving} onClick={onRetryStyleSave}>重试</button>
+          保存失败
+          <Button type="link" size="small" loading={styleSaving} onClick={onRetryStyleSave}>
+            重试
+          </Button>
         </span>
       )}
-      {styleSaveAttempted && !styleSaveFailed && (
-        <span role="status" className="tool-options__hint">{styleSaving ? "保存中…" : "已保存"}</span>
+      {tool === "highlight" && (
+        <>
+          {color}
+          <Choice
+            label="宽度"
+            value={settings.highlightWidth}
+            options={[12, 16, 20, 24, 32, 48].map((value) => ({ value, label: `${value} px` }))}
+            name="highlight-width"
+            change={(value) => onChange({ highlightWidth: selectNumber(value) })}
+            popup={popup}
+          />
+          <Choice
+            label="不透明度"
+            value={Math.round(settings.highlightOpacity * 100)}
+            options={[20, 32, 50, 75].map((value) => ({ value, label: `${value}%` }))}
+            name="highlight-opacity"
+            change={(value) => onChange({ highlightOpacity: selectNumber(value) / 100 })}
+            popup={popup}
+          />
+        </>
+      )}
+      {tool === "number" && (
+        <>
+          <Color
+            label="背景色"
+            value={settings.numberStyle.backgroundColor}
+            name="number-background"
+            change={(backgroundColor) =>
+              previewChange({ numberStyle: { ...settings.numberStyle, backgroundColor } })
+            }
+            commit={(backgroundColor) =>
+              onChange({ numberStyle: { ...settings.numberStyle, backgroundColor } })
+            }
+            popup={popup}
+            palette={palette}
+          />
+          <Color
+            label="文字色"
+            value={settings.numberStyle.textColor}
+            name="number-text"
+            change={(textColor) =>
+              previewChange({ numberStyle: { ...settings.numberStyle, textColor } })
+            }
+            commit={(textColor) =>
+              onChange({ numberStyle: { ...settings.numberStyle, textColor } })
+            }
+            popup={popup}
+            palette={palette}
+          />
+          <Choice
+            label="大小"
+            value={settings.numberStyle.size}
+            options={[24, 32, 36, 40, 48, 64].map((value) => ({ value, label: `${value} px` }))}
+            name="number-size"
+            change={(value) =>
+              onChange({ numberStyle: { ...settings.numberStyle, size: selectNumber(value) } })
+            }
+            popup={popup}
+          />
+        </>
+      )}
+      {tool === "picker" && (
+        <>
+          <Choice
+            label="复制格式"
+            value={settings.pickerFormat}
+            options={FORMATS}
+            name="picker-format"
+            change={(value) =>
+              onChange({ pickerFormat: value as ScreenshotConfig["color_copy_format"] })
+            }
+            popup={popup}
+          />
+          <PaletteBrowser
+            key={paletteSessionKey}
+            palette={palette}
+            busy={paletteBusy}
+            loading={paletteLoading}
+            error={paletteError}
+            onReload={onPaletteReload}
+            onCopy={onPaletteCopy}
+            onFavorite={onPaletteFavorite}
+            onOpenChange={(open) => popup("palette-browser", open)}
+          />
+        </>
       )}
       {tool === "mosaic" && (
         <>
@@ -460,7 +528,15 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             value={settings.mosaicEffect}
             options={[
               { value: "pixelate", label: "像素块" },
-              { value: "blur", label: <span title={mosaicBlurSupported ? undefined : "当前环境不支持柔和模糊"}>柔和模糊</span>, disabled: !mosaicBlurSupported },
+              {
+                value: "blur",
+                label: (
+                  <span title={mosaicBlurSupported ? undefined : "当前环境不支持柔和模糊"}>
+                    柔和模糊
+                  </span>
+                ),
+                disabled: !mosaicBlurSupported,
+              },
             ]}
             name="mosaic-effect"
             compactWidth={98}
@@ -473,70 +549,83 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             options={[4, 8, 12, 16, 24, 32].map((value) => ({ value, label: `${value}px` }))}
             name="mosaic-strength"
             compactWidth={70}
-            change={(value) => onChange(settings.mosaicEffect === "blur"
-              ? { blurRadius: selectNumber(value) }
-              : { mosaicBlock: selectNumber(value) })}
+            change={(value) =>
+              onChange(
+                settings.mosaicEffect === "blur"
+                  ? { blurRadius: selectNumber(value) }
+                  : { mosaicBlock: selectNumber(value) },
+              )
+            }
             popup={popup}
           />
-          {!mosaicBlurSupported && <span role="status" className="tool-options__hint">当前环境不支持模糊，请使用像素块</span>}
-        </>
-      )}
-      {sharedOptions ? sharedOptions : (tool === "rect" || tool === "ellipse" || tool === "diamond") && (
-        <>
-          {color}
-          {width}
-          <Choice
-            label="样式"
-            value={settings.lineStyle}
-            options={[...LINE_STYLE_OPTIONS]}
-            name="frame-line-style"
-            compactWidth={76}
-            change={(value) => onChange({ lineStyle: value as LineStyle })}
-            popup={popup}
-            mixed={isMixed("lineStyle")}
-          />
-          <Color
-            label="填充"
-            value={settings.fillColor}
-            name="frame-fill-color"
-            change={(fillColor) => previewChange(fillColorChanges(fillColor))}
-            commit={(fillColor) => onChange(fillColorChanges(fillColor))}
-            popup={popup}
-            palette={palette}
-            compact
-          />
-          <Choice
-            label="填充"
-            value={settings.fillStyle}
-            options={[...FILL_STYLE_OPTIONS]}
-            name="frame-fill-style"
-            change={(value) => onChange({ fillStyle: value as FillStyle })}
-            popup={popup}
-            mixed={isMixed("fillStyle")}
-          />
-          <Choice
-            label="粗糙度"
-            value={settings.roughness}
-            options={[...ROUGHNESS_OPTIONS]}
-            name="frame-roughness"
-            change={(value) => onChange({ roughness: value as Roughness })}
-            popup={popup}
-            mixed={isMixed("roughness")}
-          />
-          {tool === "rect" && (
-            <Choice
-              label="边角"
-              value={settings.roundness}
-              options={ROUNDNESS_OPTIONS}
-              name="rectangle-roundness"
-              change={(value) => onChange({ roundness: value as ToolSettings["roundness"] })}
-              popup={popup}
-              mixed={isMixed("roundness")}
-            />
+          {!mosaicBlurSupported && (
+            <span role="status" className="tool-options__hint">
+              当前环境不支持模糊，请使用像素块
+            </span>
           )}
-          {opacity}
         </>
       )}
+      {sharedOptions
+        ? sharedOptions
+        : (tool === "rect" || tool === "ellipse" || tool === "diamond") && (
+            <>
+              {color}
+              <Color
+                label="填充"
+                value={settings.fillColor}
+                empty={settings.fillStyle === "none"}
+                clear={() => onChange({ fillStyle: "none" })}
+                name="frame-fill-color"
+                change={(fillColor) => previewChange(fillColorChanges(fillColor))}
+                commit={(fillColor) => onChange(fillColorChanges(fillColor))}
+                popup={popup}
+                palette={palette}
+                compact
+              />
+
+              {width}
+              <Choice
+                label="样式"
+                value={settings.lineStyle}
+                options={[...LINE_STYLE_OPTIONS]}
+                name="frame-line-style"
+                compactWidth={76}
+                change={(value) => onChange({ lineStyle: value as LineStyle })}
+                popup={popup}
+                mixed={isMixed("lineStyle")}
+              />
+              <Choice
+                label="填充"
+                value={settings.fillStyle}
+                options={[...FILL_STYLE_OPTIONS]}
+                name="frame-fill-style"
+                change={(value) => onChange({ fillStyle: value as FillStyle })}
+                popup={popup}
+                mixed={isMixed("fillStyle")}
+              />
+              <Choice
+                label="笔触"
+                value={settings.roughness === 0 ? 0 : 2}
+                options={[...ROUGHNESS_OPTIONS]}
+                name="frame-roughness"
+                change={(value) => onChange({ roughness: value as Roughness })}
+                popup={popup}
+                mixed={isMixed("roughness")}
+              />
+              {tool === "rect" && (
+                <Choice
+                  label="边角"
+                  value={settings.roundness}
+                  options={ROUNDNESS_OPTIONS}
+                  name="rectangle-roundness"
+                  change={(value) => onChange({ roundness: value as ToolSettings["roundness"] })}
+                  popup={popup}
+                  mixed={isMixed("roundness")}
+                />
+              )}
+              {opacity}
+            </>
+          )}
       {!sharedOptions && (tool === "arrow" || tool === "line") && (
         <>
           {color}
@@ -558,6 +647,7 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
                 value={settings.startArrowhead}
                 options={[...ARROWHEAD_OPTIONS]}
                 name="arrow-start"
+                compactWidth={94}
                 change={(value) => onChange({ startArrowhead: value as Arrowhead })}
                 popup={popup}
                 mixed={isMixed("startArrowhead")}
@@ -567,6 +657,7 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
                 value={settings.endArrowhead}
                 options={[...ARROWHEAD_OPTIONS]}
                 name="arrow-end"
+                compactWidth={94}
                 change={(value) => onChange({ endArrowhead: value as Arrowhead })}
                 popup={popup}
                 mixed={isMixed("endArrowhead")}
@@ -584,8 +675,8 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             mixed={isMixed("lineStyle")}
           />
           <Choice
-            label="粗糙度"
-            value={settings.roughness}
+            label="笔触"
+            value={settings.roughness === 0 ? 0 : 2}
             options={[...ROUGHNESS_OPTIONS]}
             name={`${tool}-roughness`}
             change={(value) => onChange({ roughness: value as Roughness })}
@@ -613,12 +704,13 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
       )}
       {!sharedOptions && tool === "text" && (
         <>
+          {color}
           <Choice
             label="字体"
             value={settings.textStyle.font}
-            options={FONT_OPTIONS}
+            options={systemFontOptions(fontFavorites)}
             name="text-font"
-            compactWidth={104}
+            compactWidth={132}
             change={(value) =>
               onChange({ textStyle: { ...settings.textStyle, font: value as TextStyle["font"] } })
             }
@@ -648,16 +740,18 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             options={TEXT_ALIGN_OPTIONS}
             name="text-align"
             compactWidth={70}
-            change={(value) => onChange({
-              textStyle: {
-                ...settings.textStyle,
-                textAlign: value as TextStyle["textAlign"],
-              },
-            })}
+            change={(value) =>
+              onChange({
+                textStyle: {
+                  ...settings.textStyle,
+                  textAlign: value as TextStyle["textAlign"],
+                },
+              })
+            }
             popup={popup}
             mixed={isMixed("textAlign")}
           />
-          {color}
+
           {opacity}
         </>
       )}

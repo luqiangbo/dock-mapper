@@ -1,4 +1,5 @@
 import type { TextStyle } from "./annotationTypes";
+import { SYSTEM_FONTS } from "./systemFonts";
 
 export const TEXT_SIZES = [14, 16, 20, 24, 32, 40, 48] as const;
 export type TextSize = (typeof TEXT_SIZES)[number];
@@ -47,5 +48,8 @@ const FONT_FAMILIES: Record<TextStyle["font"], string> = {
 };
 
 export function fontFamily(font: TextStyle["font"]): string {
-  return FONT_FAMILIES[font];
+  const system = SYSTEM_FONTS.find((entry) => entry.key === font);
+  return system
+    ? `'${system.family}', 'Microsoft YaHei', sans-serif`
+    : (FONT_FAMILIES[font] ?? "'Microsoft YaHei', sans-serif");
 }

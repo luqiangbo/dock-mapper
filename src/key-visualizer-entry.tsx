@@ -1,3 +1,5 @@
+import "./utils/disableBrowserContextMenu";
+import DefaultsGate from "./DefaultsGate";
 import { useWindowTheme } from "./hooks/useWindowTheme";
 import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
@@ -174,6 +176,8 @@ function KeyVisualizerWindow() {
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <KeyVisualizerWindow />
+    <DefaultsGate secondary>
+      <KeyVisualizerWindow />
+    </DefaultsGate>
   </React.StrictMode>,
 );

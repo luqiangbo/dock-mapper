@@ -23,7 +23,7 @@ export type {
 } from "../../api/screenshotTypes";
 
 export interface Api {
-  closeOverlay: () => void;
+  closeOverlay: () => Promise<void>;
   showCaptureOverlay: (generation?: number) => Promise<boolean>;
   overlayReady: (label: string) => Promise<void>;
   getFullScreenshot: (label: string) => Promise<FullScreenshot>;
@@ -32,7 +32,8 @@ export interface Api {
     label: string,
     trace?: CaptureSelectionTrace,
   ) => Promise<boolean>;
-  onCaptureReady: (callback: (label: string) => void) => () => void;
+  onCaptureReady: (callback: (label: string) => void) => Promise<() => void>;
+  reportCaptureFailed: (label: string, error: string, generation?: number) => Promise<boolean>;
   checkScreenPermission: () => Promise<{ granted: boolean; status: string }>;
   uploadImage: (png: Uint8Array) => Promise<string>;
   releaseImage: (imageId: string) => Promise<void>;
@@ -55,27 +56,20 @@ export interface Api {
   createScreenshotHistory: (resultImageId: string) => Promise<ScreenshotHistorySummary>;
 }
 
-function subscribe<T>(event: string, callback: (payload: T) => void): () => void {
-  let disposed = false;
-  let unlisten: UnlistenFn | undefined;
-  void listen<T>(event, ({ payload }) => callback(payload)).then((off) => {
-    if (disposed) off();
-    else unlisten = off;
-  });
-  return () => {
-    disposed = true;
-    unlisten?.();
-  };
+function subscribe<T>(event: string, callback: (payload: T) => void): Promise<UnlistenFn> {
+  return listen<T>(event, ({ payload }) => callback(payload));
 }
 
 export const api: Api = {
-  closeOverlay: () => void invokeCommand("close_overlay"),
+  closeOverlay: () => invokeCommand("close_overlay"),
   showCaptureOverlay: (generation) => invokeCommand("show_capture_overlay", { generation }),
   overlayReady: (label) => invokeCommand("overlay_ready", { label }),
   getFullScreenshot: (label) => invokeCommand("get_full_screenshot", { label }),
   reportCaptureRendered: (generation, label, trace) =>
     invokeCommand("report_capture_rendered", { generation, label, trace }),
   onCaptureReady: (callback) => subscribe("capture-ready", callback),
+  reportCaptureFailed: (label, error, generation) =>
+    invokeCommand("report_capture_failed", { label, error, generation }),
   checkScreenPermission: () => invokeCommand("check_screen_permission"),
   uploadImage: (png) => invokeCommand("upload_image", png),
   releaseImage: (imageId) => invokeCommand("release_image", { imageId }),

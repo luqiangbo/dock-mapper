@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { defaultScreenshotTools, normalizeScreenshotTools } from "../../../utils/screenshotTools";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MAIN_EVENTS, paletteApi } from "../../../api/commands";
+import { DEFAULT_FONT_FAVORITES, normalizeFontFavorites } from "../components/systemFonts";
 import type {
   AnnotationOutlineConfig,
   ColorPaletteConfig,
@@ -9,6 +10,7 @@ import type {
   ScreenshotConfig,
 } from "../../../types";
 import type { CaptureSizeUnit } from "../components/selectionSizeGeometry";
+import { createPaletteReadGuard } from "../components/paletteBrowserState";
 import {
   cloneAnnotationStyles,
   DEFAULT_ANNOTATION_STYLES,
@@ -16,10 +18,20 @@ import {
 
 interface OverlayPreferencesOptions {
   onError: (message: string) => void;
+  getGeneration?: () => number;
 }
 
-export function useOverlayPreferences({ onError }: OverlayPreferencesOptions) {
+export function useOverlayPreferences({ onError, getGeneration }: OverlayPreferencesOptions) {
   const mounted = useRef(true);
+  const generationReader = useRef(getGeneration);
+  generationReader.current = getGeneration;
+  const generation = () => generationReader.current?.() ?? 0;
+  const paletteReads = useRef(
+    createPaletteReadGuard(
+      () => generationReader.current?.() ?? 0,
+      () => mounted.current,
+    ),
+  ).current;
   const paletteTail = useRef<Promise<void>>(Promise.resolve());
   const palettePending = useRef(0);
   const configRef = useRef<ScreenshotConfig | null>(null);
@@ -32,6 +44,8 @@ export function useOverlayPreferences({ onError }: OverlayPreferencesOptions) {
   const [styleSaveAttempted, setStyleSaveAttempted] = useState(false);
   const [palette, setPalette] = useState<ColorPaletteConfig>({ recent: [], favorites: [] });
   const [paletteBusy, setPaletteBusy] = useState(false);
+  const [paletteLoading, setPaletteLoading] = useState(false);
+  const [paletteError, setPaletteError] = useState<string | null>(null);
   const [pickerFormat, setPickerFormat] = useState<ScreenshotConfig["color_copy_format"]>("hex");
   const [annotationColor, setAnnotationColor] = useState("#e03131");
   const [annotationOutline, setAnnotationOutline] = useState<AnnotationOutlineConfig>({
@@ -44,6 +58,7 @@ export function useOverlayPreferences({ onError }: OverlayPreferencesOptions) {
   );
   const [captureSizeUnit, setCaptureSizeUnit] = useState<CaptureSizeUnit>("px");
   const [toolbarTools, setToolbarTools] = useState(defaultScreenshotTools);
+  const [fontFavorites, setFontFavorites] = useState(DEFAULT_FONT_FAVORITES);
   const [configSaving, setConfigSaving] = useState(false);
 
   useEffect(() => {
@@ -55,14 +70,24 @@ export function useOverlayPreferences({ onError }: OverlayPreferencesOptions) {
   }, []);
 
   const reloadPalette = useCallback(async (): Promise<void> => {
+    const request = paletteReads.begin();
+    setPaletteLoading(true);
     try {
       await paletteTail.current;
+      if (!paletteReads.current(request)) return;
       const next = await paletteApi.get();
-      if (mounted.current) setPalette(next);
-    } catch (cause) {
-      if (mounted.current) {
-        onError(`颜色列表读取失败：${cause instanceof Error ? cause.message : String(cause)}`);
+      if (paletteReads.current(request)) {
+        setPalette(next);
+        setPaletteError(null);
       }
+    } catch (cause) {
+      if (paletteReads.current(request)) {
+        const message = `颜色列表读取失败：${cause instanceof Error ? cause.message : String(cause)}`;
+        setPaletteError(message);
+        onError(message);
+      }
+    } finally {
+      if (paletteReads.current(request)) setPaletteLoading(false);
     }
   }, [onError]);
 
@@ -71,6 +96,9 @@ export function useOverlayPreferences({ onError }: OverlayPreferencesOptions) {
       operation: () => Promise<ColorPaletteConfig>,
       failureMessage: string,
     ): Promise<boolean> => {
+      const capture = generation();
+      paletteReads.invalidate();
+      setPaletteLoading(false);
       palettePending.current += 1;
       setPaletteBusy(true);
       const mutation = paletteTail.current.then(operation, operation);
@@ -80,11 +108,16 @@ export function useOverlayPreferences({ onError }: OverlayPreferencesOptions) {
       );
       try {
         const next = await mutation;
-        if (mounted.current) setPalette(next);
+        if (mounted.current && capture === generation()) {
+          setPalette(next);
+          setPaletteError(null);
+        }
         return true;
       } catch (cause) {
-        if (mounted.current) {
-          onError(`${failureMessage}：${cause instanceof Error ? cause.message : String(cause)}`);
+        if (mounted.current && capture === generation()) {
+          const message = `${failureMessage}：${cause instanceof Error ? cause.message : String(cause)}`;
+          setPaletteError(message);
+          onError(message);
         }
         return false;
       } finally {
@@ -109,6 +142,7 @@ export function useOverlayPreferences({ onError }: OverlayPreferencesOptions) {
           setAnnotationColor(next.annotation_color);
           setAnnotationOutline(next.annotation_outline);
           setAnnotationStyles(cloneAnnotationStyles(next.annotation_styles));
+          setFontFavorites(normalizeFontFavorites(next.text_font_favorites));
           setCaptureSizeUnit(next.capture_size_unit);
           setToolbarTools(normalizeScreenshotTools(next.toolbar_tools));
         }
@@ -153,7 +187,8 @@ export function useOverlayPreferences({ onError }: OverlayPreferencesOptions) {
         if (mounted.current && revision === configRevision.current) {
           setAnnotationStyles(cloneAnnotationStyles(next));
         }
-        if (mounted.current && currentStyleRevision === styleRevision.current) setStyleSaveFailed(false);
+        if (mounted.current && currentStyleRevision === styleRevision.current)
+          setStyleSaveFailed(false);
       });
       configTail.current = mutation.then(
         () => undefined,
@@ -262,6 +297,7 @@ export function useOverlayPreferences({ onError }: OverlayPreferencesOptions) {
         setAnnotationColor(config.annotation_color);
         setAnnotationOutline(config.annotation_outline);
         setAnnotationStyles(cloneAnnotationStyles(config.annotation_styles));
+        setFontFavorites(normalizeFontFavorites(config.text_font_favorites));
         setCaptureSizeUnit(config.capture_size_unit);
         if (toolbarReadRevision === toolbarRevision.current)
           setToolbarTools(normalizeScreenshotTools(config.toolbar_tools));
@@ -281,7 +317,17 @@ export function useOverlayPreferences({ onError }: OverlayPreferencesOptions) {
     const receive = (config: ScreenshotConfig) => {
       if (disposed) return;
       toolbarRevision.current += 1;
-      configRef.current = { ...(configRef.current ?? config), toolbar_tools: config.toolbar_tools };
+      configRef.current = {
+        ...(configRef.current ?? config),
+        toolbar_tools: config.toolbar_tools,
+        text_font_favorites: config.text_font_favorites,
+      };
+      setFontFavorites(normalizeFontFavorites(config.text_font_favorites));
+      if (configPending.current === 0)
+        setAnnotationStyles((current) => ({
+          ...current,
+          text: { ...current.text, font_family: config.annotation_styles.text.font_family },
+        }));
       setToolbarTools(normalizeScreenshotTools(config.toolbar_tools));
     };
     void listen<ScreenshotConfig>(MAIN_EVENTS.screenshotConfigChanged, ({ payload }) => {
@@ -312,10 +358,13 @@ export function useOverlayPreferences({ onError }: OverlayPreferencesOptions) {
     styleSaveAttempted,
     palette,
     paletteBusy,
+    paletteLoading,
+    paletteError,
     pickerFormat,
     annotationColor,
     annotationOutline,
     annotationStyles,
+    fontFavorites,
     captureSizeUnit,
     toolbarTools,
     configSaving,

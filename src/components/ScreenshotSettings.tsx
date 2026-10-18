@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { captureStartup } from "./captureStartupRuntime";
+import { captureStarting } from "./captureStartup";
 import { listen } from "@tauri-apps/api/event";
 import {
   Alert,
@@ -21,6 +23,10 @@ import styles from "./components.module.scss";
 import ScreenshotHistory from "./ScreenshotHistory";
 import ShortcutSelect from "./ShortcutSelect";
 import ScreenshotToolbarSettings from "./ScreenshotToolbarSettings";
+import {
+  SYSTEM_FONTS,
+  DEFAULT_FONT_FAVORITES,
+} from "../screenshots/screenshot/components/systemFonts";
 import { errorMessage, MAIN_EVENTS, screenshotSettingsApi } from "../api/commands";
 import { resetShortcutConfig, shortcutStatusDisplay } from "../utils/shortcutStatus";
 import {
@@ -29,6 +35,7 @@ import {
   type ScreenshotShortcutField,
 } from "./screenshotSettingsSave";
 import { useQueuedAutosave } from "../hooks/useQueuedAutosave";
+import { PageScope, usePageActive, usePageReadGuard, usePageRefresh } from "./PageActivity";
 import { takeDetachedAutosaveError, waitForPendingAutosave } from "../hooks/queuedAutosave";
 
 const { Text } = Typography;
@@ -51,6 +58,14 @@ export default function ScreenshotSettings({
   activeTab,
   onActiveTabChange,
 }: ScreenshotSettingsProps) {
+  const captureSnapshot = useSyncExternalStore(
+    captureStartup.subscribe,
+    captureStartup.getSnapshot,
+  );
+  const active = usePageActive();
+  const reads = usePageReadGuard();
+  const statusReads = usePageReadGuard();
+  const loaded = useRef(false);
   const { notification } = AntApp.useApp();
   const screens = Grid.useBreakpoint();
   const [form] = Form.useForm<ScreenshotConfig>();
@@ -62,46 +77,55 @@ export default function ScreenshotSettings({
   const values = Form.useWatch([], form);
 
   const refreshStatuses = useCallback(async () => {
+    if (!active) return;
+    const request = statusReads.begin();
     try {
-      setShortcutStatuses(await screenshotSettingsApi.shortcutStatuses());
+      const statuses = await screenshotSettingsApi.shortcutStatuses();
+      if (statusReads.isCurrent(request)) setShortcutStatuses(statuses);
     } catch (error) {
+      if (!statusReads.isCurrent(request)) return;
       setShortcutStatuses([]);
       notification.error({
         message: "读取快捷键状态失败",
         description: errorMessage(error),
       });
     }
-  }, [notification]);
+  }, [notification, active, statusReads]);
 
   const {
     schedule: queueSave,
     invalidate: invalidateSave,
     isCurrent: isSaveCurrent,
-  } = useQueuedAutosave({
-    key: "screenshot-settings",
-    delayMs: 0,
-    save: screenshotSettingsApi.update,
-    onSavingChange: setSaving,
-    onSuccess: async (config, { latest }) => {
-      setSaved(config);
-      if (!latest) return;
-      form.setFieldsValue(config);
-      setSaveError(null);
-      await refreshStatuses();
+  } = useQueuedAutosave(
+    {
+      key: "screenshot-settings",
+      delayMs: 0,
+      save: screenshotSettingsApi.update,
+      onSavingChange: setSaving,
+      onSuccess: async (config, { latest }) => {
+        setSaved(config);
+        if (!latest) return;
+        form.setFieldsValue(config);
+        setSaveError(null);
+        await refreshStatuses();
+      },
+      onError: (error, { latest }) => {
+        if (latest) setSaveError(errorMessage(error));
+      },
+      onDetachedError: (error) =>
+        notification.error({
+          message: "截图设置未保存",
+          description: errorMessage(error),
+        }),
     },
-    onError: (error, { latest }) => {
-      if (latest) setSaveError(errorMessage(error));
-    },
-    onDetachedError: (error) =>
-      notification.error({
-        message: "截图设置未保存",
-        description: errorMessage(error),
-      }),
-  });
+    activeTab === "settings",
+  );
 
   const load = useCallback(async () => {
+    const request = reads.begin();
+    const statusRequest = statusReads.begin();
     const revision = invalidateSave();
-    setLoading(true);
+    if (!loaded.current) setLoading(true);
     setSaveError(null);
     try {
       await waitForPendingAutosave("screenshot-settings");
@@ -109,24 +133,22 @@ export default function ScreenshotSettings({
         screenshotSettingsApi.get(),
         screenshotSettingsApi.shortcutStatuses(),
       ]);
-      if (!isSaveCurrent(revision)) return;
+      if (!reads.isCurrent(request) || !isSaveCurrent(revision)) return;
+      loaded.current = true;
       const pendingError = takeDetachedAutosaveError("screenshot-settings");
       if (pendingError) setSaveError(errorMessage(pendingError));
       setSaved(config);
       form.setFieldsValue(config);
-      setShortcutStatuses(statuses);
+      if (statusReads.isCurrent(statusRequest)) setShortcutStatuses(statuses);
     } catch (error) {
-      if (isSaveCurrent(revision)) setSaveError(errorMessage(error));
+      if (reads.isCurrent(request) && isSaveCurrent(revision)) setSaveError(errorMessage(error));
     } finally {
-      if (isSaveCurrent(revision)) setLoading(false);
+      if (reads.isCurrent(request)) setLoading(false);
     }
-  }, [form, invalidateSave, isSaveCurrent]);
+  }, [form, invalidateSave, isSaveCurrent, reads, statusReads]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
-
-  useEffect(() => {
+    if (!active) return;
     let disposed = false;
     let off: (() => void) | undefined;
     void listen(MAIN_EVENTS.shortcutStatusChanged, () => void refreshStatuses())
@@ -141,12 +163,14 @@ export default function ScreenshotSettings({
       disposed = true;
       off?.();
     };
-  }, [notification, refreshStatuses]);
+  }, [notification, refreshStatuses, active]);
 
   const dirty = useMemo(
     () => !!saved && !!values && JSON.stringify(values) !== JSON.stringify(saved),
     [saved, values],
   );
+  usePageRefresh(load, dirty || saving || (!!saved && !!saveError));
+  usePageRefresh(refreshStatuses);
 
   const validateShortcuts = useCallback(
     (next: ScreenshotConfig): boolean => {
@@ -175,6 +199,13 @@ export default function ScreenshotSettings({
     (next: ScreenshotConfig, delay = 0) => {
       invalidateSave();
       setSaveError(null);
+      if (
+        next.text_font_favorites &&
+        (next.text_font_favorites.length === 0 || next.text_font_favorites.length > 10)
+      ) {
+        setSaveError("请保留 1～10 个常用字体");
+        return;
+      }
       if (!validateShortcuts(next)) return;
       queueSave(next, delay);
     },
@@ -251,6 +282,7 @@ export default function ScreenshotSettings({
             </div>
             <Button
               type="primary"
+              loading={captureStarting(captureSnapshot)}
               onClick={() =>
                 void screenshotSettingsApi.start().catch((error) =>
                   notification.error({
@@ -342,6 +374,19 @@ export default function ScreenshotSettings({
           <Form.Item name="filename_prefix" label="文件名前缀">
             <Input />
           </Form.Item>
+          <Form.Item
+            name="text_font_favorites"
+            label="截图常用字体（最多 10 个）"
+            initialValue={DEFAULT_FONT_FAVORITES}
+            extra="优先使用本机已安装字体；未安装的字体会由系统回退显示。"
+          >
+            <Select
+              mode="multiple"
+              maxCount={10}
+              optionFilterProp="label"
+              options={SYSTEM_FONTS.map((font) => ({ value: font.key, label: font.label }))}
+            />
+          </Form.Item>
           {saveError && (
             <Alert
               type="error"
@@ -386,11 +431,24 @@ export default function ScreenshotSettings({
   return (
     <div className={styles.page}>
       <Tabs
+        destroyOnHidden={false}
         activeKey={activeTab}
         onChange={(key) => onActiveTabChange(key as "history" | "settings")}
         items={[
-          { key: "history", label: "截图历史", children: <ScreenshotHistory /> },
-          { key: "settings", label: "截图设置", children: settings },
+          {
+            key: "history",
+            label: "截图历史",
+            children: (
+              <PageScope active={activeTab === "history"}>
+                <ScreenshotHistory />
+              </PageScope>
+            ),
+          },
+          {
+            key: "settings",
+            label: "截图设置",
+            children: <PageScope active={activeTab === "settings"}>{settings}</PageScope>,
+          },
         ]}
       />
     </div>

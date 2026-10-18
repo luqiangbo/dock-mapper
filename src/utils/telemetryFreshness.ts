@@ -8,9 +8,13 @@ export function telemetryFreshness(lastReceivedAt: number | null, now: number): 
   return now - lastReceivedAt > TELEMETRY_STALE_AFTER_MS ? "stale" : "live";
 }
 
-export function useTelemetryFreshness(lastReceivedAt: number | null): TelemetryFreshness {
+export function useTelemetryFreshness(
+  lastReceivedAt: number | null,
+  active = true,
+): TelemetryFreshness {
   const [, forceRefresh] = useState(0);
   useEffect(() => {
+    if (!active) return;
     const refreshWhenVisible = () => forceRefresh((value) => value + 1);
     window.addEventListener("visibilitychange", refreshWhenVisible);
     window.addEventListener("focus", refreshWhenVisible);
@@ -27,6 +31,6 @@ export function useTelemetryFreshness(lastReceivedAt: number | null): TelemetryF
       window.removeEventListener("visibilitychange", refreshWhenVisible);
       window.removeEventListener("focus", refreshWhenVisible);
     };
-  }, [lastReceivedAt]);
+  }, [lastReceivedAt, active]);
   return telemetryFreshness(lastReceivedAt, Date.now());
 }

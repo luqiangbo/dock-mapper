@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Button, Dropdown, Slider } from "antd";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { copyBinaryPayload } from "../utils/binaryPayload";
@@ -6,7 +7,6 @@ import { invokeCommand, type PinActionCommand } from "../../../api/ipc";
 import type { PinOptions } from "../../../api/screenshotTypes";
 import { usePinZoomController } from "../hooks/usePinZoomController";
 import { createLatestWriter } from "../../../utils/latestWriter";
-import { clampMenuPosition } from "./menuGeometry";
 
 export default function PinImage(): React.JSX.Element {
   const pinId = new URLSearchParams(window.location.search).get("id") ?? getCurrentWindow().label;
@@ -20,10 +20,8 @@ export default function PinImage(): React.JSX.Element {
     opacity: 1,
     locked: false,
   });
-  const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const imageUrlRef = useRef("");
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [menuLayout, setMenuLayout] = useState({ left: 8, top: 8 });
   const mountedRef = useRef(true);
   const confirmedOptionsRef = useRef(options);
   const draftOptionsRef = useRef<PinOptions | null>(null);
@@ -63,32 +61,9 @@ export default function PinImage(): React.JSX.Element {
       writer.cancelPending();
     };
   }, [writer]);
-  useLayoutEffect(() => {
-    if (!menuPosition || !menuRef.current) return;
-    const measure = () => {
-      const menu = menuRef.current;
-      if (!menu) return;
-      const rect = menu.getBoundingClientRect();
-      const next = clampMenuPosition(menuPosition, rect, {
-        width: window.innerWidth,
-        height: window.innerHeight,
-      });
-      setMenuLayout((previous) =>
-        previous.left === next.left && previous.top === next.top ? previous : next,
-      );
-    };
-    const observer = new ResizeObserver(measure);
-    observer.observe(menuRef.current);
-    measure();
-    window.addEventListener("resize", measure);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", measure);
-    };
-  }, [menuPosition]);
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMenuPosition(null);
+      if (event.key === "Escape") setMenuOpen(false);
     };
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
@@ -184,8 +159,8 @@ export default function PinImage(): React.JSX.Element {
   }, [pinId, writer, reloadAttempt]);
 
   const startDragging = (event: React.PointerEvent<HTMLDivElement>): void => {
-    if (menuPosition && !(event.target as HTMLElement).closest(".pin-menu")) {
-      setMenuPosition(null);
+    if (menuOpen && !(event.target as HTMLElement).closest(".pin-menu")) {
+      setMenuOpen(false);
       return;
     }
     if (
@@ -211,67 +186,47 @@ export default function PinImage(): React.JSX.Element {
   const runPinCommand = async (command: PinActionCommand): Promise<void> => {
     try {
       await invokeCommand(command, { id: pinId });
-      if (command !== "close_pin_window") setMenuPosition(null);
+      if (command !== "close_pin_window") setMenuOpen(false);
     } catch (error) {
       setLoadError(`贴图操作失败：${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
   return (
-    <div
-      className={`pin-wrap${loadError || zoomError || optionsError ? " pin-wrap-error" : ""}`}
-      onPointerDown={startDragging}
-      onWheel={scaleAtPointer}
-      onContextMenu={(event) => {
-        event.preventDefault();
-        setMenuPosition({
-          left: event.clientX,
-          top: event.clientY,
-        });
+    <Dropdown
+      trigger={["contextMenu"]}
+      open={menuOpen}
+      onOpenChange={(open, info) => {
+        if (info.source === "trigger") setMenuOpen(open);
       }}
-    >
-      {imageUrl ? (
-        <img
-          src={imageUrl}
-          draggable={false}
-          style={{ opacity: options.opacity }}
-          onLoad={() => {
-            setLoadError("");
-            void invokeCommand("pin_image_ready", { id: pinId }).catch((error) => {
-              setLoadError(
-                `贴图显示失败：${error instanceof Error ? error.message : String(error)}`,
-              );
-            });
-          }}
-          onError={() => setLoadError("贴图加载失败：无法解码 PNG 图片")}
-        />
-      ) : null}
-      {options.locked && <span className="pin-lock-status">已锁定</span>}
-      {loadError || zoomError || optionsError ? (
-        <div className="pin-load-error" role="alert">
-          {loadError || zoomError || optionsError}
-          {(loadError || (optionsError && !optionsReady)) && (
-            <button
-              type="button"
-              onClick={() => {
-                setLoadError("");
-                setReloadAttempt((attempt) => attempt + 1);
-              }}
-            >
-              重新读取
-            </button>
-          )}
-        </div>
-      ) : null}
-      {menuPosition ? (
+      autoFocus
+      menu={{
+        selectable: false,
+        items: [
+          {
+            key: "lock",
+            label: options.locked ? "解除锁定" : "锁定位置",
+            disabled: !optionsReady,
+            onClick: () => updateOptions({ ...options, locked: !options.locked }),
+          },
+          { key: "copy", label: "复制图片", onClick: () => void runPinCommand("copy_pin_image") },
+          { key: "save", label: "保存图片", onClick: () => void runPinCommand("save_pin_image") },
+          {
+            key: "close",
+            label: "关闭贴图",
+            danger: true,
+            onClick: () => void runPinCommand("close_pin_window"),
+          },
+        ],
+      }}
+      popupRender={(menu) => (
         <div
           className="pin-menu"
-          ref={menuRef}
-          style={menuLayout}
           onPointerDown={(event) => event.stopPropagation()}
+          onWheel={(event) => event.stopPropagation()}
         >
-          <label>
-            <span role="status">
+          <div className="pin-menu__settings">
+            <span role="status" aria-live="polite">
               {optionsError
                 ? optionsReady
                   ? "保存失败"
@@ -283,56 +238,81 @@ export default function PinImage(): React.JSX.Element {
                     : "已保存"}
             </span>
             {optionsError && draftOptionsRef.current && (
-              <button
-                type="button"
+              <Button
+                size="small"
+                loading={savingOptions}
                 onClick={() => {
                   if (draftOptionsRef.current) updateOptions(draftOptionsRef.current);
                 }}
               >
                 重试保存
-              </button>
+              </Button>
             )}
-            <span>透明度 {Math.round(options.opacity * 100)}%</span>
-            <input
-              type="range"
-              min="20"
-              max="100"
-              step="5"
+            <span id="pin-opacity-label">透明度 {Math.round(options.opacity * 100)}%</span>
+            <Slider
+              ariaLabelledByForHandle="pin-opacity-label"
+              min={20}
+              max={100}
+              step={5}
               disabled={!optionsReady}
               value={Math.round(options.opacity * 100)}
-              onChange={(event) =>
-                void updateOptions({ ...options, opacity: Number(event.target.value) / 100 })
-              }
+              onChange={(value) => updateOptions({ ...options, opacity: value / 100 })}
             />
-          </label>
-          <button
-            type="button"
-            disabled={!optionsReady}
-            onClick={() => void updateOptions({ ...options, locked: !options.locked })}
-          >
-            {options.locked ? "解除锁定" : "锁定位置"}
-          </button>
-          <button type="button" onClick={() => void runPinCommand("copy_pin_image")}>
-            复制图片
-          </button>
-          <button type="button" onClick={() => void runPinCommand("save_pin_image")}>
-            保存图片
-          </button>
-          <button type="button" onClick={() => void runPinCommand("close_pin_window")}>
-            关闭贴图
-          </button>
+          </div>
+          {menu}
         </div>
-      ) : null}
-      <button
-        type="button"
-        className="pin-close"
-        aria-label="关闭贴图"
-        title="关闭贴图"
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={() => void runPinCommand("close_pin_window")}
+      )}
+    >
+      <div
+        className={`pin-wrap${loadError || zoomError || optionsError ? " pin-wrap-error" : ""}`}
+        onPointerDown={startDragging}
+        onWheel={scaleAtPointer}
       >
-        ×
-      </button>
-    </div>
+        {imageUrl ? (
+          <img
+            src={imageUrl}
+            draggable={false}
+            style={{ opacity: options.opacity }}
+            onLoad={() => {
+              setLoadError("");
+              void invokeCommand("pin_image_ready", { id: pinId }).catch((error) => {
+                setLoadError(
+                  `贴图显示失败：${error instanceof Error ? error.message : String(error)}`,
+                );
+              });
+            }}
+            onError={() => setLoadError("贴图加载失败：无法解码 PNG 图片")}
+          />
+        ) : null}
+        {options.locked && <span className="pin-lock-status">已锁定</span>}
+        {loadError || zoomError || optionsError ? (
+          <div className="pin-load-error" role="alert">
+            {loadError || zoomError || optionsError}
+            {(loadError || (optionsError && !optionsReady)) && (
+              <Button
+                size="small"
+                onClick={() => {
+                  setLoadError("");
+                  setReloadAttempt((attempt) => attempt + 1);
+                }}
+              >
+                重新读取
+              </Button>
+            )}
+          </div>
+        ) : null}
+        <Button
+          type="text"
+          shape="circle"
+          className="pin-close"
+          aria-label="关闭贴图"
+          title="关闭贴图"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={() => void runPinCommand("close_pin_window")}
+        >
+          ×
+        </Button>
+      </div>
+    </Dropdown>
   );
 }

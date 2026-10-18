@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { createQueuedAutosave, type QueueOptions } from "./queuedAutosave";
+import { usePageActive } from "../components/PageActivity";
 
 export interface AutosaveResultContext {
   latest: boolean;
@@ -8,7 +9,14 @@ export interface AutosaveResultContext {
 interface QueuedAutosaveOptions<Value, Result> extends QueueOptions<Value, Result> {}
 
 /** Debounces drafts and flushes pending writes when a settings page unmounts. */
-export function useQueuedAutosave<Value, Result>(options: QueuedAutosaveOptions<Value, Result>) {
+export function useQueuedAutosave<Value, Result>(
+  options: QueuedAutosaveOptions<Value, Result>,
+  enabled = true,
+) {
+  const pageActive = usePageActive();
+  const active = pageActive && enabled;
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const optionsRef = useRef(options);
   optionsRef.current = options;
   const controllerRef = useRef<ReturnType<typeof createQueuedAutosave<Value, Result>> | null>(null);
@@ -17,19 +25,28 @@ export function useQueuedAutosave<Value, Result>(options: QueuedAutosaveOptions<
       ...options,
       save: (value) => optionsRef.current.save(value),
       onSuccess: (result, context) => optionsRef.current.onSuccess(result, context),
-      onError: (error, context) => optionsRef.current.onError(error, context),
+      onError: (error, context) => {
+        optionsRef.current.onError(error, context);
+        if (!activeRef.current) optionsRef.current.onDetachedError(error);
+      },
       onDetachedError: (error) => optionsRef.current.onDetachedError(error),
       onSavingChange: (saving) => optionsRef.current.onSavingChange(saving),
     });
   }
   const controller = controllerRef.current;
+  useEffect(() => {
+    if (!active) void controller.flush();
+  }, [active, controller]);
 
   useEffect(() => {
     controller.attach();
     return () => controller.detach();
   }, [controller]);
 
-  const schedule = useCallback((value: Value, delay?: number) => controller.schedule(value, delay), [controller]);
+  const schedule = useCallback(
+    (value: Value, delay?: number) => controller.schedule(value, delay),
+    [controller],
+  );
   const invalidate = useCallback(() => controller.invalidate(), [controller]);
   const isCurrent = useCallback((value: number) => controller.isCurrent(value), [controller]);
   return { schedule, invalidate, isCurrent };

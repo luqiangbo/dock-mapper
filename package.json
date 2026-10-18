@@ -26,6 +26,7 @@
     "@tauri-apps/plugin-process": "2.3.1",
     "@tauri-apps/plugin-updater": "2.11.0",
     "antd": "6.6.5",
+    "dayjs": "1.11.23",
     "echarts": "6.1.0",
     "lucide-react": "1.49.0",
     "perfect-freehand": "1.2.3",

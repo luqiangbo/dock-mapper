@@ -1,4 +1,6 @@
+import "./utils/disableBrowserContextMenu";
 import { useWindowTheme } from "./hooks/useWindowTheme";
+import DefaultsGate from "./DefaultsGate";
 import {
   useCallback,
   useEffect,
@@ -55,7 +57,6 @@ const FALLBACK_CONFIG: WidgetConfig = {
   refresh_interval_secs: 1,
   network_interface: null,
   speed_unit: "auto",
-  alerts: { cpu_percent: null, memory_percent: null, battery_below_percent: null },
   presets: [],
 };
 const INITIAL_BUDGET: WidgetLayoutBudget = {
@@ -72,8 +73,6 @@ const MEASUREMENT_STATUS: SysStatus = {
   memory_usage: 100,
   network_available: true,
   cpu_usage: 100,
-  cpu_temperature_celsius: 100,
-  gpu_usage: 100,
   battery: { percentage: 100, charging: false },
 };
 interface Measurements {
@@ -389,4 +388,8 @@ function TaskbarWidget() {
     </>
   );
 }
-ReactDOM.createRoot(document.getElementById("root")!).render(<TaskbarWidget />);
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <DefaultsGate secondary>
+    <TaskbarWidget />
+  </DefaultsGate>,
+);

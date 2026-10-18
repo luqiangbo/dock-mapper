@@ -92,7 +92,9 @@ pub enum WidgetMetricKind {
     Upload,
     Download,
     Cpu,
+    #[doc(hidden)]
     CpuTemperature,
+    #[doc(hidden)]
     GpuUsage,
     Memory,
     Battery,
@@ -139,14 +141,6 @@ impl Default for WidgetMetricConfig {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct AlertConfig {
-    pub cpu_percent: Option<u8>,
-    pub memory_percent: Option<u8>,
-    pub battery_below_percent: Option<u8>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
 pub struct WidgetPreset {
     pub layout: WidgetLayoutSettings,
     pub name: String,
@@ -167,7 +161,6 @@ pub struct WidgetConfig {
     /// now always used and normalization clears any legacy explicit value.
     pub network_interface: Option<String>,
     pub speed_unit: SpeedUnit,
-    pub alerts: AlertConfig,
     pub presets: Vec<WidgetPreset>,
 }
 
@@ -201,7 +194,6 @@ impl Default for WidgetConfig {
             refresh_interval_secs: 1,
             network_interface: None,
             speed_unit: SpeedUnit::Auto,
-            alerts: AlertConfig::default(),
             presets: Vec::new(),
         }
     }
@@ -210,13 +202,6 @@ impl Default for WidgetConfig {
 impl WidgetConfig {
     pub fn normalize(&mut self) {
         self.layout.normalize();
-        for threshold in [
-            &mut self.alerts.cpu_percent,
-            &mut self.alerts.memory_percent,
-            &mut self.alerts.battery_below_percent,
-        ] {
-            *threshold = threshold.and_then(|value| (value > 0).then_some(value.min(100)));
-        }
         let mut names = std::collections::HashSet::new();
         self.presets.retain_mut(|preset| {
             preset.name = preset.name.trim().chars().take(24).collect();
@@ -276,7 +261,12 @@ impl WidgetConfig {
                 .collect()
         });
         for metric in expanded {
-            if metric.kind == WidgetMetricKind::DiskIoLegacy {
+            if matches!(
+                metric.kind,
+                WidgetMetricKind::DiskIoLegacy
+                    | WidgetMetricKind::CpuTemperature
+                    | WidgetMetricKind::GpuUsage
+            ) {
                 continue;
             }
             if !normalized
@@ -296,21 +286,11 @@ impl WidgetConfig {
             if metric.icon_style == WidgetIconStyle::None {
                 metric.icon_style = WidgetIconStyle::Outline;
             }
-            if metric.kind == WidgetMetricKind::CpuTemperature
-                && !matches!(
-                    metric.usage_scheme,
-                    UsageScheme::Number | UsageScheme::Capsule
-                )
-            {
-                metric.usage_scheme = UsageScheme::Number;
-            }
         }
         for kind in [
             WidgetMetricKind::Upload,
             WidgetMetricKind::Download,
             WidgetMetricKind::Cpu,
-            WidgetMetricKind::CpuTemperature,
-            WidgetMetricKind::GpuUsage,
             WidgetMetricKind::Memory,
             WidgetMetricKind::Battery,
         ] {
@@ -320,24 +300,19 @@ impl WidgetConfig {
                     row_layout: WidgetRowLayout::Single,
                     kind,
                     enabled: false,
-                    usage_scheme: if kind == WidgetMetricKind::CpuTemperature {
-                        UsageScheme::Number
-                    } else {
-                        self.memory_scheme
-                    },
+                    usage_scheme: self.memory_scheme,
                     icon_style: WidgetIconStyle::Outline,
                 });
             }
         }
-        // A taskbar widget with every switch disabled still owns taskbar
-        // space but cannot communicate anything useful. Keep the network
-        // metric as a deterministic recovery default.
+        // Removed legacy sensors may have been the only enabled metrics.
+        // Restore the supported defaults without replacing existing styles/order.
         if !normalized.iter().any(|item| item.enabled) {
-            if let Some(network) = normalized
-                .iter_mut()
-                .find(|item| item.kind == WidgetMetricKind::Upload)
-            {
-                network.enabled = true;
+            let defaults = Self::default().metrics;
+            for metric in &mut normalized {
+                metric.enabled = defaults
+                    .iter()
+                    .any(|item| item.kind == metric.kind && item.enabled);
             }
         }
         // Only reciprocal, distinct pairs form columns. Invalid/conflicting edges
@@ -436,12 +411,12 @@ pub async fn sync_widget_dynamic_width(
     .await
 }
 
-pub fn setup_window(app: &tauri::App) -> Result<(), String> {
+pub fn setup_window(app: &tauri::AppHandle) -> Result<(), String> {
     let widget = app
         .get_webview_window("taskbar_widget")
         .ok_or_else(|| "缺少 taskbar_widget 窗口".to_string())?;
-    taskbar::schedule_refresh(app.handle());
-    let widget_app = app.handle().clone();
+    taskbar::schedule_refresh(app);
+    let widget_app = app.clone();
     widget.on_window_event(move |event| {
         if matches!(
             event,
@@ -450,7 +425,7 @@ pub fn setup_window(app: &tauri::App) -> Result<(), String> {
             taskbar::schedule_refresh(&widget_app);
         }
     });
-    let recovery_app = app.handle().clone();
+    let recovery_app = app.clone();
     std::thread::spawn(move || {
         let pending = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         loop {
@@ -481,7 +456,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn legacy_network_reopens_as_paired_upload_download_and_gpu_is_off() {
+    fn legacy_network_reopens_as_paired_upload_download_without_removed_metrics() {
         let mut config: WidgetConfig = serde_json::from_str(
             r#"{
             "metrics":[{"kind":"network","enabled":true,"row_layout":"double","icon_style":"text"}],
@@ -497,14 +472,10 @@ mod tests {
         assert_eq!(saved["metrics"][1]["pair_with"], "upload");
         assert_eq!(saved["metrics"][0]["icon_style"], "text");
         assert_eq!(saved["presets"][0]["metrics"][0]["kind"], "upload");
-        assert!(
-            !config
-                .metrics
-                .iter()
-                .find(|m| m.kind == WidgetMetricKind::GpuUsage)
-                .unwrap()
-                .enabled
-        );
+        assert!(!config.metrics.iter().any(|m| matches!(
+            m.kind,
+            WidgetMetricKind::CpuTemperature | WidgetMetricKind::GpuUsage
+        )));
         let mut reopened: WidgetConfig = serde_json::from_value(saved.clone()).unwrap();
         reopened.normalize();
         assert_eq!(serde_json::to_value(reopened).unwrap(), saved);
@@ -577,7 +548,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_rows_migrate_to_complete_metrics_and_temperature_sizes_survive_reopening() {
+    fn legacy_rows_keep_supported_metrics_and_layout_sizes_after_reopening() {
         let mut config: WidgetConfig = serde_json::from_str(r#"{
             "layout":{"font_size":16,"icon_size":20},
             "metrics":[{"kind":"network","enabled":true,"row_layout":"single","icon_style":"text"},
@@ -591,8 +562,10 @@ mod tests {
         assert_eq!(reopened.metrics[0].row_layout, WidgetRowLayout::Single);
         assert_eq!(reopened.metrics[0].pair_with, None);
         assert_eq!(reopened.metrics[2].row_layout, WidgetRowLayout::Single);
-        assert_eq!(reopened.metrics[3].kind, WidgetMetricKind::CpuTemperature);
-        assert!(reopened.metrics[3].enabled);
+        assert!(!reopened.metrics.iter().any(|m| matches!(
+            m.kind,
+            WidgetMetricKind::CpuTemperature | WidgetMetricKind::GpuUsage
+        )));
         assert_eq!(
             (reopened.layout.font_size, reopened.layout.icon_size),
             (16, 20)
@@ -701,7 +674,7 @@ mod tests {
             ..WidgetConfig::default()
         };
         config.normalize();
-        assert_eq!(config.metrics.len(), 7);
+        assert_eq!(config.metrics.len(), 5);
         assert_eq!(config.metrics[2].kind, WidgetMetricKind::Memory);
         assert_eq!(config.metrics[2].usage_scheme, MemoryScheme::Ring);
     }
@@ -775,7 +748,7 @@ mod tests {
         )
         .unwrap();
         config.normalize();
-        assert_eq!(config.metrics.len(), 7);
+        assert_eq!(config.metrics.len(), 5);
         assert!(config
             .metrics
             .iter()
@@ -801,15 +774,60 @@ mod tests {
     }
 
     #[test]
-    fn alert_thresholds_and_layout_presets_survive_config_normalization() {
+    fn obsolete_alerts_are_ignored_while_layout_presets_survive() {
         let mut config: WidgetConfig = serde_json::from_str(r#"{
             "alerts": {"cpu_percent": 85, "memory_percent": 90, "battery_below_percent": 20},
             "presets": [{"name": "办公", "metrics": [{"kind": "cpu", "enabled": true, "usage_scheme": "ring"}], "refresh_interval_secs": 3, "speed_unit": "mb"}]
         }"#).unwrap();
         config.normalize();
         let value = serde_json::to_value(config).unwrap();
-        assert_eq!(value["alerts"]["cpu_percent"], 85);
+        assert!(value.get("alerts").is_none());
         assert_eq!(value["presets"][0]["name"], "办公");
         assert_eq!(value["presets"][0]["metrics"][0]["kind"], "cpu");
+    }
+    #[test]
+    fn removed_sensors_and_their_pairs_are_migrated_without_losing_supported_styles() {
+        let mut config: WidgetConfig = serde_json::from_str(r#"{
+            "metrics":[{"kind":"cpu","enabled":true,"pair_with":"gpu_usage","usage_scheme":"ring"},{"kind":"gpu_usage","enabled":true,"pair_with":"cpu"},{"kind":"cpu_temperature","enabled":true}],
+            "presets":[{"name":"旧布局","metrics":[{"kind":"cpu_temperature","enabled":true},{"kind":"gpu_usage","enabled":true}]}]
+        }"#).unwrap();
+        config.normalize();
+        assert_eq!(config.metrics[0].kind, WidgetMetricKind::Cpu);
+        assert_eq!(config.metrics[0].usage_scheme, UsageScheme::Ring);
+        assert_eq!(config.metrics[0].pair_with, None);
+        for metrics in [&config.metrics, &config.presets[0].metrics] {
+            assert!(metrics.iter().any(|m| m.enabled));
+            assert!(!metrics.iter().any(|m| matches!(
+                m.kind,
+                WidgetMetricKind::CpuTemperature | WidgetMetricKind::GpuUsage
+            )));
+        }
+        let mut reopened: WidgetConfig =
+            serde_json::from_value(serde_json::to_value(&config).unwrap()).unwrap();
+        reopened.normalize();
+        assert_eq!(
+            serde_json::to_value(&config).unwrap(),
+            serde_json::to_value(reopened).unwrap()
+        );
+    }
+    #[test]
+    fn removed_only_enabled_sensor_restores_defaults_and_preserves_disabled_metric_style() {
+        let mut config: WidgetConfig = serde_json::from_str(r#"{
+            "metrics":[{"kind":"cpu","enabled":false,"usage_scheme":"ring"},{"kind":"gpu_usage","enabled":true}]
+        }"#).unwrap();
+        config.normalize();
+        assert_eq!(config.metrics[0].kind, WidgetMetricKind::Cpu);
+        assert_eq!(config.metrics[0].usage_scheme, UsageScheme::Ring);
+        assert!(!config.metrics[0].enabled);
+        for default in WidgetConfig::default()
+            .metrics
+            .into_iter()
+            .filter(|m| m.enabled)
+        {
+            assert!(config
+                .metrics
+                .iter()
+                .any(|m| m.kind == default.kind && m.enabled));
+        }
     }
 }

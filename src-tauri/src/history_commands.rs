@@ -55,11 +55,13 @@ pub async fn create_screenshot_history(
     };
     match result {
         Ok(summary) => {
+            tracing::info!(target: "dock_mapper::history", "screenshot history saved");
             app.state::<AppState>().images.remove(&result_image_id);
             let _ = app.emit("screenshot-history-changed", ());
             Ok(summary)
         }
         Err(error) => {
+            tracing::error!(target: "dock_mapper::history", error = %crate::diagnostics::redact_sensitive_text(&error), "screenshot history save failed");
             let _ = app.emit("screenshot-history-write-failed", &error);
             Err(error)
         }

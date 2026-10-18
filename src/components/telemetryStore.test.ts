@@ -7,7 +7,6 @@ describe("后台系统采样", () => {
       lastSampleAt: null,
       samples: [],
       archive: [],
-      alerts: [],
     });
     let notifications = 0;
     const off = store.subscribe(() => {

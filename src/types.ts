@@ -13,15 +13,7 @@ export interface WidgetLayoutSettings {
   icon_size: number;
 }
 export type SpeedUnit = "auto" | "kb" | "mb";
-export type WidgetMetricKind =
-  | "network"
-  | "upload"
-  | "download"
-  | "cpu"
-  | "cpu_temperature"
-  | "gpu_usage"
-  | "memory"
-  | "battery";
+export type WidgetMetricKind = "network" | "upload" | "download" | "cpu" | "memory" | "battery";
 export type ThemeMode = "light" | "dark" | "system";
 export type KeyVisualizerCategory = "modifier" | "combination" | "character" | "other";
 
@@ -38,14 +30,19 @@ export interface SupportedKey {
   group: string;
 }
 
-export interface ScancodeMapStatus {
-  state: "not_applied" | "applied" | "draft_changed" | "system_changed";
-  backup_available: boolean;
+export interface LegacyMappingPreview {
+  present: boolean;
+  value: string | null;
+  rules: { source: string; target: string }[];
+  parse_error: string | null;
+  waiting_restart: boolean;
 }
-
-export interface ApplyScancodeMapResult {
-  outcome: "applied" | "confirmationRequired";
-  status: ScancodeMapStatus;
+export interface KeyMappingStatus {
+  state: "no_rules" | "running" | "paused" | "legacy_blocked" | "restart_required" | "error";
+  enabled: boolean;
+  rule_count: number;
+  error: string | null;
+  legacy: LegacyMappingPreview | null;
 }
 
 export interface ScreenshotConfig {
@@ -64,6 +61,7 @@ export interface ScreenshotConfig {
   /** Internal migration marker round-tripped by settings updates. */
   _annotation_styles_initialized?: boolean;
   capture_size_unit: "px" | "dip";
+  text_font_favorites?: string[];
 }
 
 export type AnnotationStrokeStyle = "solid" | "dashed" | "dotted";
@@ -106,6 +104,7 @@ export interface AnnotationToolStyleConfig {
   mosaic_effect: MosaicEffect;
   blur_radius: number;
   font_size: number;
+  font_family?: string;
   marker_size: number;
   outline_enabled: boolean;
   outline_color: string;
@@ -136,14 +135,7 @@ export interface WidgetConfig {
   refresh_interval_secs: number;
   network_interface: string | null;
   speed_unit: SpeedUnit;
-  alerts: WidgetAlertConfig;
   presets: WidgetPreset[];
-}
-
-export interface WidgetAlertConfig {
-  cpu_percent: number | null;
-  memory_percent: number | null;
-  battery_below_percent: number | null;
 }
 
 export interface WidgetPreset {
@@ -246,14 +238,14 @@ export interface SysStatus {
   memory_usage: number;
   network_available: boolean;
   cpu_usage?: number;
-  cpu_temperature_celsius?: number | null;
-  cpu_temperature_error?: string | null;
-  gpu_usage?: number | null;
-  gpu_usage_error?: string | null;
   battery?: { percentage: number; charging: boolean } | null;
 }
 
 export interface RuntimeHealth {
+  sampling: {
+    measuredSeconds: number;
+    system: SamplingTimingStats;
+  };
   screenshot: {
     shortcuts: ShortcutRuntimeStatus[];
     recentCaptureBackend: string | null;
@@ -265,6 +257,14 @@ export interface RuntimeHealth {
   historyCount: number;
   transientImageCount: number;
   transientImageBytes: number;
+}
+
+export interface SamplingTimingStats {
+  count: number;
+  totalMs: number;
+  averageMs: number;
+  lastMs: number;
+  maxMs: number;
 }
 
 export interface ShortcutRuntimeStatus {

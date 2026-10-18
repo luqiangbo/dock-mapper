@@ -1,25 +1,30 @@
-mod history_preview;
 mod admin;
 mod app_commands;
 mod app_state;
+mod autostart_reset;
 mod config;
 mod config_transaction;
-mod cpu_temperature;
-mod gpu_usage;
+mod defaults_bootstrap;
 mod diagnostics;
 mod dxgi_capture;
 mod history;
 mod history_commands;
+mod history_preview;
 mod image_commands;
 mod image_store;
 #[cfg(test)]
 mod ipc_contract;
 mod key_mapping;
+mod key_mapping_runtime;
 mod key_types;
 mod key_visualizer;
+mod legacy_key_mapping;
 mod ocr;
+mod ocr_engine_state;
 mod raw_input;
 mod runtime_health;
+mod runtime_logs;
+mod sampling_metrics;
 mod scancode_mapper;
 mod screenshot;
 mod sys_monitor;
@@ -36,7 +41,7 @@ pub(crate) use app_state::persist;
 pub use app_state::AppState;
 #[cfg(test)]
 use config_transaction::commit_scancode_change_with;
-pub(crate) use config_transaction::{commit_scancode_change_at_path, commit_shortcut_change_with};
+pub(crate) use config_transaction::commit_shortcut_change_with;
 pub use key_mapping::{ScancodeMapState, ScancodeMapStatus};
 pub(crate) use key_types::supported_keys;
 pub use key_types::{KeyCode, KeyMapping, SupportedKey};
@@ -94,69 +99,86 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .manage(defaults_bootstrap::BootstrapState::default())
+        .manage(key_mapping_runtime::Runtime::default())
         .manage(screenshot::create_state())
         .manage(history_preview::PreviewState::default())
         .manage(visualizer_effects::VisualizerEffectsRuntime::default())
         .setup(|app| {
-            app.manage(diagnostics::initialize(app.handle())?);
-            if let Err(error) = migrate_main_window_width(app) {
-                tracing::warn!(target: "dock_mapper::window", %error);
-            }
-            #[cfg(desktop)]
-            tray::setup(app)?;
+            let result: Result<(), Box<dyn std::error::Error>> = (|| {
+                app.manage(diagnostics::initialize(app.handle())?);
+                if let Err(error) = migrate_main_window_width(app) {
+                    tracing::warn!(target: "dock_mapper::window", %error);
+                }
+                #[cfg(desktop)]
+                tray::setup(app)?;
 
-            let app_data_dir = app.path().app_data_dir()?;
-            let config_path = app_data_dir.join("config.json");
-            let loaded_config = config::load(&config_path);
-            let history = Arc::new(history::HistoryStore::new(app_data_dir.join("history"))?);
-            let monitor_interval = loaded_config.widget_config.refresh_interval_secs;
-            let state = AppState::new(loaded_config, config_path, history);
-            app.manage(state);
-            app.manage(key_visualizer::KeyVisualizerRuntime::default());
-            app.manage(sys_monitor::SysMonitorControl::new(monitor_interval));
-            app.manage(ocr::OcrService::new(app.handle())?);
-            if let Err(error) = screenshot::initialize(app.handle()) {
-                tracing::error!(target: "dock_mapper::shortcut", %error, "注册截图快捷键失败");
-            }
+                let app_data_dir = app.path().app_data_dir()?;
+                let config_path = app_data_dir.join("config.json");
+                let mut legacy_config = config::load(&config_path);
+                legacy_key_mapping::migrate(&config_path, &mut legacy_config)?;
+                let token_path = std::env::current_exe()?.with_file_name("settings-reset.token");
+                config::prepare_installation(app, &config_path, &token_path)?;
+                let (loaded_config, _, _) =
+                    config::load_for_installation(&config_path, &token_path)?;
+                let history = Arc::new(history::HistoryStore::new(app_data_dir.join("history"))?);
+                let monitor_interval = loaded_config.widget_config.refresh_interval_secs;
+                let state = AppState::new(loaded_config, config_path, history);
+                app.manage(state);
+                app.manage(key_visualizer::KeyVisualizerRuntime::default());
+                app.manage(sys_monitor::SysMonitorControl::new(monitor_interval));
+                app.manage(ocr::OcrService::new(app.handle())?);
 
-            if let Some(window) = app.get_webview_window("main") {
-                let app_handle = app.handle().clone();
-                window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        let minimize = app_handle
-                            .state::<AppState>()
-                            .config
-                            .lock()
-                            .map(|config| config.minimize_to_tray)
-                            .unwrap_or(true);
-                        if minimize {
-                            api.prevent_close();
-                            if let Some(window) = app_handle.get_webview_window("main") {
-                                let _ = window.hide();
+                if let Some(window) = app.get_webview_window("main") {
+                    let app_handle = app.handle().clone();
+                    window.on_window_event(move |event| {
+                        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                            let minimize = app_handle
+                                .state::<AppState>()
+                                .config
+                                .lock()
+                                .map(|config| config.minimize_to_tray)
+                                .unwrap_or(true);
+                            if minimize {
+                                api.prevent_close();
+                                if let Some(window) = app_handle.get_webview_window("main") {
+                                    let _ = window.hide();
+                                }
                             }
                         }
-                    }
-                });
-            }
+                    });
+                }
 
-            widget::setup_window(app)?;
-            key_visualizer::setup_window(app)?;
-
-            visualizer_effects::initialize(app.handle());
-            sys_monitor::start_sys_monitor(app.handle().clone());
-            Ok(())
+                Ok(())
+            })();
+            app.state::<defaults_bootstrap::BootstrapState>()
+                .finish_setup(
+                    result
+                        .as_ref()
+                        .map(|_| ())
+                        .map_err(|error| error.to_string()),
+                );
+            result
         })
         .invoke_handler(tauri::generate_handler![
+            defaults_bootstrap::initialize_defaults,
+            defaults_bootstrap::application_ready,
+            runtime_logs::get_runtime_logs,
+            runtime_logs::get_runtime_log_text,
+            runtime_logs::clear_runtime_logs,
+            runtime_logs::append_runtime_log,
             key_mapping::get_supported_keys,
             key_mapping::get_key_mappings,
             key_mapping::sync_key_mappings,
-            key_mapping::get_scancode_map_status,
-            key_mapping::apply_scancode_map,
-            key_mapping::restore_scancode_map,
+            key_mapping::get_key_mapping_status,
+            key_mapping::set_key_mapping_enabled,
+            key_mapping::get_legacy_key_mappings,
+            key_mapping::clear_legacy_key_mappings,
             image_commands::upload_image,
             image_commands::release_image,
             history_preview::open_screenshot_history_preview,
             history_preview::get_screenshot_history_preview_session,
+            history_preview::navigate_screenshot_history_preview,
             history_commands::list_screenshot_history,
             history_commands::get_screenshot_history_image,
             history_commands::get_screenshot_history_thumbnail,
@@ -173,6 +195,7 @@ pub fn run() {
             screenshot::overlay_ready,
             screenshot::get_full_screenshot,
             screenshot::report_capture_rendered,
+            screenshot::report_capture_failed,
             screenshot::check_screen_permission,
             screenshot::output::copy_image,
             screenshot::output::copy_text,
@@ -231,6 +254,9 @@ pub fn run() {
                 control.shutdown();
             }
             if let Some(runtime) = app.try_state::<key_visualizer::KeyVisualizerRuntime>() {
+                runtime.stop();
+            }
+            if let Some(runtime) = app.try_state::<key_mapping_runtime::Runtime>() {
                 runtime.stop();
             }
         }

@@ -1,4 +1,4 @@
-use crate::{config, scancode_mapper};
+use crate::config;
 
 pub(crate) fn commit_scancode_change_with<W, S>(
     registry_before: Option<&[u8]>,
@@ -21,21 +21,6 @@ where
         };
     }
     Ok(())
-}
-
-pub(crate) fn commit_scancode_change_at_path(
-    config_path: &std::path::Path,
-    registry_before: Option<&[u8]>,
-    registry_after: Option<&[u8]>,
-    next_config: &config::AppConfig,
-) -> Result<(), String> {
-    commit_scancode_change_with(
-        registry_before,
-        registry_after,
-        next_config,
-        scancode_mapper::write,
-        |config| config::save(config_path, config),
-    )
 }
 
 pub(crate) fn commit_shortcut_change_with<A, S>(

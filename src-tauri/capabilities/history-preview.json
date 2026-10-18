@@ -13,6 +13,7 @@
     "core:window:allow-set-fullscreen",
     "core:window:allow-is-fullscreen",
     "allow-get-screenshot-history-image",
-    "allow-get-screenshot-history-preview-session"
+    "allow-get-screenshot-history-preview-session",
+    "allow-navigate-screenshot-history-preview"
   ]
 }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { Button, Checkbox, Tooltip } from "antd";
+import { usePageActive } from "./PageActivity";
 import { HolderOutlined } from "@ant-design/icons";
 import { MoreHorizontal } from "lucide-react";
 import {
@@ -20,6 +21,7 @@ export default function ScreenshotToolbarSettings({
   value?: ScreenshotToolbarTool[];
   onChange?: (next: ScreenshotToolbarTool[]) => void;
 }) {
+  const pageActive = usePageActive();
   const tools = useMemo(() => normalizeScreenshotTools(value), [value]);
   const host = useRef<HTMLDivElement>(null);
   const active = useRef<{
@@ -37,6 +39,10 @@ export default function ScreenshotToolbarSettings({
     setDrag(null);
   };
   useEffect(() => {
+    if (!pageActive) {
+      cancel();
+      return;
+    }
     const key = (event: KeyboardEvent) => {
       if (event.key === "Escape") cancel();
     };
@@ -46,7 +52,7 @@ export default function ScreenshotToolbarSettings({
       window.removeEventListener("blur", cancel);
       window.removeEventListener("keydown", key);
     };
-  }, []);
+  }, [pageActive]);
   const move = (id: ScreenshotToolId, target: number) => {
     const next = moveScreenshotTool(tools, id, target);
     if (next === tools) return;

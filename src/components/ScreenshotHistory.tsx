@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { captureStartup } from "./captureStartupRuntime";
+import { captureStarting } from "./captureStartup";
 import { listen } from "@tauri-apps/api/event";
 import {
   CopyOutlined,
@@ -11,11 +21,12 @@ import {
 } from "@ant-design/icons";
 import {
   App as AntApp,
+  ConfigProvider,
+  DatePicker,
   Alert,
   Button,
   Empty,
   Grid,
-  Image,
   InputNumber,
   Masonry,
   Popconfirm,
@@ -32,13 +43,14 @@ import {
   selectScreenshotHistory,
   responsiveHistoryColumnCount,
   screenshotHistoryPhase,
+  groupScreenshotHistory,
   type HistoryFilter,
   type HistorySort,
 } from "./screenshotHistoryView";
 import styles from "./components.module.scss";
-import { createRequestQueue } from "../utils/requestQueue";
-
-const thumbnailRequests = createRequestQueue(4);
+import HistoryImage from "./HistoryImage";
+import { usePageActive } from "./PageActivity";
+import { historyDateLocale, historyDateRange, historyDatesFromRange } from "./historyDateRange";
 
 const { Text } = Typography;
 
@@ -50,112 +62,11 @@ function formatBytes(bytes: number): string {
 
 type HistoryAction = "copy" | "pin" | "favorite" | "delete";
 
-function HistoryImage({ id }: { id: string }) {
-  const hostRef = useRef<HTMLDivElement>(null);
-  const thumbnailUrlRef = useRef("");
-  const { notification } = AntApp.useApp();
-  const [opening, setOpening] = useState(false);
-  const [nearViewport, setNearViewport] = useState(false);
-  const [thumbnailUrl, setThumbnailUrl] = useState("");
-  const [failed, setFailed] = useState(false);
-  const [thumbnailAttempt, setThumbnailAttempt] = useState(0);
-
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!host || typeof IntersectionObserver === "undefined") {
-      setNearViewport(true);
-      return;
-    }
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (!entry?.isIntersecting) return;
-        setNearViewport(true);
-        observer.disconnect();
-      },
-      { rootMargin: "200px" },
-    );
-    observer.observe(host);
-    return () => observer.disconnect();
-  }, [id]);
-
-  useEffect(() => {
-    if (!nearViewport) return;
-    let disposed = false;
-    let objectUrl = "";
-    const controller = new AbortController();
-    setFailed(false);
-    void thumbnailRequests
-      .run(() => historyApi.thumbnail(id), controller.signal)
-      .then((payload) => {
-        if (disposed) return;
-        objectUrl = URL.createObjectURL(new Blob([payload], { type: "image/png" }));
-        thumbnailUrlRef.current = objectUrl;
-        setThumbnailUrl(objectUrl);
-      })
-      .catch(() => {
-        if (!disposed) setFailed(true);
-      });
-    return () => {
-      disposed = true;
-      controller.abort();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-      if (thumbnailUrlRef.current === objectUrl) thumbnailUrlRef.current = "";
-    };
-  }, [id, nearViewport, thumbnailAttempt]);
-
-  return (
-    <div ref={hostRef} className={styles.historyImageHost}>
-      {failed ? (
-        <div className={styles.historyImageFallback}>
-          <span>缩略图加载失败</span>
-          <Button size="small" onClick={() => setThumbnailAttempt((attempt) => attempt + 1)}>
-            重试
-          </Button>
-        </div>
-      ) : !thumbnailUrl ? (
-        nearViewport ? (
-          <Spin size="small" />
-        ) : null
-      ) : (
-        <button
-          type="button"
-          className={styles.historyPreviewButton}
-          aria-label="查看截图原图"
-          disabled={opening}
-          aria-busy={opening}
-          onClick={() => {
-            setOpening(true);
-            void historyApi
-              .openPreview(id)
-              .catch((error) =>
-                notification.error({
-                  message: "原图预览打开失败",
-                  description: errorMessage(error),
-                }),
-              )
-              .finally(() => setOpening(false));
-          }}
-        >
-          <Image
-            src={thumbnailUrl}
-            alt="历史截图"
-            className={styles.historyImage}
-            preview={false}
-            onError={() => {
-              if (thumbnailUrlRef.current) URL.revokeObjectURL(thumbnailUrlRef.current);
-              thumbnailUrlRef.current = "";
-              setThumbnailUrl("");
-              setFailed(true);
-            }}
-          />
-          {opening && <span className={styles.historyOpening}>正在打开原图…</span>}
-        </button>
-      )}
-    </div>
-  );
-}
-
 export default function ScreenshotHistory() {
+  const active = usePageActive();
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const loaded = useRef(false);
   const screens = Grid.useBreakpoint();
   const { notification } = AntApp.useApp();
   const [entries, setEntries] = useState<ScreenshotHistorySummary[]>([]);
@@ -163,16 +74,19 @@ export default function ScreenshotHistory() {
   const [loading, setLoading] = useState(true);
   const [readError, setReadError] = useState<string | null>(null);
   const [writeError, setWriteError] = useState<string | null>(null);
-  const [startingCapture, setStartingCapture] = useState(false);
+  const [preferenceError, setPreferenceError] = useState<string | null>(null);
+  const captureSnapshot = useSyncExternalStore(
+    captureStartup.subscribe,
+    captureStartup.getSnapshot,
+  );
+  const startingCapture = captureStarting(captureSnapshot);
   const [working, setWorking] = useState<{ id: string; action: HistoryAction } | null>(null);
   const workingRef = useRef(false);
   const refreshGenerationRef = useRef(0);
   const refreshTimerRef = useRef<number | null>(null);
   const visibleEntries = useMemo(() => selectScreenshotHistory(entries, view), [entries, view]);
-  const masonryItems = useMemo(
-    () => visibleEntries.map((entry) => ({ key: entry.id, data: entry })),
-    [visibleEntries],
-  );
+  const groups = useMemo(() => groupScreenshotHistory(visibleEntries), [visibleEntries]);
+  const previewIds = useMemo(() => visibleEntries.map((entry) => entry.id), [visibleEntries]);
 
   const onColumnCountChange = (columns: number | null) => {
     if (columns === null || !Number.isInteger(columns) || columns < 1 || columns > 10) return;
@@ -187,9 +101,23 @@ export default function ScreenshotHistory() {
     style: { width: 150 },
   };
   const visibleColumnCount = responsiveHistoryColumnCount(view.columns, screens);
-  const phase = screenshotHistoryPhase(loading, readError, entries.length, visibleEntries.length);
+  const phase = screenshotHistoryPhase(
+    loading && !loaded.current,
+    loaded.current ? null : readError,
+    entries.length,
+    visibleEntries.length,
+  );
 
-  useEffect(() => saveScreenshotHistoryView(view), [view]);
+  const saveView = useCallback(() => {
+    if (view.startDate && view.endDate && view.startDate > view.endDate) return;
+    try {
+      saveScreenshotHistoryView(view);
+      setPreferenceError(null);
+    } catch (error) {
+      setPreferenceError(errorMessage(error));
+    }
+  }, [view]);
+  useEffect(saveView, [saveView]);
 
   useEffect(() => {
     const error = window.sessionStorage.getItem("dockmapper.history-write-error");
@@ -199,12 +127,16 @@ export default function ScreenshotHistory() {
   }, []);
 
   const refresh = useCallback(async () => {
+    if (!activeRef.current) return;
     const generation = ++refreshGenerationRef.current;
     setLoading(true);
     setReadError(null);
     try {
       const nextEntries = await historyApi.list();
-      if (generation === refreshGenerationRef.current) setEntries(nextEntries);
+      if (generation === refreshGenerationRef.current) {
+        loaded.current = true;
+        setEntries(nextEntries);
+      }
     } catch (error) {
       if (generation === refreshGenerationRef.current) {
         setReadError(errorMessage(error));
@@ -215,6 +147,7 @@ export default function ScreenshotHistory() {
   }, []);
 
   const scheduleRefresh = useCallback(() => {
+    if (!activeRef.current) return;
     if (refreshTimerRef.current !== null) window.clearTimeout(refreshTimerRef.current);
     refreshTimerRef.current = window.setTimeout(() => {
       refreshTimerRef.current = null;
@@ -222,7 +155,15 @@ export default function ScreenshotHistory() {
     }, 150);
   }, [refresh]);
 
+  useLayoutEffect(() => {
+    if (!active) {
+      refreshGenerationRef.current += 1;
+      if (refreshTimerRef.current !== null) window.clearTimeout(refreshTimerRef.current);
+    }
+  }, [active]);
+
   useEffect(() => {
+    if (!active) return;
     void refresh();
     let disposed = false;
     let unlisten: (() => void) | undefined;
@@ -240,7 +181,7 @@ export default function ScreenshotHistory() {
       if (refreshTimerRef.current !== null) window.clearTimeout(refreshTimerRef.current);
       unlisten?.();
     };
-  }, [refresh, scheduleRefresh]);
+  }, [refresh, scheduleRefresh, active]);
 
   const run = async (
     id: string,
@@ -263,13 +204,10 @@ export default function ScreenshotHistory() {
   };
 
   const startCapture = async () => {
-    setStartingCapture(true);
     try {
       await screenshotSettingsApi.start();
     } catch (error) {
       notification.error({ message: "启动截图失败", description: errorMessage(error) });
-    } finally {
-      setStartingCapture(false);
     }
   };
 
@@ -301,7 +239,7 @@ export default function ScreenshotHistory() {
               options={[
                 { value: "newest", label: "最新优先" },
                 { value: "oldest", label: "最早优先" },
-                { value: "favorite", label: "收藏优先" },
+                { value: "favorite", label: "当日收藏优先" },
               ]}
             />
           </label>
@@ -316,6 +254,28 @@ export default function ScreenshotHistory() {
               ]}
             />
           </label>
+          <div className={styles.historyControl}>
+            <span>日期范围</span>
+            <ConfigProvider locale={historyDateLocale}>
+              <DatePicker.RangePicker
+                size="small"
+                aria-label="截图日期范围"
+                allowEmpty={[true, true]}
+                allowClear
+                value={historyDateRange(view)}
+                onChange={(range) =>
+                  setView((current) => ({ ...current, ...historyDatesFromRange(range) }))
+                }
+              />
+            </ConfigProvider>
+          </div>
+          {(view.startDate || view.endDate) && (
+            <Button
+              onClick={() => setView((current) => ({ ...current, startDate: "", endDate: "" }))}
+            >
+              清除日期
+            </Button>
+          )}
           <label className={styles.historyControl}>
             <span>列数</span>
             <InputNumber
@@ -339,6 +299,18 @@ export default function ScreenshotHistory() {
         </div>
       </div>
 
+      {preferenceError && (
+        <Alert
+          type="warning"
+          showIcon
+          message="历史浏览偏好未保存"
+          description={preferenceError}
+          action={<Button onClick={saveView}>重试保存</Button>}
+        />
+      )}
+      {view.startDate && view.endDate && view.startDate > view.endDate && (
+        <Alert type="warning" showIcon message="开始日期不能晚于结束日期，请调整日期范围" />
+      )}
       {readError && (
         <Alert
           type="error"
@@ -373,129 +345,148 @@ export default function ScreenshotHistory() {
       ) : phase === "filtered" ? (
         <Empty description="没有符合当前筛选条件的截图" />
       ) : (
-        <Masonry<ScreenshotHistorySummary>
-          className={styles.historyMasonry}
-          columns={visibleColumnCount}
-          gutter={[12, 12]}
-          items={masonryItems}
-          itemRender={({ data: entry }) => (
-            <article className={styles.historyCard} tabIndex={0}>
-              <div
-                className={styles.historyPreview}
-                style={{ aspectRatio: `${entry.width} / ${entry.height}` }}
-              >
-                <HistoryImage id={entry.id} />
-              </div>
-              <div className={styles.historyMeta}>
-                <Text ellipsis title={new Date(entry.createdAtMs).toLocaleString("zh-CN")}>
-                  {new Date(entry.createdAtMs).toLocaleString("zh-CN")}
-                </Text>
-                <span className={styles.description}>
-                  {entry.width} × {entry.height} · {formatBytes(entry.totalBytes)}
-                </span>
-              </div>
-              <div className={styles.historyActions}>
-                <Tooltip title="复制">
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<CopyOutlined />}
-                    aria-label="复制截图历史"
-                    loading={working?.id === entry.id && working.action === "copy"}
-                    disabled={
-                      loading ||
-                      (working !== null && (working.id !== entry.id || working.action !== "copy"))
-                    }
-                    onClick={() =>
-                      void run(entry.id, "copy", () => historyApi.copy(entry.id), "截图已复制")
-                    }
-                  />
-                </Tooltip>
-                <Tooltip title="贴图">
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<PushpinOutlined />}
-                    aria-label="贴出截图历史"
-                    loading={working?.id === entry.id && working.action === "pin"}
-                    disabled={
-                      loading ||
-                      (working !== null && (working.id !== entry.id || working.action !== "pin"))
-                    }
-                    onClick={() =>
-                      void run(
-                        entry.id,
-                        "pin",
-                        () => historyApi.pin(entry.id),
-                        "贴图已创建，可继续贴其他截图",
-                      )
-                    }
-                  />
-                </Tooltip>
-                <Tooltip title={entry.favorite ? "取消收藏" : "收藏"}>
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={entry.favorite ? <StarFilled /> : <StarOutlined />}
-                    className={entry.favorite ? styles.favoriteButton : undefined}
-                    aria-label={entry.favorite ? "取消收藏截图历史" : "收藏截图历史"}
-                    loading={working?.id === entry.id && working.action === "favorite"}
-                    disabled={
-                      loading ||
-                      (working !== null &&
-                        (working.id !== entry.id || working.action !== "favorite"))
-                    }
-                    onClick={() =>
-                      void run(
-                        entry.id,
-                        "favorite",
-                        async () => {
-                          const updated = await historyApi.favorite(entry.id, !entry.favorite);
-                          setEntries((current) =>
-                            current.map((item) => (item.id === updated.id ? updated : item)),
-                          );
-                        },
-                        entry.favorite ? "已取消收藏" : "已收藏",
-                      )
-                    }
-                  />
-                </Tooltip>
-                <Popconfirm
-                  title="删除这条截图历史？"
-                  okText="删除"
-                  cancelText="取消"
-                  onConfirm={() =>
-                    void run(
-                      entry.id,
-                      "delete",
-                      async () => {
-                        await historyApi.delete(entry.id);
-                        setEntries((current) => current.filter((item) => item.id !== entry.id));
-                      },
-                      "截图历史已删除",
-                    )
-                  }
-                >
-                  <Tooltip title="删除">
-                    <Button
-                      type="text"
-                      size="small"
-                      danger
-                      icon={<DeleteOutlined />}
-                      aria-label="删除截图历史"
-                      loading={working?.id === entry.id && working.action === "delete"}
-                      disabled={
-                        loading ||
-                        (working !== null &&
-                          (working.id !== entry.id || working.action !== "delete"))
+        groups.map((group) => (
+          <section
+            key={group.date}
+            className={styles.historyDateGroup}
+            aria-label={`${group.date}截图`}
+          >
+            <Typography.Title level={5}>
+              {new Intl.DateTimeFormat("zh-CN", {
+                year: "numeric",
+                month: "long",
+                day: "numeric",
+                weekday: "short",
+              }).format(new Date(`${group.date}T12:00:00`))}{" "}
+              <Text type="secondary">{group.entries.length} 张</Text>
+            </Typography.Title>
+            <Masonry<ScreenshotHistorySummary>
+              className={styles.historyMasonry}
+              columns={visibleColumnCount}
+              gutter={[12, 12]}
+              items={group.entries.map((entry) => ({ key: entry.id, data: entry }))}
+              itemRender={({ data: entry }) => (
+                <article className={styles.historyCard} tabIndex={0}>
+                  <div
+                    className={styles.historyPreview}
+                    style={{ aspectRatio: `${entry.width} / ${entry.height}` }}
+                  >
+                    <HistoryImage id={entry.id} ids={previewIds} />
+                  </div>
+                  <div className={styles.historyMeta}>
+                    <Text ellipsis title={new Date(entry.createdAtMs).toLocaleString("zh-CN")}>
+                      {new Date(entry.createdAtMs).toLocaleString("zh-CN")}
+                    </Text>
+                    <span className={styles.description}>
+                      {entry.width} × {entry.height} · {formatBytes(entry.totalBytes)}
+                    </span>
+                  </div>
+                  <div className={styles.historyActions}>
+                    <Tooltip title="复制">
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<CopyOutlined />}
+                        aria-label="复制截图历史"
+                        loading={working?.id === entry.id && working.action === "copy"}
+                        disabled={
+                          loading ||
+                          (working !== null &&
+                            (working.id !== entry.id || working.action !== "copy"))
+                        }
+                        onClick={() =>
+                          void run(entry.id, "copy", () => historyApi.copy(entry.id), "截图已复制")
+                        }
+                      />
+                    </Tooltip>
+                    <Tooltip title="贴图">
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<PushpinOutlined />}
+                        aria-label="贴出截图历史"
+                        loading={working?.id === entry.id && working.action === "pin"}
+                        disabled={
+                          loading ||
+                          (working !== null &&
+                            (working.id !== entry.id || working.action !== "pin"))
+                        }
+                        onClick={() =>
+                          void run(
+                            entry.id,
+                            "pin",
+                            () => historyApi.pin(entry.id),
+                            "贴图已创建，可继续贴其他截图",
+                          )
+                        }
+                      />
+                    </Tooltip>
+                    <Tooltip title={entry.favorite ? "取消收藏" : "收藏"}>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={entry.favorite ? <StarFilled /> : <StarOutlined />}
+                        className={entry.favorite ? styles.favoriteButton : undefined}
+                        aria-label={entry.favorite ? "取消收藏截图历史" : "收藏截图历史"}
+                        loading={working?.id === entry.id && working.action === "favorite"}
+                        disabled={
+                          loading ||
+                          (working !== null &&
+                            (working.id !== entry.id || working.action !== "favorite"))
+                        }
+                        onClick={() =>
+                          void run(
+                            entry.id,
+                            "favorite",
+                            async () => {
+                              const updated = await historyApi.favorite(entry.id, !entry.favorite);
+                              setEntries((current) =>
+                                current.map((item) => (item.id === updated.id ? updated : item)),
+                              );
+                            },
+                            entry.favorite ? "已取消收藏" : "已收藏",
+                          )
+                        }
+                      />
+                    </Tooltip>
+                    <Popconfirm
+                      title="删除这条截图历史？"
+                      okText="删除"
+                      cancelText="取消"
+                      onConfirm={() =>
+                        void run(
+                          entry.id,
+                          "delete",
+                          async () => {
+                            await historyApi.delete(entry.id);
+                            setEntries((current) => current.filter((item) => item.id !== entry.id));
+                          },
+                          "截图历史已删除",
+                        )
                       }
-                    />
-                  </Tooltip>
-                </Popconfirm>
-              </div>
-            </article>
-          )}
-        />
+                    >
+                      <Tooltip title="删除">
+                        <Button
+                          type="text"
+                          size="small"
+                          danger
+                          icon={<DeleteOutlined />}
+                          aria-label="删除截图历史"
+                          loading={working?.id === entry.id && working.action === "delete"}
+                          disabled={
+                            loading ||
+                            (working !== null &&
+                              (working.id !== entry.id || working.action !== "delete"))
+                          }
+                        />
+                      </Tooltip>
+                    </Popconfirm>
+                  </div>
+                </article>
+              )}
+            />
+          </section>
+        ))
       )}
     </div>
   );

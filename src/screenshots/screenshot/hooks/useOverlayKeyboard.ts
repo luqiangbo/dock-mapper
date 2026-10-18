@@ -24,100 +24,64 @@ interface Options {
   confirm: () => void;
 }
 
+export function overlayKeyAction(
+  event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "shiftKey" | "altKey" | "isComposing">,
+  options: Options,
+  textInput = false,
+): "cancel" | "confirm" | "undo" | "redo" | "picker" | null {
+  if (event.isComposing || event.key === "Process") return null;
+  if (event.key === "Escape") return "cancel";
+  if (textInput || options.isEditingText?.()) return null;
+  const modifier = event.ctrlKey || event.metaKey;
+  const key = event.key.toLowerCase();
+  if (modifier && key === "c")
+    return options.phase === "editing" && options.shotReady && !options.busy ? "confirm" : null;
+  if (options.blocked || options.busy) return null;
+  if (modifier && key === "z" && options.phase === "editing")
+    return event.shiftKey ? "redo" : "undo";
+  if (modifier && key === "y" && options.phase === "editing") return "redo";
+  if (event.key === "Enter" && options.phase === "editing" && options.shotReady) return "confirm";
+  // The active pixel-picker owns C/Space/arrows, including its locked sample.
+  return null;
+}
 export function useOverlayKeyboard(options: Options): void {
   useEffect(() => {
+    let composing = false;
+    const beginComposition = () => {
+      composing = true;
+    };
+    const endComposition = () => {
+      composing = false;
+    };
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (options.blocked) return;
-      if (event.key === "Escape" && options.dismissTransientPanel?.()) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        return;
-      }
-      // Excalidraw owns editing shortcuts (including Escape, delete and
-      // undo/redo) while mounted. The host keeps only screenshot confirmation.
-      if (options.editorActive) {
-        if (event.key === "Escape" && !options.isEditingText?.()) {
-          if (options.hasEditorSelection) return;
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          if (options.tool && options.tool !== "select") options.returnToSelect();
-          else options.cancel();
-          return;
-        }
-        if (
-          event.key === "Enter" &&
-          options.phase === "editing" &&
-          options.shotReady &&
-          !options.busy &&
-          !options.isEditingText?.()
-        ) {
-          event.preventDefault();
-          options.confirm();
-        }
-        return;
-      }
-      if (
-        options.tool === "picker" &&
-        !event.metaKey &&
-        !event.ctrlKey &&
-        !event.altKey &&
-        event.key.toLowerCase() === "c"
-      ) {
-        event.preventDefault();
-        options.copyPickerHex();
-        return;
-      }
-      if (event.key === "Escape") {
-        if (options.tool === "picker") options.exitPicker();
-        else if (
-          options.hasSelectedText ||
-          options.hasSelectedNumber ||
-          options.hasSelectedRaster
-        )
-          options.clearSelection();
-        else if (options.tool && options.tool !== "select") options.returnToSelect();
-        else options.cancel();
-        return;
-      }
-      if (
-        (event.key === "Backspace" || event.key === "Delete") &&
-        (options.hasSelectedText || options.hasSelectedNumber || options.hasSelectedRaster) &&
-        options.phase === "editing"
-      ) {
-        event.preventDefault();
-        options.deleteSelection();
-        return;
-      }
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        event.key.toLowerCase() === "z" &&
-        options.phase === "editing"
-      ) {
-        event.preventDefault();
-        if (event.shiftKey) options.redo();
-        else options.undo();
-        return;
-      }
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        event.key.toLowerCase() === "y" &&
-        options.phase === "editing"
-      ) {
-        event.preventDefault();
-        options.redo();
-        return;
-      }
+      if (composing || event.isComposing || event.keyCode === 229) return;
+      const target = event.target;
       if (
         event.key === "Enter" &&
-        options.phase === "editing" &&
-        options.shotReady &&
-        !options.busy
-      ) {
-        event.preventDefault();
-        options.confirm();
-      }
+        target instanceof Element &&
+        target.closest("[data-picker-controls]")
+      )
+        return;
+      const textInput =
+        target instanceof Element &&
+        Boolean(target.closest('input, textarea, [contenteditable="true"]'));
+      const action = overlayKeyAction(event, options, textInput);
+      if (!action) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (action === "cancel") options.cancel();
+      else if (action === "confirm") options.confirm();
+      else if (action === "undo") options.undo();
+      else if (action === "redo") options.redo();
+      else options.copyPickerHex();
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("compositionstart", beginComposition, true);
+    window.addEventListener("compositionend", endComposition, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("compositionstart", beginComposition, true);
+      window.removeEventListener("compositionend", endComposition, true);
+    };
   }, [options]);
 }

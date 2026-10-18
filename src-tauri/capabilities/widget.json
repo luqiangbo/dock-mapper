@@ -2,8 +2,11 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "taskbar-widget",
   "description": "任务栏挂件接收状态事件并上报布局状态",
-  "windows": ["taskbar_widget"],
+  "windows": [
+    "taskbar_widget"
+  ],
   "permissions": [
+    "allow-application-ready",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:event:allow-emit",

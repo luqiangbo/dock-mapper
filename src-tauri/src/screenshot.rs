@@ -5,7 +5,7 @@ use std::{
     path::PathBuf,
     process::Command,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
         Arc, LazyLock, Mutex, MutexGuard,
     },
     thread,
@@ -25,11 +25,12 @@ mod pin_geometry;
 mod pin_runtime;
 mod runtime;
 mod shortcut;
+mod startup;
 use output::*;
 pub use output::{copy_png_bytes, pin_external_image};
 use overlay::*;
-pub use pin_geometry::{PinWindowGeometry, PinWindowGeometryRequest};
 use pin_geometry::*;
+pub use pin_geometry::{PinWindowGeometry, PinWindowGeometryRequest};
 pub use pin_runtime::PinOptions;
 use pin_runtime::*;
 use runtime::URI_CAPTURE;
@@ -117,9 +118,9 @@ pub struct AppState {
     // pinning before the user has confirmed a selection.
     confirmed_png: Mutex<Option<Arc<[u8]>>>,
     shortcut_registry: Mutex<shortcut::ShortcutRegistryState>,
-    overlay_ready: AtomicBool,
+    overlay_ready: Mutex<HashSet<String>>,
     active_overlay: Mutex<Option<String>>,
-    capture_in_progress: AtomicBool,
+    startup: Mutex<startup::CaptureStartup>,
     capture_generation: AtomicU64,
     visualizer_suspend_token: Mutex<Option<u64>>,
     capture_timings: Mutex<Vec<CaptureTiming>>,
@@ -134,9 +135,9 @@ pub fn create_state() -> AppState {
         pin_generation: AtomicU64::new(0),
         confirmed_png: Mutex::new(None),
         shortcut_registry: Mutex::new(shortcut::ShortcutRegistryState::default()),
-        overlay_ready: AtomicBool::new(false),
+        overlay_ready: Mutex::new(HashSet::new()),
         active_overlay: Mutex::new(None),
-        capture_in_progress: AtomicBool::new(false),
+        startup: Mutex::new(startup::CaptureStartup::default()),
         capture_generation: AtomicU64::new(0),
         visualizer_suspend_token: Mutex::new(None),
         capture_timings: Mutex::new(Vec::with_capacity(20)),
@@ -170,11 +171,15 @@ pub fn initialize(app: &AppHandle) -> Result<(), String> {
 }
 
 pub fn start_capture(app: &AppHandle) {
-    handle_start_capture(app);
+    if let Err(error) = handle_start_capture(app) {
+        startup::request_error(app, error);
+    }
 }
 
 pub fn start_quick_ocr_capture(app: &AppHandle) {
-    handle_start_quick_ocr(app);
+    if let Err(error) = handle_start_quick_ocr(app) {
+        startup::request_error(app, error);
+    }
 }
 
 pub(crate) fn show_main_window(app: &AppHandle) {
@@ -213,15 +218,18 @@ pub(crate) fn pin_recent_screenshot(app: &AppHandle) {
 }
 
 #[tauri::command]
-pub fn start_screenshot(app: AppHandle) {
-    handle_start_capture(&app);
+pub fn start_screenshot(app: AppHandle) -> Result<u64, String> {
+    handle_start_capture(&app)
 }
 
 #[tauri::command]
-pub fn start_quick_ocr(app: AppHandle, service: State<'_, crate::ocr::OcrService>) {
+pub fn start_quick_ocr(
+    app: AppHandle,
+    service: State<'_, crate::ocr::OcrService>,
+) -> Result<u64, String> {
     // Engine preparation is asynchronous and does not delay the capture UI.
     service.prepare();
-    handle_start_quick_ocr(&app);
+    handle_start_quick_ocr(&app)
 }
 
 #[derive(Serialize)]
@@ -382,12 +390,18 @@ pub(crate) fn toggle_latest_pin(app: &AppHandle) {
 }
 
 #[tauri::command]
-pub fn close_overlay(app: AppHandle) {
+pub fn close_overlay(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = active_overlay_window(&app) {
+        window
+            .hide()
+            .map_err(|error| format!("关闭截图浮层失败：{error}"))?;
+    }
     if let Some(service) = app.try_state::<crate::ocr::OcrService>() {
         service.cancel();
     }
     let _ = app.state::<crate::AppState>().images.clear();
-    close_overlay_impl(&app);
+    finish_overlay_commit(&app);
+    Ok(())
 }
 
 #[tauri::command]
@@ -396,7 +410,9 @@ pub fn show_capture_overlay(
     generation: Option<u64>,
     label: Option<String>,
 ) -> Result<bool, String> {
-    let capture = app.state::<AppState>().capture.lock_or_recover().clone();
+    let state = app.state::<AppState>();
+    let mut startup = state.startup.lock_or_recover();
+    let capture = state.capture.lock_or_recover().clone();
     let Some(capture) = capture else {
         return Err("No screenshot is available".into());
     };
@@ -417,20 +433,52 @@ pub fn show_capture_overlay(
     let window = app
         .get_webview_window(&active_label)
         .ok_or_else(|| "Capture overlay is unavailable".to_string())?;
-    window.show().map_err(|error| error.to_string())?;
-    window.set_focus().map_err(|error| error.to_string())?;
+    let shown = window.show().and_then(|_| window.set_focus());
+    if let Err(error) = shown {
+        drop(startup);
+        startup::fail_startup(
+            &app,
+            capture.generation,
+            format!("显示截图浮层失败：{error}"),
+        );
+        return Err(error.to_string());
+    }
+    if let Some(status) = startup.finish(capture.generation, None) {
+        startup::publish(&app, &status);
+    }
     Ok(true)
 }
 
 #[tauri::command]
-pub fn overlay_ready(app: AppHandle, label: String) {
+pub fn report_capture_failed(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    label: String,
+    generation: Option<u64>,
+    error: String,
+) -> Result<bool, String> {
+    startup::report_capture_failed(app, window, label, generation, error)
+}
+
+#[tauri::command]
+pub fn overlay_ready(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    label: String,
+) -> Result<(), String> {
+    if window.label() != label {
+        return Err("不能代其他浮层报告就绪".into());
+    }
     let state = app.state::<AppState>();
-    state.overlay_ready.store(true, Ordering::SeqCst);
+    state.overlay_ready.lock_or_recover().insert(label.clone());
+    tracing::info!(target: "dock_mapper::capture", overlay = %label, "Capture event listener ready");
     if state.capture.lock_or_recover().is_some()
         && state.active_overlay.lock_or_recover().as_deref() == Some(label.as_str())
     {
-        let _ = app.emit_to(label.as_str(), "capture-ready", &label);
+        app.emit_to(label.as_str(), "capture-ready", &label)
+            .map_err(|error| error.to_string())?;
     }
+    Ok(())
 }
 
 #[tauri::command]
@@ -446,6 +494,7 @@ pub fn get_full_screenshot(
     if state.active_overlay.lock_or_recover().as_deref() != Some(label.as_str()) {
         return Err("Capture overlay has been superseded".into());
     }
+    tracing::info!(target: "dock_mapper::capture", generation = capture.generation, "Capture frame delivered for decoding");
     Ok(FullScreenshot {
         url: format!(
             "http://dockmapper-shot.localhost/capture/{}.bmp",
@@ -812,10 +861,7 @@ pub fn close_pin_window(app: AppHandle, id: String) {
 }
 
 #[tauri::command]
-pub fn get_pin_window_geometry(
-    app: AppHandle,
-    id: String,
-) -> Result<PinWindowGeometry, String> {
+pub fn get_pin_window_geometry(app: AppHandle, id: String) -> Result<PinWindowGeometry, String> {
     let window = app
         .get_webview_window(&id)
         .ok_or_else(|| "贴图窗口不存在".to_string())?;
@@ -826,14 +872,11 @@ pub fn get_pin_window_geometry(
     if !runtime.options.contains_key(&id) {
         return Err("贴图窗口不存在".into());
     }
-    let geometry = runtime
-        .geometries
-        .entry(id)
-        .or_insert(PinGeometryRuntime {
-            base_width: size.width.max(1),
-            base_height: size.height.max(1),
-            sequence: 0,
-        });
+    let geometry = runtime.geometries.entry(id).or_insert(PinGeometryRuntime {
+        base_width: size.width.max(1),
+        base_height: size.height.max(1),
+        sequence: 0,
+    });
     Ok(PinWindowGeometry {
         x: position.x,
         y: position.y,
@@ -863,14 +906,11 @@ pub fn set_pin_window_geometry(
         .get(&id)
         .ok_or_else(|| "贴图窗口不存在".to_string())?
         .locked;
-    let geometry_runtime = runtime
-        .geometries
-        .entry(id)
-        .or_insert(PinGeometryRuntime {
-            base_width: size.width.max(1),
-            base_height: size.height.max(1),
-            sequence: 0,
-        });
+    let geometry_runtime = runtime.geometries.entry(id).or_insert(PinGeometryRuntime {
+        base_width: size.width.max(1),
+        base_height: size.height.max(1),
+        sequence: 0,
+    });
     if locked {
         return Ok(PinWindowGeometry {
             x: position.x,

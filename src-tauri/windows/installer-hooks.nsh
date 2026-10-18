@@ -1,3 +1,5 @@
+!include "FileFunc.nsh"
+
 !macro NSIS_HOOK_POSTINSTALL
   StrCpy $R0 0
   StrCpy $R1 0
@@ -47,4 +49,37 @@ dockmapper_vcredist_cleanup:
   Delete "$INSTDIR\resources\runtime\vc_redist.x64.exe"
   Delete "$INSTDIR\resources\runtime\README.txt"
   RMDir "$INSTDIR\resources\runtime"
+  ; A fresh identity for every install, even a reinstall of the same build.
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  Push $5
+  Push $6
+  Push $7
+  Push $8
+  ${GetTime} "" "L" $0 $1 $2 $3 $4 $5 $6
+  System::Call 'kernel32::GetTickCount64() l .r7'
+  ClearErrors
+  FileOpen $8 "$INSTDIR\settings-reset.token" w
+  ${If} ${Errors}
+    MessageBox MB_ICONSTOP "无法写入设置重置标记，安装未完成。"
+    Abort
+  ${EndIf}
+  FileWrite $8 "$2-$1-$0T$4:$5:$6-$7"
+  FileClose $8
+  ${If} ${Errors}
+    MessageBox MB_ICONSTOP "设置重置标记写入失败，安装未完成。"
+    Abort
+  ${EndIf}
+  Pop $8
+  Pop $7
+  Pop $6
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
 !macroend

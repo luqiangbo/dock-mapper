@@ -1,19 +1,36 @@
 import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { App as AntApp } from "antd";
 import { MAIN_EVENTS } from "../api/commands";
 import type { SysStatus } from "../types";
 import { appendDashboardSample } from "./dashboardTelemetry";
 import { updateTelemetryArchive, saveTelemetryArchive } from "./telemetryArchive";
 import { telemetryStore } from "./telemetryStore";
 import { observeTelemetryVisibility } from "./telemetryVisibility";
+import { recordRuntimeLog } from "./runtimeLogging";
 export default function TelemetryCollector() {
-  const { notification } = AntApp.useApp();
+  const initialized = useRef(false);
+  const archiveError = useRef<string | null>(null);
   const archiveRef = useRef([...telemetryStore.getSnapshot().archive]);
   const archiveSavedAtRef = useRef(0);
   const publishedMinuteRef = useRef(-1);
+  const saveArchive = (archive: typeof archiveRef.current) => {
+    try {
+      saveTelemetryArchive(archive);
+      if (archiveError.current) recordRuntimeLog("monitor", "长期趋势保存已恢复");
+      archiveError.current = null;
+    } catch (error) {
+      const message = String(error);
+      if (archiveError.current !== message)
+        recordRuntimeLog("monitor", `长期趋势保存失败：${message}`, "error");
+      archiveError.current = message;
+    }
+  };
   useEffect(() => {
+    if (!initialized.current) {
+      initialized.current = true;
+      recordRuntimeLog("application", "主窗口系统采集已启动");
+    }
     let disposed = false;
     let off: (() => void) | undefined;
     const visibility = observeTelemetryVisibility(document, telemetryStore.setVisible);
@@ -25,15 +42,13 @@ export default function TelemetryCollector() {
         if (disposed) unlisten();
         else off = unlisten;
       })
-      .catch((error) =>
-        notification.warning({ message: "窗口状态监听失败", description: String(error) }),
-      );
+      .catch((error) => recordRuntimeLog("monitor", `窗口状态监听失败：${String(error)}`, "warn"));
     return () => {
       disposed = true;
       off?.();
       visibility.dispose();
     };
-  }, [notification]);
+  }, []);
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
@@ -52,32 +67,21 @@ export default function TelemetryCollector() {
         telemetryStore.update({ archive: [...nextArchive] });
       }
       if (now - archiveSavedAtRef.current >= 60_000) {
-        try {
-          saveTelemetryArchive(nextArchive);
-          archiveSavedAtRef.current = now;
-        } catch (error) {
-          notification.warning({ message: "长期趋势保存失败", description: String(error) });
-          archiveSavedAtRef.current = now;
-        }
+        saveArchive(nextArchive);
+        archiveSavedAtRef.current = now;
       }
     })
       .then((off) => {
         if (disposed) off();
         else unlisten = off;
       })
-      .catch((error) =>
-        notification.error({ message: "系统指标监听失败", description: String(error) }),
-      );
+      .catch((error) => recordRuntimeLog("monitor", `系统指标监听失败：${String(error)}`, "error"));
     return () => {
       disposed = true;
       unlisten?.();
-      try {
-        saveTelemetryArchive(archiveRef.current);
-      } catch (error) {
-        notification.warning({ message: "长期趋势保存失败", description: String(error) });
-      }
+      saveArchive(archiveRef.current);
     };
-  }, [notification]);
+  }, []);
 
   return null;
 }

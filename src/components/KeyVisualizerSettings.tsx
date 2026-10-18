@@ -24,6 +24,7 @@ import type {
 } from "../types";
 import styles from "./components.module.scss";
 import { useQueuedAutosave } from "../hooks/useQueuedAutosave";
+import { usePageActive, usePageReadGuard, usePageRefresh } from "./PageActivity";
 import { takeDetachedAutosaveError, waitForPendingAutosave } from "../hooks/queuedAutosave";
 
 const { Text, Title } = Typography;
@@ -83,6 +84,9 @@ function statusDisplay(status: KeyVisualizerStatus | null, enabled: boolean) {
 }
 
 export default function KeyVisualizerSettings() {
+  const active = usePageActive();
+  const reads = usePageReadGuard();
+  const loaded = useRef(false);
   const screens = Grid.useBreakpoint();
   const { notification } = AntApp.useApp();
   const [form] = Form.useForm<KeyVisualizerConfig>();
@@ -92,6 +96,11 @@ export default function KeyVisualizerSettings() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const values = Form.useWatch([], form);
+  const draftProtected = useRef(false);
+  draftProtected.current =
+    saving || !!error || (!!saved && !!values && JSON.stringify(values) !== JSON.stringify(saved));
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const ownSaveInFlight = useRef(false);
   const statusRefreshRevision = useRef(0);
   const {
@@ -115,12 +124,14 @@ export default function KeyVisualizerSettings() {
       if (!latest) return;
       form.setFieldsValue(config);
       setError(null);
+      if (!activeRef.current) return;
       const request = ++statusRefreshRevision.current;
       try {
         const nextStatus = await keyVisualizerApi.status();
         if (request === statusRefreshRevision.current) setStatus(nextStatus);
       } catch (reason) {
-        setError(`设置已保存，但刷新运行状态失败：${errorMessage(reason)}`);
+        if (request === statusRefreshRevision.current)
+          setError(`设置已保存，但刷新运行状态失败：${errorMessage(reason)}`);
       }
     },
     onError: (reason, { latest }) => {
@@ -134,8 +145,10 @@ export default function KeyVisualizerSettings() {
   });
 
   const load = useCallback(async () => {
+    const request = reads.begin();
+    const statusRequest = ++statusRefreshRevision.current;
     const revision = invalidateSave();
-    setLoading(true);
+    if (!loaded.current) setLoading(true);
     setError(null);
     try {
       await waitForPendingAutosave("key-visualizer-settings");
@@ -143,34 +156,35 @@ export default function KeyVisualizerSettings() {
         keyVisualizerApi.config(),
         keyVisualizerApi.status(),
       ]);
-      if (!isSaveCurrent(revision)) return;
+      if (!reads.isCurrent(request) || !isSaveCurrent(revision)) return;
+      loaded.current = true;
       const pendingError = takeDetachedAutosaveError("key-visualizer-settings");
       if (pendingError) setError(errorMessage(pendingError));
       setSaved(config);
       form.setFieldsValue(config);
-      setStatus(nextStatus);
+      if (statusRequest === statusRefreshRevision.current) setStatus(nextStatus);
     } catch (reason) {
-      if (isSaveCurrent(revision)) setError(errorMessage(reason));
+      if (reads.isCurrent(request) && isSaveCurrent(revision)) setError(errorMessage(reason));
     } finally {
-      if (isSaveCurrent(revision)) setLoading(false);
+      if (reads.isCurrent(request)) setLoading(false);
     }
-  }, [form, invalidateSave, isSaveCurrent]);
+  }, [form, invalidateSave, isSaveCurrent, reads]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
-
-  useEffect(() => {
+    if (!active) return;
     let disposed = false;
     const offs: (() => void)[] = [];
     const subscribe = async () => {
       const offConfig = await listen<KeyVisualizerConfig>(
         MAIN_EVENTS.keyVisualizerConfigChanged,
         ({ payload }) => {
-          if (disposed || ownSaveInFlight.current) return;
+          if (disposed || ownSaveInFlight.current || draftProtected.current) return;
+          reads.invalidate();
           invalidateSave();
+          loaded.current = true;
           setSaved(payload);
           form.setFieldsValue(payload);
+          setLoading(false);
         },
       );
       if (disposed) offConfig();
@@ -186,7 +200,8 @@ export default function KeyVisualizerSettings() {
               if (!disposed && request === statusRefreshRevision.current) setStatus(next);
             })
             .catch((reason) => {
-              if (!disposed) setError(`刷新按键展示状态失败：${errorMessage(reason)}`);
+              if (!disposed && request === statusRefreshRevision.current)
+                setError(`刷新按键展示状态失败：${errorMessage(reason)}`);
             });
         },
       );
@@ -198,14 +213,26 @@ export default function KeyVisualizerSettings() {
     });
     return () => {
       disposed = true;
+      statusRefreshRevision.current += 1;
       offs.forEach((off) => off());
     };
-  }, [form, invalidateSave]);
+  }, [form, invalidateSave, active, reads]);
 
   const dirty = useMemo(
     () => !!saved && !!values && JSON.stringify(values) !== JSON.stringify(saved),
     [saved, values],
   );
+  usePageRefresh(load, dirty || saving || (!!saved && !!error));
+  usePageRefresh(async () => {
+    const request = ++statusRefreshRevision.current;
+    try {
+      const next = await keyVisualizerApi.status();
+      if (request === statusRefreshRevision.current) setStatus(next);
+    } catch (reason) {
+      if (request === statusRefreshRevision.current)
+        setError(`刷新按键展示状态失败：${errorMessage(reason)}`);
+    }
+  });
 
   const scheduleSave = useCallback(
     (next: KeyVisualizerConfig) => {

@@ -12,11 +12,11 @@ describe("taskbar widget responsive layout", () => {
   const normal = [112, 48, 32, 48];
   const compact = [88, 42, 30, 42];
 
-  it("keeps an enabled temperature metric identifiable when its sensor is unavailable", () => {
+  it("keeps an enabled CPU metric with available sampling data", () => {
     const metrics = enabledWidgetMetrics(
       [
         {
-          kind: "cpu_temperature",
+          kind: "cpu",
           enabled: true,
           usage_scheme: "number",
           icon_style: "text",
@@ -25,7 +25,7 @@ describe("taskbar widget responsive layout", () => {
       ],
       { cpu_usage: 20, battery: null },
     );
-    expect(metrics.map((m) => m.kind)).toEqual(["cpu_temperature"]);
+    expect(metrics.map((m) => m.kind)).toEqual(["cpu"]);
     expect(DEFAULT_WIDGET_LAYOUT.font_size).toBe(14);
     expect(DEFAULT_WIDGET_LAYOUT.icon_size).toBe(18);
   });

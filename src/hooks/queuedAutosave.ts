@@ -42,8 +42,7 @@ export function createQueuedAutosave<Value, Result>(options: QueueOptions<Value,
           if (detached) {
             detachedErrors.set(options.key, error);
             options.onDetachedError(error);
-          }
-          else options.onError(error, { latest: true });
+          } else options.onError(error, { latest: true });
         }
       } finally {
         active -= 1;
@@ -65,6 +64,15 @@ export function createQueuedAutosave<Value, Result>(options: QueueOptions<Value,
     return revision;
   };
 
+  const flush = () => {
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+    const pending = pendingValue;
+    pendingValue = null;
+    if (pending) enqueue(pending.value, pending.revision);
+    return queue;
+  };
+
   return {
     schedule(value: Value, delay = options.delayMs): void {
       detachedErrors.delete(options.key);
@@ -78,14 +86,15 @@ export function createQueuedAutosave<Value, Result>(options: QueueOptions<Value,
     },
     detach(): void {
       detached = true;
-      if (timer !== null) clearTimeout(timer);
-      timer = null;
-      const pending = pendingValue;
-      pendingValue = null;
-      if (pending) enqueue(pending.value, pending.revision);
+      void flush();
     },
-    attach(): void { detached = false; },
+    flush,
+    attach(): void {
+      detached = false;
+    },
     invalidate,
-    isCurrent(value: number): boolean { return value === revision; },
+    isCurrent(value: number): boolean {
+      return value === revision;
+    },
   };
 }

@@ -1,8 +1,18 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { App as AntApp, Button, Grid, Layout, Menu, Splitter, Tooltip, Typography } from "antd";
+import {
+  App as AntApp,
+  Button,
+  Grid,
+  Layout,
+  Menu,
+  Splitter,
+  Tabs,
+  Tooltip,
+  Typography,
+} from "antd";
 import {
   DashboardOutlined,
   CameraOutlined,
@@ -13,6 +23,9 @@ import {
   MoonOutlined,
   SettingOutlined,
   SunOutlined,
+  MinusOutlined,
+  BorderOutlined,
+  CloseOutlined,
 } from "@ant-design/icons";
 import { useTheme } from "./ThemeContext";
 import appIcon from "./assets/app-icon.png";
@@ -26,7 +39,9 @@ import {
 } from "./utils/sidebarPreferences";
 
 import DeferredPage from "./components/DeferredPage";
+import { PageScope } from "./components/PageActivity";
 import TelemetryCollector from "./components/TelemetryCollector";
+import CaptureStartupFeedback from "./components/CaptureStartupFeedback";
 import {
   loadNavigationPreferences,
   saveNavigationPreferences,
@@ -62,7 +77,16 @@ const PAGES: PageItem[] = [
   { key: "widget", label: "任务栏挂件", icon: <DesktopOutlined /> },
   { key: "settings", label: "全局设置", icon: <SettingOutlined /> },
 ];
-const menuItem = ({ key, label, icon }: PageItem) => ({ key, label, icon });
+const menuItem = ({ key, label, icon }: PageItem) => ({
+  key,
+  label,
+  icon,
+  onMouseEnter: () => preloadPage(key),
+  onFocus: () => preloadPage(key),
+});
+function preloadPage(key: PageKey) {
+  void LOADERS[key]().catch((error) => console.warn(`页面预加载失败：${key}`, error));
+}
 
 export default function App() {
   const { notification } = AntApp.useApp();
@@ -70,7 +94,33 @@ export default function App() {
   const compactNavigation = useCompactNavigation();
   const [initialNavigation] = useState(loadNavigationPreferences);
   const contentRef = useRef<HTMLDivElement>(null);
+  const scrollPositions = useRef<Partial<Record<PageKey, number>>>({});
   const [activePage, setActivePage] = useState<PageKey>(initialNavigation.page);
+  const activePageRef = useRef(activePage);
+  const navigateTo = useCallback((page: PageKey) => {
+    if (page === activePageRef.current) return;
+    scrollPositions.current[activePageRef.current] = contentRef.current?.scrollTop ?? 0;
+    setActivePage(page);
+  }, []);
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen<string>("key-mapping-error", ({ payload }) => {
+      navigateTo("keymapper");
+      notification.error({ message: "按键映射提示", description: payload });
+    })
+      .then((off) => {
+        if (disposed) off();
+        else unlisten = off;
+      })
+      .catch((error) =>
+        notification.error({ message: "按键映射通知监听失败", description: String(error) }),
+      );
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [navigateTo, notification]);
   const [screenshotTab, setScreenshotTab] = useState<ScreenshotTabKey>(initialNavigation.tab);
   const [siderWidth, setSiderWidth] = useState(loadSidebarWidth);
   const { resolved, setMode } = useTheme();
@@ -83,7 +133,7 @@ export default function App() {
       if (payload.page === "screenshot") {
         setScreenshotTab(payload.tab ?? "history");
       }
-      setActivePage(payload.page);
+      navigateTo(payload.page);
     })
       .then((off) => {
         if (disposed) off();
@@ -96,7 +146,7 @@ export default function App() {
       disposed = true;
       unlisten?.();
     };
-  }, [notification]);
+  }, [notification, navigateTo]);
 
   useEffect(() => {
     let disposed = false;
@@ -132,7 +182,6 @@ export default function App() {
   }, [siderWidth]);
 
   useEffect(() => {
-    contentRef.current?.scrollTo({ top: 0 });
     try {
       saveNavigationPreferences({ page: activePage, tab: screenshotTab });
     } catch (error) {
@@ -140,9 +189,17 @@ export default function App() {
     }
   }, [activePage, screenshotTab, notification]);
 
+  useLayoutEffect(() => {
+    activePageRef.current = activePage;
+    contentRef.current?.scrollTo({
+      top: scrollPositions.current[activePage] ?? 0,
+      behavior: "instant",
+    });
+  }, [activePage]);
+
   const currentPage = PAGES.find((page) => page.key === activePage) ?? PAGES[0];
-  const page = useMemo(() => {
-    switch (activePage) {
+  const renderPage = (key: PageKey) => {
+    switch (key) {
       case "keymapper":
         return <DeferredPage key="keymapper" load={LOADERS.keymapper} pageProps={{}} />;
       case "screenshot":
@@ -160,27 +217,14 @@ export default function App() {
       case "settings":
         return <DeferredPage key="settings" load={LOADERS.settings} pageProps={{}} />;
       default:
-        return (
-          <DeferredPage
-            key="dashboard"
-            load={LOADERS.dashboard}
-            pageProps={{
-              onNavigate: (
-                target: "keymapper" | "screenshot" | "widget",
-                tab?: ScreenshotTabKey,
-              ) => {
-                if (target === "screenshot" && tab) setScreenshotTab(tab);
-                setActivePage(target);
-              },
-            }}
-          />
-        );
+        return <DeferredPage key="dashboard" load={LOADERS.dashboard} pageProps={{}} />;
     }
-  }, [activePage, screenshotTab]);
+  };
 
   return (
     <>
       <TelemetryCollector />
+      <CaptureStartupFeedback />
       <Splitter
         className={styles.shell}
         orientation="horizontal"
@@ -207,7 +251,7 @@ export default function App() {
               mode="inline"
               selectedKeys={[activePage]}
               inlineCollapsed={compactNavigation}
-              onClick={({ key }) => setActivePage(key as PageKey)}
+              onClick={({ key }) => navigateTo(key as PageKey)}
               items={PAGES.filter((page) => page.key !== "settings").map(menuItem)}
               className={styles.nav}
             />
@@ -215,7 +259,7 @@ export default function App() {
               mode="inline"
               selectedKeys={[activePage]}
               inlineCollapsed={compactNavigation}
-              onClick={() => setActivePage("settings")}
+              onClick={() => navigateTo("settings")}
               items={[menuItem(PAGES[5])]}
               className={styles.bottomNav}
             />
@@ -250,41 +294,67 @@ export default function App() {
                   />
                 </Tooltip>
                 <div className={styles.windowControls}>
-                  <button
-                    type="button"
+                  <Button
+                    type="text"
+                    icon={<MinusOutlined />}
                     aria-label="最小化窗口"
                     title="最小化"
-                    onClick={() => void getCurrentWindow().minimize()}
-                  >
-                    <svg viewBox="0 0 12 12" aria-hidden="true">
-                      <path d="M2.5 6h7" />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
+                    onClick={() =>
+                      void getCurrentWindow()
+                        .minimize()
+                        .catch((error) =>
+                          notification.error({ message: "最小化失败", description: String(error) }),
+                        )
+                    }
+                  />
+                  <Button
+                    type="text"
+                    icon={<BorderOutlined />}
                     aria-label="最大化或还原窗口"
                     title="最大化或还原"
-                    onClick={() => void getCurrentWindow().toggleMaximize()}
-                  >
-                    <svg viewBox="0 0 12 12" aria-hidden="true">
-                      <rect x="2.5" y="2.5" width="7" height="7" rx="1" />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
+                    onClick={() =>
+                      void getCurrentWindow()
+                        .toggleMaximize()
+                        .catch((error) =>
+                          notification.error({
+                            message: "调整窗口失败",
+                            description: String(error),
+                          }),
+                        )
+                    }
+                  />
+                  <Button
+                    type="text"
+                    danger
+                    icon={<CloseOutlined />}
                     aria-label="关闭窗口"
                     title="关闭"
-                    onClick={() => void getCurrentWindow().close()}
-                  >
-                    <svg viewBox="0 0 12 12" aria-hidden="true">
-                      <path d="M3 3l6 6M9 3L3 9" />
-                    </svg>
-                  </button>
+                    onClick={() =>
+                      void getCurrentWindow()
+                        .close()
+                        .catch((error) =>
+                          notification.error({
+                            message: "关闭窗口失败",
+                            description: String(error),
+                          }),
+                        )
+                    }
+                  />
                 </div>
               </div>
             </Header>
             <Content ref={contentRef} className={styles.content}>
-              {page}
+              <Tabs
+                activeKey={activePage}
+                destroyOnHidden={false}
+                renderTabBar={() => <></>}
+                animated={false}
+                items={PAGES.map(({ key, label }) => ({
+                  key,
+                  label,
+                  children: <PageScope active={activePage === key}>{renderPage(key)}</PageScope>,
+                }))}
+              />
             </Content>
           </Layout>
         </Splitter.Panel>

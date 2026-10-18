@@ -1,11 +1,24 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Alert, Button, ConfigProvider, Spin, theme as antdTheme } from "antd";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { X, Maximize, Minimize, Plus, Minus, Scan, Square } from "lucide-react";
+import {
+  X,
+  Maximize,
+  Minimize,
+  Plus,
+  Minus,
+  Scan,
+  Square,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import { historyApi, errorMessage } from "../api/commands";
 import type { HistoryPreviewSession } from "../api/ipc";
 import { useWindowTheme } from "../hooks/useWindowTheme";
+import { accentColors } from "../themePalette";
 import { usePreviewImage } from "./usePreviewImage";
+import { previewDirection, previewStep } from "./previewNavigation";
 import {
   constrainView,
   fitView,
@@ -19,12 +32,15 @@ import "./preview.scss";
 const initialView: ImageView = { scale: 1, x: 0, y: 0, mode: "fit" };
 
 export default function HistoryPreview() {
-  const { resolved } = useWindowTheme();
+  const { resolved, accentColor } = useWindowTheme();
   const [session, setSession] = useState<HistoryPreviewSession | null>(null);
   const sessionGeneration = useRef(0);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [sessionAttempt, setSessionAttempt] = useState(0);
   const [operationError, setOperationError] = useState<string | null>(null);
+  const [navigationBusy, setNavigationBusy] = useState(false);
+  const navigationOperation = useRef(false);
+  const [retryDirection, setRetryDirection] = useState<-1 | 1 | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [windowBusy, setWindowBusy] = useState(false);
   const windowOperation = useRef(false);
@@ -38,6 +54,17 @@ export default function HistoryPreview() {
     view: ImageView;
   } | null>(null);
   const { image, error, retry } = usePreviewImage(session);
+  const acceptSession = useCallback((next: HistoryPreviewSession | null) => {
+    if (next && next.generation > sessionGeneration.current) {
+      sessionGeneration.current = next.generation;
+      pan.current = null;
+      setView(initialView);
+      setSession(next);
+      setSessionError(null);
+      setOperationError(null);
+      setRetryDirection(null);
+    }
+  }, []);
   useEffect(() => {
     void getCurrentWindow()
       .setTheme(resolved)
@@ -47,13 +74,7 @@ export default function HistoryPreview() {
     let disposed = false;
     let off: (() => void) | undefined;
     const accept = (next: HistoryPreviewSession | null) => {
-      if (!disposed && next && next.generation > sessionGeneration.current) {
-        sessionGeneration.current = next.generation;
-        pan.current = null;
-        setView(initialView);
-        setSession(next);
-        setSessionError(null);
-      }
+      if (!disposed) acceptSession(next);
     };
     setSessionError(null);
     void listen<HistoryPreviewSession>("history-preview-session", ({ payload }) => accept(payload))
@@ -75,7 +96,35 @@ export default function HistoryPreview() {
       disposed = true;
       off?.();
     };
-  }, [sessionAttempt]);
+  }, [sessionAttempt, acceptSession]);
+  const navigate = useCallback(
+    async (direction: -1 | 1) => {
+      if (
+        !session ||
+        navigationOperation.current ||
+        !previewStep(session.ids, session.id, direction)
+      )
+        return;
+      navigationOperation.current = true;
+      setNavigationBusy(true);
+      setOperationError(null);
+      setRetryDirection(null);
+      try {
+        acceptSession(await historyApi.navigatePreview(session.generation, direction));
+      } catch (error) {
+        if (sessionGeneration.current === session.generation) {
+          setOperationError(
+            `切换截图失败：${errorMessage(error)}。若记录已删除，请从历史页重新打开。`,
+          );
+          setRetryDirection(direction);
+        }
+      } finally {
+        navigationOperation.current = false;
+        setNavigationBusy(false);
+      }
+    },
+    [session, acceptSession],
+  );
   useLayoutEffect(() => {
     const node = stage.current;
     if (!node) return;
@@ -132,11 +181,22 @@ export default function HistoryPreview() {
       if (event.key === "F11" || event.key === "Escape") {
         event.preventDefault();
         void windowAction(event.key === "F11" ? "fullscreen" : "escape");
+      } else {
+        const direction = previewDirection(
+          event,
+          !!(event.target as HTMLElement)?.closest?.(
+            "input,textarea,select,[contenteditable='true']",
+          ),
+        );
+        if (direction) {
+          event.preventDefault();
+          void navigate(direction);
+        }
       }
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [windowAction]);
+  }, [windowAction, navigate]);
   const zoom = useCallback(
     (factor: number) => {
       if (image)
@@ -167,155 +227,226 @@ export default function HistoryPreview() {
     return () => node.removeEventListener("wheel", wheel);
   }, [image, stageSize]);
   return (
-    <main className="history-preview">
-      <header className="preview-toolbar">
+    <ConfigProvider
+      theme={{
+        algorithm: resolved === "dark" ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+        token: { colorPrimary: accentColors(accentColor, resolved).solid },
+      }}
+    >
+      <main className="history-preview">
+        <header className="preview-toolbar">
+          <div
+            className="preview-title"
+            onPointerDown={(event) => {
+              if (event.button === 0 && !fullscreen)
+                void getCurrentWindow()
+                  .startDragging()
+                  .catch((error) => setOperationError(errorMessage(error)));
+            }}
+          >
+            截图原图
+            {session ? ` · ${session.ids.indexOf(session.id) + 1}/${session.ids.length}` : ""}
+          </div>
+          <div className="preview-tools">
+            <Button
+              type="text"
+              aria-label="缩小"
+              title="缩小"
+              disabled={!image}
+              onClick={() => zoom(1 / 1.2)}
+            >
+              <Minus />
+            </Button>
+            <output aria-label="缩放比例">
+              {image ? `${(view.scale * 100).toFixed(view.scale < 0.1 ? 1 : 0)}%` : "—"}
+            </output>
+            <Button
+              type="text"
+              aria-label="放大"
+              title="放大"
+              disabled={!image}
+              onClick={() => zoom(1.2)}
+            >
+              <Plus />
+            </Button>
+            <Button
+              type="text"
+              aria-label="适应窗口"
+              title="适应窗口"
+              disabled={!image}
+              onClick={() => image && setView(fitView(stageSize, image.size))}
+            >
+              <Scan />
+              <span>适应</span>
+            </Button>
+            <Button
+              type="text"
+              aria-label="原始大小"
+              title="原始大小"
+              disabled={!image}
+              onClick={() => setView({ ...initialView, mode: "manual" })}
+            >
+              <Square />
+              <span>原始</span>
+            </Button>
+            <Button
+              type="text"
+              aria-label={fullscreen ? "退出全屏" : "全屏"}
+              title="全屏（F11）"
+              disabled={windowBusy}
+              onClick={() => void windowAction("fullscreen")}
+            >
+              {fullscreen ? <Minimize /> : <Maximize />}
+            </Button>
+          </div>
+          <Button
+            type="text"
+            danger
+            className="preview-close"
+            aria-label="关闭预览"
+            title="关闭"
+            disabled={windowBusy}
+            onClick={() => void windowAction("close")}
+          >
+            <X />
+          </Button>
+        </header>
+        {operationError && (
+          <Alert
+            type="error"
+            showIcon
+            title={operationError}
+            closable={{ onClose: () => setOperationError(null), "aria-label": "关闭提示" }}
+            action={
+              retryDirection ? (
+                <Button
+                  size="small"
+                  loading={navigationBusy}
+                  onClick={() => void navigate(retryDirection)}
+                >
+                  重试切换
+                </Button>
+              ) : undefined
+            }
+          />
+        )}
         <div
-          className="preview-title"
+          ref={stage}
+          className={`preview-stage ${image ? "has-image" : ""}`}
+          role="region"
+          aria-label="原图，可滚轮缩放和拖动"
+          onDoubleClick={() =>
+            image &&
+            setView((previous) =>
+              previous.mode === "fit"
+                ? { ...initialView, mode: "manual" }
+                : fitView(stageSize, image.size),
+            )
+          }
           onPointerDown={(event) => {
-            if (event.button === 0 && !fullscreen)
-              void getCurrentWindow()
-                .startDragging()
-                .catch((error) => setOperationError(errorMessage(error)));
+            if (event.button !== 0 || !image || (event.target as HTMLElement).closest("button"))
+              return;
+            event.currentTarget.setPointerCapture(event.pointerId);
+            pan.current = {
+              pointerId: event.pointerId,
+              clientX: event.clientX,
+              clientY: event.clientY,
+              view,
+            };
+          }}
+          onPointerMove={(event) => {
+            const current = pan.current;
+            if (!current || current.pointerId !== event.pointerId || !image) return;
+            if (Math.hypot(event.clientX - current.clientX, event.clientY - current.clientY) < 2)
+              return;
+            setView(
+              constrainView(
+                {
+                  ...current.view,
+                  x: current.view.x + event.clientX - current.clientX,
+                  y: current.view.y + event.clientY - current.clientY,
+                  mode: "manual",
+                },
+                stageSize,
+                image.size,
+              ),
+            );
+          }}
+          onPointerUp={() => {
+            pan.current = null;
+          }}
+          onPointerCancel={() => {
+            pan.current = null;
+          }}
+          onLostPointerCapture={() => {
+            pan.current = null;
           }}
         >
-          截图原图
+          {sessionError || error ? (
+            <div className="preview-state" role="alert">
+              <strong>原图加载失败</strong>
+              <p>{sessionError || error}</p>
+              <Button
+                type="primary"
+                onClick={() => (sessionError ? setSessionAttempt((value) => value + 1) : retry())}
+              >
+                重试
+              </Button>
+            </div>
+          ) : image ? (
+            <img
+              src={image.url}
+              alt="截图原图"
+              draggable={false}
+              style={{
+                width: image.size.width,
+                height: image.size.height,
+                transform: `translate(calc(-50% + ${view.x}px), calc(-50% + ${view.y}px)) scale(${view.scale})`,
+              }}
+            />
+          ) : (
+            <div className="preview-state" role="status">
+              <Spin />
+              正在加载原图…
+            </div>
+          )}
         </div>
-        <div className="preview-tools">
-          <button aria-label="缩小" title="缩小" disabled={!image} onClick={() => zoom(1 / 1.2)}>
-            <Minus />
-          </button>
-          <output aria-label="缩放比例">
-            {image ? `${(view.scale * 100).toFixed(view.scale < 0.1 ? 1 : 0)}%` : "—"}
-          </output>
-          <button aria-label="放大" title="放大" disabled={!image} onClick={() => zoom(1.2)}>
-            <Plus />
-          </button>
-          <button
-            aria-label="适应窗口"
-            title="适应窗口"
-            disabled={!image}
-            onClick={() => image && setView(fitView(stageSize, image.size))}
+        <footer className="preview-hint">
+          <Button
+            type="text"
+            aria-label="上一张截图"
+            title="上一张（←）"
+            disabled={navigationBusy || !session || !previewStep(session.ids, session.id, -1)}
+            onClick={() => void navigate(-1)}
           >
-            <Scan />
-            <span>适应</span>
-          </button>
-          <button
-            aria-label="原始大小"
-            title="原始大小"
-            disabled={!image}
-            onClick={() => setView({ ...initialView, mode: "manual" })}
+            <ChevronLeft />
+            上一张
+          </Button>
+          <span role="status" aria-live="polite">
+            {navigationBusy ? "正在切换…" : "← → 切图 · 滚轮缩放 · 双击切换比例"}
+          </span>
+          <Button
+            type="text"
+            aria-label="下一张截图"
+            title="下一张（→）"
+            disabled={navigationBusy || !session || !previewStep(session.ids, session.id, 1)}
+            onClick={() => void navigate(1)}
           >
-            <Square />
-            <span>原始</span>
-          </button>
-          <button
-            aria-label={fullscreen ? "退出全屏" : "全屏"}
-            title="全屏（F11）"
-            disabled={windowBusy}
-            onClick={() => void windowAction("fullscreen")}
-          >
-            {fullscreen ? <Minimize /> : <Maximize />}
-          </button>
-        </div>
-        <button
-          className="preview-close"
-          aria-label="关闭预览"
-          title="关闭"
-          disabled={windowBusy}
-          onClick={() => void windowAction("close")}
-        >
-          <X />
-        </button>
-      </header>
-      {operationError && (
-        <div className="preview-operation-error" role="alert">
-          {operationError}
-          <button onClick={() => setOperationError(null)}>关闭提示</button>
-        </div>
-      )}
-      <div
-        ref={stage}
-        className={`preview-stage ${image ? "has-image" : ""}`}
-        role="region"
-        aria-label="原图，可滚轮缩放和拖动"
-        onDoubleClick={() =>
-          image &&
-          setView((previous) =>
-            previous.mode === "fit"
-              ? { ...initialView, mode: "manual" }
-              : fitView(stageSize, image.size),
-          )
-        }
-        onPointerDown={(event) => {
-          if (event.button !== 0 || !image || (event.target as HTMLElement).closest("button"))
-            return;
-          event.currentTarget.setPointerCapture(event.pointerId);
-          pan.current = {
-            pointerId: event.pointerId,
-            clientX: event.clientX,
-            clientY: event.clientY,
-            view,
-          };
-        }}
-        onPointerMove={(event) => {
-          const current = pan.current;
-          if (!current || current.pointerId !== event.pointerId || !image) return;
-          if (Math.hypot(event.clientX - current.clientX, event.clientY - current.clientY) < 2)
-            return;
-          setView(
-            constrainView(
-              {
-                ...current.view,
-                x: current.view.x + event.clientX - current.clientX,
-                y: current.view.y + event.clientY - current.clientY,
-                mode: "manual",
-              },
-              stageSize,
-              image.size,
-            ),
-          );
-        }}
-        onPointerUp={() => {
-          pan.current = null;
-        }}
-        onPointerCancel={() => {
-          pan.current = null;
-        }}
-        onLostPointerCapture={() => {
-          pan.current = null;
-        }}
-      >
-        {sessionError || error ? (
-          <div className="preview-state" role="alert">
-            <strong>原图加载失败</strong>
-            <p>{sessionError || error}</p>
-            <button
-              onClick={() => (sessionError ? setSessionAttempt((value) => value + 1) : retry())}
-            >
-              重试
-            </button>
-          </div>
-        ) : image ? (
-          <img
-            src={image.url}
-            alt="截图原图"
-            draggable={false}
-            style={{
-              width: image.size.width,
-              height: image.size.height,
-              transform: `translate(calc(-50% + ${view.x}px), calc(-50% + ${view.y}px)) scale(${view.scale})`,
-            }}
-          />
-        ) : (
-          <div className="preview-state" role="status">
-            正在加载原图…
-          </div>
-        )}
-      </div>
-      <footer className="preview-hint">滚轮缩放 · 拖动查看 · 双击切换比例</footer>
-      {!fullscreen &&
-        ["North", "NorthEast", "East", "SouthEast", "South", "SouthWest", "West", "NorthWest"].map(
-          (direction) => (
+            下一张
+            <ChevronRight />
+          </Button>
+        </footer>
+        {!fullscreen &&
+          [
+            "North",
+            "NorthEast",
+            "East",
+            "SouthEast",
+            "South",
+            "SouthWest",
+            "West",
+            "NorthWest",
+          ].map((direction) => (
             <div
               key={direction}
               className={`preview-resize resize-${direction}`}
@@ -326,8 +457,8 @@ export default function HistoryPreview() {
                     .catch((error) => setOperationError(errorMessage(error)));
               }}
             />
-          ),
-        )}
-    </main>
+          ))}
+      </main>
+    </ConfigProvider>
   );
 }

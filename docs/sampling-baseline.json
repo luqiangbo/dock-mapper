@@ -1,0 +1,68 @@
+{
+  "recordedAt": "2026-10-14T00:51:13.4618545+08:00",
+  "machine": "LQB",
+  "os": "Microsoft Windows NT 10.0.26300.0",
+  "hostPowerShell": "7.6.6",
+  "queryExecutable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+  "scenarioLaunchSeconds": 20,
+  "actualMeasurementSeconds": 60.09,
+  "method": "Same query scripts, -NoProfile -NonInteractive -Command, hidden processes, closed stdin, captured output, 5s timeout. Independent scheduling: valid GPU 2s / temperature 5s, otherwise 30s; no overlapping same-source queries. Wall-time includes up to 25ms polling delay. Does not measure whole-app CPU/memory or main-loop scheduling.",
+  "results": [
+    {
+      "scenario": "gpu-only",
+      "source": "gpu",
+      "actualScenarioSeconds": 20.038,
+      "count": 1,
+      "processStarts": 1,
+      "totalMs": 3158.052,
+      "averageMs": 3158.052,
+      "maxMs": 3158.052,
+      "valid": 0,
+      "noData": 0,
+      "failed": 1,
+      "timeouts": 0
+    },
+    {
+      "scenario": "temperature-only",
+      "source": "temperature",
+      "actualScenarioSeconds": 20.016,
+      "count": 1,
+      "processStarts": 1,
+      "totalMs": 363.137,
+      "averageMs": 363.137,
+      "maxMs": 363.137,
+      "valid": 0,
+      "noData": 1,
+      "failed": 0,
+      "timeouts": 0
+    },
+    {
+      "scenario": "both",
+      "source": "gpu",
+      "actualScenarioSeconds": 20.025,
+      "count": 10,
+      "processStarts": 10,
+      "totalMs": 8285.818,
+      "averageMs": 828.582,
+      "maxMs": 1305.696,
+      "valid": 10,
+      "noData": 0,
+      "failed": 0,
+      "timeouts": 0
+    },
+    {
+      "scenario": "both",
+      "source": "temperature",
+      "actualScenarioSeconds": 20.025,
+      "count": 1,
+      "processStarts": 1,
+      "totalMs": 329.068,
+      "averageMs": 329.068,
+      "maxMs": 329.068,
+      "valid": 0,
+      "noData": 1,
+      "failed": 0,
+      "timeouts": 0
+    }
+  ]
+}

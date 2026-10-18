@@ -9,6 +9,19 @@ interface ImageActionOptions {
   fallbackError: string;
 }
 
+/** Cancellation advances the caller's token, allowing a new capture to commit. */
+export class ImageActionGate {
+  private active: number | null = null;
+  begin(current: number): number | null {
+    if (this.active === current) return null;
+    this.active = current + 1;
+    return this.active;
+  }
+  finish(token: number) {
+    if (this.active === token) this.active = null;
+  }
+}
+
 export function readableActionError(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === "string" && error.trim()) return error;

@@ -173,7 +173,10 @@ pub(super) fn capture_with_gdi_fallback<T>(
     }
 }
 
-pub(super) fn capture_active_screen(app: &AppHandle) -> Result<CaptureData, String> {
+pub(super) fn capture_active_screen(
+    app: &AppHandle,
+    generation: u64,
+) -> Result<CaptureData, String> {
     let screen = active_screen(app)?;
     let rect = crate::dxgi_capture::MonitorRect {
         x: screen.physical_origin_x,
@@ -208,11 +211,7 @@ pub(super) fn capture_active_screen(app: &AppHandle) -> Result<CaptureData, Stri
     );
     Ok(CaptureData {
         bmp,
-        generation: app
-            .state::<AppState>()
-            .capture_generation
-            .fetch_add(1, Ordering::SeqCst)
-            + 1,
+        generation,
         bounds: screen.bounds,
         image_width,
         image_height,

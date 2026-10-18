@@ -12,6 +12,20 @@ $compact-radius: 10px;
   gap: 16px;
 }
 
+.softwareUpdateRow {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding-block: 12px;
+}
+.historyDateGroup {
+  min-width: 0;
+  > h5 {
+    margin: 4px 0 12px;
+  }
+}
+
 .overviewPanel {
   padding: 16px;
   @include glass.surface(var(--glass-surface), 10px);
@@ -57,49 +71,6 @@ $compact-radius: 10px;
   align-items: center;
   justify-content: center;
   gap: 10px;
-}
-
-.dashboardStatusList,
-.dashboardActions {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.dashboardStatusRow {
-  display: flex;
-  min-height: 32px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--glass-border);
-
-  &:last-child {
-    padding-bottom: 0;
-    border-bottom: 0;
-  }
-
-  span {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--text-secondary);
-  }
-
-  b {
-    text-align: right;
-    font-size: 12px;
-  }
-}
-
-.dashboardActions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-
-  button {
-    height: 42px;
-  }
 }
 
 .overviewGrid {
@@ -235,15 +206,54 @@ $compact-radius: 10px;
   border-radius: 10px;
   background: var(--surface-muted);
 }
-.widgetSettingsLayout { display: flex; flex-direction: column; gap: 16px; }
-.widgetStatusPane { display: flex; flex-direction: column; gap: 8px; }
-.widgetSettingsLayout .configurationPane { border-left: 0; padding-left: 0; }
-.previewBoundary { flex: 0 0 16px; text-align: center; color: var(--text-secondary); }
-.widgetLayoutControls { padding: 12px 0 16px; border-bottom: 1px solid var(--glass-border); }
-.widgetLayoutHeading { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.widgetLayoutField { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
-.widgetLayoutField :global(.ant-select), .widgetLayoutField :global(.ant-input-number) { width: 140px; flex: 0 0 140px; }
-.widgetDistanceGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px 24px; margin: 12px 0; }
+.widgetSettingsLayout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.widgetStatusPane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.widgetSettingsLayout .configurationPane {
+  border-left: 0;
+  padding-left: 0;
+}
+.previewBoundary {
+  flex: 0 0 16px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+.widgetLayoutControls {
+  padding: 12px 0 16px;
+  border-bottom: 1px solid var(--glass-border);
+}
+.widgetLayoutHeading {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.widgetLayoutField {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.widgetLayoutField :global(.ant-select),
+.widgetLayoutField :global(.ant-input-number) {
+  width: 140px;
+  flex: 0 0 140px;
+}
+.widgetDistanceGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px 24px;
+  margin: 12px 0;
+}
 .widgetOptionCard {
   display: grid;
   min-width: 0;
@@ -806,17 +816,13 @@ $compact-radius: 10px;
 }
 
 .historyPreviewButton {
+  position: relative;
+  display: block;
   width: 100%;
   height: 100%;
   padding: 0;
   cursor: zoom-in;
-  border: 0;
-  background: transparent;
-}
-
-.historyPreviewButton:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
+  overflow: hidden;
 }
 
 .historyImage {
@@ -1043,7 +1049,9 @@ $compact-radius: 10px;
   max-width: 100%;
   min-width: 0;
 }
-.widgetPreview > :global(.wm-row) { flex: 0 0 auto; }
+.widgetPreview > :global(.wm-row) {
+  flex: 0 0 auto;
+}
 
 .visualizerOption > div:last-child {
   flex: 0 0 auto;
@@ -1104,8 +1112,11 @@ $compact-radius: 10px;
   inset: auto 0 -1px;
 }
 .historyOpening {
+  position: absolute;
+  inset: auto 0 0;
   display: block;
   padding: 8px;
+  background: var(--glass-panel);
   color: var(--text-secondary);
   font-size: 12px;
 }
@@ -1206,3 +1217,48 @@ $compact-radius: 10px;
   }
 }
 
+.logToolbar {
+  margin-bottom: 10px;
+}
+.logViewport {
+  height: 280px;
+  overflow: auto;
+  background: var(--surface-muted);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  padding: 8px;
+  font: 12px/1.7 var(--font-mono);
+  overflow-anchor: none;
+}
+.logLine {
+  display: grid;
+  grid-template-columns: 150px 34px 140px minmax(160px, 1fr);
+  gap: 8px;
+  padding: 2px 0;
+  align-items: start;
+  > span,
+  time {
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+  }
+  time {
+    color: var(--text-secondary);
+  }
+}
+.logInfo {
+  color: var(--text-secondary);
+}
+.logWarning {
+  color: var(--warning);
+}
+.logError {
+  color: var(--danger);
+}
+@media (max-width: 640px) {
+  .logLine {
+    grid-template-columns: 1fr 34px;
+    > span:last-child {
+      grid-column: 1 / -1;
+    }
+  }
+}

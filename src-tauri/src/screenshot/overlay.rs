@@ -81,8 +81,14 @@ pub(super) fn open_overlay(app: &AppHandle, capture: &CaptureData) -> Result<(),
     // native frame is captured. Hiding it again here introduces an extra DWM
     // composition cycle on every screenshot and is the main source of the
     // visible desktop flash on Windows.
-    if app.state::<AppState>().overlay_ready.load(Ordering::SeqCst) {
-        let _ = app.emit_to(label.as_str(), "capture-ready", &label);
+    if app
+        .state::<AppState>()
+        .overlay_ready
+        .lock_or_recover()
+        .contains(&label)
+    {
+        app.emit_to(label.as_str(), "capture-ready", &label)
+            .map_err(|error| error.to_string())?;
     }
     // The renderer shows the window only after the captured image has decoded
     // and painted. Showing a transparent WebView earlier causes a brief desktop
@@ -149,95 +155,88 @@ pub(super) fn prewarm_overlay(app: &AppHandle) {
     }
 }
 
-pub(super) fn show_capture_error(app: &AppHandle, detail: &str) {
-    tracing::error!(target: "dock_mapper::capture", %detail, "screenshot capture failed");
-    let _ = app.emit("capture-error", detail.to_string());
-    let _ = rfd::MessageDialog::new()
-        .set_title("Cannot capture screen")
-        .set_description(format!(
-            "DockMapper 截图无法捕获屏幕。请检查屏幕录制权限，完全退出 DockMapper 后重试。\n\n{detail}"
-        ))
-        .set_level(rfd::MessageLevel::Error)
-        .show();
+pub(super) fn handle_start_capture(app: &AppHandle) -> Result<u64, String> {
+    handle_start_capture_with_mode(app, CaptureMode::Screenshot)
 }
 
-pub(super) fn handle_start_capture(app: &AppHandle) {
-    handle_start_capture_with_mode(app, CaptureMode::Screenshot);
+pub(super) fn handle_start_quick_ocr(app: &AppHandle) -> Result<u64, String> {
+    handle_start_capture_with_mode(app, CaptureMode::QuickOcr)
 }
 
-pub(super) fn handle_start_quick_ocr(app: &AppHandle) {
-    handle_start_capture_with_mode(app, CaptureMode::QuickOcr);
-}
-
-fn handle_start_capture_with_mode(app: &AppHandle, mode: CaptureMode) {
+fn handle_start_capture_with_mode(app: &AppHandle, mode: CaptureMode) -> Result<u64, String> {
     let state = app.state::<AppState>();
-    if state.capture_in_progress.swap(true, Ordering::SeqCst) {
-        return;
+    let mut startup = state.startup.lock_or_recover();
+    if startup.generation().is_some() {
+        return Err("截图正在启动，请稍候".into());
     }
+    // Allocate before capture starts: acknowledgement and every later result
+    // refer to one generation, even when the capture worker finishes late.
+    let generation = state.capture_generation.fetch_add(1, Ordering::SeqCst) + 1;
+    let status = startup.begin(generation)?;
     match crate::visualizer_effects::suspend_for_capture(app) {
         Ok(token) => *state.visualizer_suspend_token.lock_or_recover() = token,
         Err(error) => {
             tracing::warn!(target: "dock_mapper::key_visualizer", %error, "截图前暂停按键展示失败")
         }
     }
-    // A shortcut can arrive while the previous WebView is still painting
-    // (most visible on the first Windows launch). Hide it before the native
-    // capture so the screenshot tool never captures its own transparent surface together
-    // with the desktop.
     if let Some(window) = active_overlay_window(app) {
-        let _ = window.hide();
+        if let Err(error) = window.hide() {
+            tracing::warn!(target: "dock_mapper::capture", %error, "隐藏上一张截图失败");
+        }
     }
+    *state.capture.lock_or_recover() = None;
     *URI_CAPTURE.lock_or_recover() = None;
+    startup::publish(app, &status);
+    drop(startup);
+
+    let timeout_app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(startup::STARTUP_TIMEOUT).await;
+        let ui = timeout_app.clone();
+        if let Err(error) = timeout_app.run_on_main_thread(move || {
+            startup::fail_startup(&ui, generation, "截图启动超时（8 秒），请重试".into());
+        }) {
+            startup::fail_startup(&timeout_app, generation, format!("截图调度失败：{error}"));
+        }
+    });
     let worker_app = app.clone();
     thread::spawn(move || {
         let started = Instant::now();
         #[cfg(target_os = "windows")]
-        // DwmFlush waits for the hide request to reach the compositor without
-        // adding a configurable fixed delay to every screenshot.
         unsafe {
             let _ = windows::Win32::Graphics::Dwm::DwmFlush();
         }
-        let result = capture_active_screen(&worker_app).map(|mut capture| {
+        if !worker_app
+            .state::<AppState>()
+            .startup
+            .lock_or_recover()
+            .pending(generation)
+        {
+            return;
+        }
+        tracing::info!(target: "dock_mapper::capture", generation, "Native capture started");
+        let result = capture_active_screen(&worker_app, generation).map(|mut capture| {
             capture.mode = mode;
             capture
         });
         let native_ready_ms = started.elapsed().as_millis();
         let ui_app = worker_app.clone();
         if let Err(error) = worker_app.run_on_main_thread(move || {
-            match result {
-                Ok(capture) => {
-                    *ui_app.state::<AppState>().capture.lock_or_recover() = Some(capture.clone());
-                    *URI_CAPTURE.lock_or_recover() = Some(capture.clone());
-                    record_capture_timing(
-                        &ui_app,
-                        capture.generation,
-                        started,
-                        native_ready_ms,
-                        capture.backend,
-                    );
-                    if let Err(error) = open_overlay(&ui_app, &capture) {
-                        show_capture_error(&ui_app, &error);
-                        resume_visualizer(&ui_app);
-                    }
-                }
-                Err(error) => {
-                    show_capture_error(&ui_app, &error);
-                    resume_visualizer(&ui_app);
-                }
-            }
-            ui_app
-                .state::<AppState>()
-                .capture_in_progress
-                .store(false, Ordering::SeqCst);
-        }) {
-            worker_app
-                .state::<AppState>()
-                .capture_in_progress
-                .store(false, Ordering::SeqCst);
-            tracing::error!(target: "dock_mapper::capture", %error, "Unable to display capture overlay");
-            resume_visualizer(&worker_app);
-        }
+            let state = ui_app.state::<AppState>();
+            let guard = state.startup.lock_or_recover();
+            if !guard.pending(generation) { return; }
+            let result = result.and_then(|capture| {
+                *state.capture.lock_or_recover() = Some(capture.clone());
+                *URI_CAPTURE.lock_or_recover() = Some(capture.clone());
+                record_capture_timing(&ui_app, generation, started, native_ready_ms, capture.backend);
+                tracing::info!(target: "dock_mapper::capture", generation, "Waiting for capture renderer");
+                open_overlay(&ui_app, &capture)
+            });
+            drop(guard);
+            if let Err(error) = result { startup::fail_startup(&ui_app, generation, error); }
+        }) { startup::fail_startup(&worker_app, generation, format!("截图显示调度失败：{error}")); }
     });
+    Ok(generation)
 }
 
 pub(super) fn hide_overlay_for_commit(app: &AppHandle) {
@@ -258,7 +257,7 @@ pub(super) fn finish_overlay_commit(app: &AppHandle) {
     resume_visualizer(app);
 }
 
-fn resume_visualizer(app: &AppHandle) {
+pub(super) fn resume_visualizer(app: &AppHandle) {
     let token = app
         .state::<AppState>()
         .visualizer_suspend_token

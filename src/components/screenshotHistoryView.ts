@@ -20,12 +20,16 @@ export interface ScreenshotHistoryView {
   sort: HistorySort;
   filter: HistoryFilter;
   columns: number;
+  startDate: string;
+  endDate: string;
 }
 
 export const DEFAULT_SCREENSHOT_HISTORY_VIEW: ScreenshotHistoryView = {
   sort: "newest",
   filter: "all",
   columns: 3,
+  startDate: "",
+  endDate: "",
 };
 
 const SORT_VALUES: readonly HistorySort[] = ["newest", "oldest", "favorite"];
@@ -44,7 +48,15 @@ export function parseScreenshotHistoryView(value: string | null): ScreenshotHist
   if (!value) return { ...DEFAULT_SCREENSHOT_HISTORY_VIEW };
   try {
     const parsed = JSON.parse(value) as Record<string, unknown>;
+    let startDate = validDate(parsed.startDate) ? parsed.startDate : "";
+    let endDate = validDate(parsed.endDate) ? parsed.endDate : "";
+    if (startDate && endDate && startDate > endDate) {
+      startDate = "";
+      endDate = "";
+    }
     return {
+      startDate,
+      endDate,
       sort: isAllowed(parsed.sort, SORT_VALUES)
         ? parsed.sort
         : DEFAULT_SCREENSHOT_HISTORY_VIEW.sort,
@@ -74,20 +86,46 @@ export function loadScreenshotHistoryView(): ScreenshotHistoryView {
 }
 
 export function saveScreenshotHistoryView(view: ScreenshotHistoryView): void {
-  try {
-    window.localStorage.setItem(SCREENSHOT_HISTORY_VIEW_KEY, JSON.stringify(view));
-  } catch {
-    // Viewing preferences are optional; storage failures must not block history.
+  window.localStorage.setItem(SCREENSHOT_HISTORY_VIEW_KEY, JSON.stringify(view));
+}
+
+export function localDateKey(timestamp: number): string {
+  const date = new Date(timestamp);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+function validDate(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    localDateKey(new Date(`${value}T00:00:00`).getTime()) === value
+  );
+}
+export function groupScreenshotHistory(entries: ScreenshotHistorySummary[]) {
+  const groups = new Map<string, ScreenshotHistorySummary[]>();
+  for (const entry of entries) {
+    const date = localDateKey(entry.createdAtMs);
+    const group = groups.get(date) ?? [];
+    group.push(entry);
+    groups.set(date, group);
   }
+  return [...groups].map(([date, entries]) => ({ date, entries }));
 }
 
 export function selectScreenshotHistory(
   entries: ScreenshotHistorySummary[],
   view: ScreenshotHistoryView,
 ): ScreenshotHistorySummary[] {
-  const filtered =
-    view.filter === "favorite" ? entries.filter((entry) => entry.favorite) : [...entries];
+  const filtered = entries.filter((entry) => {
+    const date = localDateKey(entry.createdAtMs);
+    return (
+      (view.filter !== "favorite" || entry.favorite) &&
+      (!view.startDate || date >= view.startDate) &&
+      (!view.endDate || date <= view.endDate)
+    );
+  });
   return filtered.sort((left, right) => {
+    const dates = localDateKey(right.createdAtMs).localeCompare(localDateKey(left.createdAtMs));
+    if (dates) return view.sort === "oldest" ? -dates : dates;
     if (view.sort === "favorite" && left.favorite !== right.favorite) {
       return Number(right.favorite) - Number(left.favorite);
     }

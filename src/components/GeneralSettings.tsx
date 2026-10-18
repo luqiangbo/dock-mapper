@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { usePageActive } from "./PageActivity";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
@@ -6,8 +7,8 @@ import {
   enable as enableAutostart,
   isEnabled as isAutostartEnabled,
 } from "@tauri-apps/plugin-autostart";
-import { relaunch } from "@tauri-apps/plugin-process";
-import { check } from "@tauri-apps/plugin-updater";
+import SoftwareUpdate from "./SoftwareUpdate";
+
 import {
   App as AntApp,
   Button,
@@ -22,7 +23,7 @@ import {
   Switch,
   Typography,
 } from "antd";
-import { ReloadOutlined } from "@ant-design/icons";
+
 import { useTheme } from "../ThemeContext";
 import { DEFAULT_ACCENT_COLOR } from "../themePalette";
 import styles from "./components.module.scss";
@@ -32,6 +33,9 @@ const { Text } = Typography;
 const REPOSITORY_URL = "https://github.com/luqiangbo/dock-mapper";
 
 export default function GeneralSettings() {
+  const active = usePageActive();
+  const readRevision = useRef({ autoStart: 0, minimize: 0 });
+  const writing = useRef({ autoStart: false, minimize: false });
   const screens = Grid.useBreakpoint();
   const [form] = Form.useForm<{
     autoStart: boolean;
@@ -42,95 +46,110 @@ export default function GeneralSettings() {
   const [autoStartLoading, setAutoStartLoading] = useState(true);
   const [minimizeToTray, setMinimizeToTray] = useState(true);
   const [minimizeLoading, setMinimizeLoading] = useState(true);
-  const [checking, setChecking] = useState(false);
+
   const [exportingDiagnostics, setExportingDiagnostics] = useState(false);
   const [version, setVersion] = useState("—");
   const { accentColor, setAccentColor } = useTheme();
-  const { modal, notification } = AntApp.useApp();
+  const { notification } = AntApp.useApp();
 
   useEffect(() => {
-    void isAutostartEnabled()
-      .then((value) => {
-        setAutoStart(value);
-        form.setFieldValue("autoStart", value);
-      })
-      .catch((error) =>
-        notification.error({ message: "读取开机启动状态失败", description: errorMessage(error) }),
-      )
-      .finally(() => setAutoStartLoading(false));
-    void generalSettingsApi
-      .minimizeToTray()
-      .then((value) => {
-        setMinimizeToTray(value);
-        form.setFieldValue("minimizeToTray", value);
-      })
-      .catch((error) =>
-        notification.error({ message: "读取托盘设置失败", description: errorMessage(error) }),
-      )
-      .finally(() => setMinimizeLoading(false));
+    if (!active) return;
+    let disposed = false;
+    const autoRevision = ++readRevision.current.autoStart;
+    const minimizeRevision = ++readRevision.current.minimize;
+    const autoCurrent = () => !disposed && autoRevision === readRevision.current.autoStart;
+    const minimizeCurrent = () => !disposed && minimizeRevision === readRevision.current.minimize;
+    if (!writing.current.autoStart)
+      void isAutostartEnabled()
+        .then((value) => {
+          if (!autoCurrent()) return;
+          setAutoStart(value);
+          form.setFieldValue("autoStart", value);
+        })
+        .catch((error) => {
+          if (autoCurrent())
+            notification.error({
+              message: "读取开机启动状态失败",
+              description: errorMessage(error),
+            });
+        })
+        .finally(() => {
+          if (autoCurrent()) setAutoStartLoading(false);
+        });
+    if (!writing.current.minimize)
+      void generalSettingsApi
+        .minimizeToTray()
+        .then((value) => {
+          if (!minimizeCurrent()) return;
+          setMinimizeToTray(value);
+          form.setFieldValue("minimizeToTray", value);
+        })
+        .catch((error) => {
+          if (minimizeCurrent())
+            notification.error({ message: "读取托盘设置失败", description: errorMessage(error) });
+        })
+        .finally(() => {
+          if (minimizeCurrent()) setMinimizeLoading(false);
+        });
     void getVersion()
-      .then(setVersion)
+      .then((value) => {
+        if (!disposed) setVersion(value);
+      })
       .catch((error) => {
+        if (disposed) return;
         setVersion("未知");
         notification.error({ message: "读取版本失败", description: errorMessage(error) });
       });
+    return () => {
+      disposed = true;
+    };
+  }, [active, form, notification]);
+
+  useEffect(() => {
     form.setFieldValue("accentColor", accentColor);
-  }, [accentColor, form, notification]);
+  }, [accentColor, form]);
 
-  const changeAutostart = useCallback(async (checked: boolean) => {
-    setAutoStartLoading(true);
-    try {
-      if (checked) await enableAutostart();
-      else await disableAutostart();
-      setAutoStart(checked);
-      form.setFieldValue("autoStart", checked);
-      notification.success({ message: checked ? "开机自启已开启" : "开机自启已关闭" });
-    } catch (error) {
-      form.setFieldValue("autoStart", autoStart);
-      notification.error({ message: "操作失败", description: errorMessage(error) });
-    } finally {
-      setAutoStartLoading(false);
-    }
-  }, []);
-
-  const changeMinimize = useCallback(async (checked: boolean) => {
-    setMinimizeLoading(true);
-    try {
-      await generalSettingsApi.setMinimizeToTray(checked);
-      setMinimizeToTray(checked);
-      form.setFieldValue("minimizeToTray", checked);
-    } catch (error) {
-      form.setFieldValue("minimizeToTray", minimizeToTray);
-      notification.error({ message: "操作失败", description: errorMessage(error) });
-    } finally {
-      setMinimizeLoading(false);
-    }
-  }, []);
-
-  const checkForUpdate = async () => {
-    setChecking(true);
-    try {
-      const update = await check();
-      if (!update) {
-        notification.success({ message: "当前已是最新版本" });
-        return;
+  const changeAutostart = useCallback(
+    async (checked: boolean) => {
+      writing.current.autoStart = true;
+      readRevision.current.autoStart += 1;
+      setAutoStartLoading(true);
+      try {
+        if (checked) await enableAutostart();
+        else await disableAutostart();
+        setAutoStart(checked);
+        form.setFieldValue("autoStart", checked);
+        notification.success({ message: checked ? "开机自启已开启" : "开机自启已关闭" });
+      } catch (error) {
+        form.setFieldValue("autoStart", autoStart);
+        notification.error({ message: "操作失败", description: errorMessage(error) });
+      } finally {
+        writing.current.autoStart = false;
+        setAutoStartLoading(false);
       }
-      modal.confirm({
-        title: `发现 DockMapper v${update.version}`,
-        content: "下载完成后应用将自动重启。",
-        okText: "下载并安装",
-        cancelText: "稍后",
-        onOk: async () => {
-          await update.downloadAndInstall();
-          await relaunch();
-        },
-      });
-    } catch (error) {
-      notification.error({ message: "检查更新失败", description: errorMessage(error) });
-    } finally {
-      setChecking(false);
-    }
-  };
+    },
+    [autoStart, form, notification],
+  );
+
+  const changeMinimize = useCallback(
+    async (checked: boolean) => {
+      writing.current.minimize = true;
+      readRevision.current.minimize += 1;
+      setMinimizeLoading(true);
+      try {
+        await generalSettingsApi.setMinimizeToTray(checked);
+        setMinimizeToTray(checked);
+        form.setFieldValue("minimizeToTray", checked);
+      } catch (error) {
+        form.setFieldValue("minimizeToTray", minimizeToTray);
+        notification.error({ message: "操作失败", description: errorMessage(error) });
+      } finally {
+        writing.current.minimize = false;
+        setMinimizeLoading(false);
+      }
+    },
+    [minimizeToTray, form, notification],
+  );
 
   const exportDiagnostics = async () => {
     setExportingDiagnostics(true);
@@ -210,7 +229,10 @@ export default function GeneralSettings() {
                         onChangeComplete={(color) => setAccentColor(color.toHexString())}
                       />
                     </Form.Item>
-                    <Button disabled={accentColor.toLowerCase() === DEFAULT_ACCENT_COLOR} onClick={() => setAccentColor(DEFAULT_ACCENT_COLOR)}>
+                    <Button
+                      disabled={accentColor.toLowerCase() === DEFAULT_ACCENT_COLOR}
+                      onClick={() => setAccentColor(DEFAULT_ACCENT_COLOR)}
+                    >
                       恢复默认
                     </Button>
                   </Space>
@@ -224,37 +246,44 @@ export default function GeneralSettings() {
               <div className={styles.settingsGroup}>
                 <div className={styles.settingRow}>
                   <div className={styles.settingCopy}>
-                    <Text strong>DockMapper {__DOCKMAPPER_BUILD__.releaseVersion ? `v${version}` : `开发版 · ${version}`}</Text>
+                    <Text strong>
+                      DockMapper{" "}
+                      {__DOCKMAPPER_BUILD__.releaseVersion ? `v${version}` : `开发版 · ${version}`}
+                    </Text>
                     <span className={styles.description}>Windows 11 桌面工具</span>
                     {__DOCKMAPPER_BUILD__.commit ? (
-                      <Button type="link" size="small" onClick={() => {
-                        void openUrl(`${REPOSITORY_URL}/commit/${__DOCKMAPPER_BUILD__.commit}`).catch((error) =>
-                          notification.error({ message: "打开提交失败", description: errorMessage(error) }),
-                        );
-                      }}>
+                      <Button
+                        type="link"
+                        size="small"
+                        onClick={() => {
+                          void openUrl(
+                            `${REPOSITORY_URL}/commit/${__DOCKMAPPER_BUILD__.commit}`,
+                          ).catch((error) =>
+                            notification.error({
+                              message: "打开提交失败",
+                              description: errorMessage(error),
+                            }),
+                          );
+                        }}
+                      >
                         提交 {__DOCKMAPPER_BUILD__.commit.slice(0, 7)}
                       </Button>
-                    ) : <span className={styles.description}>提交未知</span>}
+                    ) : (
+                      <span className={styles.description}>提交未知</span>
+                    )}
                   </div>
                   <Button onClick={() => void openUrl(REPOSITORY_URL)}>GitHub</Button>
                 </div>
-                <div className={styles.settingRow}>
+                <div className={styles.softwareUpdateRow}>
                   <div className={styles.settingCopy}>
                     <Text strong>软件更新</Text>
                     <span className={styles.description}>检查新版本并安装更新</span>
                   </div>
-                  <Button
-                    icon={<ReloadOutlined />}
-                    loading={checking}
-                    onClick={() => void checkForUpdate()}
-                  >
-                    检查更新
-                  </Button>
+                  <SoftwareUpdate />
                 </div>
               </div>
             </Card>
           </Col>
-
         </Row>
       </Form>
     </div>

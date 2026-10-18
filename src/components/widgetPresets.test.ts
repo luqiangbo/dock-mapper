@@ -27,7 +27,6 @@ const config: WidgetConfig = {
   refresh_interval_secs: 2,
   network_interface: null,
   speed_unit: "mb",
-  alerts: { cpu_percent: 85, memory_percent: null, battery_below_percent: null },
   presets: [],
 };
 
@@ -45,7 +44,6 @@ describe("挂件布局预设", () => {
     expect(applied?.metrics.map((item) => item.pair_with)).toEqual(["cpu", "upload"]);
     expect(applied?.refresh_interval_secs).toBe(2);
     expect(applied?.speed_unit).toBe("mb");
-    expect(applied?.alerts.cpu_percent).toBe(85);
   });
 
   it("删除预设后重新进入时列表不再包含它", () => {

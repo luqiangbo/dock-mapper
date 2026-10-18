@@ -19,7 +19,6 @@ describe("主窗口可见性与后台采样", () => {
       lastSampleAt: null,
       samples: [],
       archive: [],
-      alerts: [],
     });
     const visibility = observeTelemetryVisibility(source, store.setVisible);
     store.update({ lastSampleAt: 100 });

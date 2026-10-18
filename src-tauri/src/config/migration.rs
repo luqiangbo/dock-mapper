@@ -1,6 +1,21 @@
 use super::*;
 
 pub fn normalize_screenshot_config(config: &mut ScreenshotConfig) {
+    let fonts: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+        "../../../src/screenshots/screenshot/components/systemFonts.json"
+    ))
+    .expect("bundled font catalogue");
+    let mut seen = std::collections::HashSet::new();
+    config.text_font_favorites.retain(|key| {
+        fonts
+            .iter()
+            .any(|font| font["key"].as_str() == Some(key.as_str()))
+            && seen.insert(key.clone())
+    });
+    config.text_font_favorites.truncate(10);
+    if config.text_font_favorites.is_empty() {
+        config.text_font_favorites = ScreenshotConfig::default().text_font_favorites;
+    }
     super::normalize_screenshot_toolbar_tools(&mut config.toolbar_tools);
     config.filename_prefix = config
         .filename_prefix
@@ -80,6 +95,12 @@ pub fn normalize_screenshot_config(config: &mut ScreenshotConfig) {
     config.annotation_styles.line.fill_style = AnnotationFillStyle::None;
     config.annotation_styles.arrow.fill_style = AnnotationFillStyle::None;
     config.annotation_styles.pen.fill_style = AnnotationFillStyle::None;
+    if !config
+        .text_font_favorites
+        .contains(&config.annotation_styles.text.font_family)
+    {
+        config.annotation_styles.text.font_family = config.text_font_favorites[0].clone();
+    }
     config.annotation_styles.highlight.fill_style = AnnotationFillStyle::None;
     config.annotation_styles.highlight.pressure = false;
 }
@@ -111,6 +132,30 @@ pub(crate) fn normalize_annotation_tool_style(style: &mut AnnotationToolStyleCon
         style.mosaic_effect = MosaicEffect::Pixelate;
     }
     style.font_size = style.font_size.clamp(8, 96);
+    let fonts: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+        "../../../src/screenshots/screenshot/components/systemFonts.json"
+    ))
+    .expect("bundled font catalogue");
+    if !fonts
+        .iter()
+        .any(|font| font["key"].as_str() == Some(style.font_family.as_str()))
+        && !matches!(
+            style.font_family.as_str(),
+            "virgil"
+                | "helvetica"
+                | "cascadia"
+                | "excalifont"
+                | "nunito"
+                | "lilita"
+                | "comic-shanns"
+                | "liberation-sans"
+                | "sans"
+                | "serif"
+                | "mono"
+        )
+    {
+        style.font_family = fallback.font_family;
+    }
     style.marker_size = style.marker_size.clamp(16, 64);
     style.outline_color =
         normalize_hex_color(&style.outline_color).unwrap_or_else(|| fallback.outline_color.clone());
@@ -176,22 +221,23 @@ pub fn normalize_color(value: &str) -> Option<String> {
 }
 
 pub fn normalize_palette(palette: &mut ColorPaletteConfig) {
-    let normalize = |values: &mut Vec<String>, limit: usize| {
+    let normalize = |values: &mut Vec<String>, limit: Option<usize>| {
         let mut unique = Vec::with_capacity(values.len());
+        let mut seen = std::collections::HashSet::with_capacity(values.len());
         for value in std::mem::take(values) {
             if let Some(value) = normalize_color(&value) {
-                if !unique.contains(&value) {
+                if seen.insert(value.clone()) {
                     unique.push(value);
                 }
             }
-            if unique.len() == limit {
+            if limit == Some(unique.len()) {
                 break;
             }
         }
         *values = unique;
     };
-    normalize(&mut palette.recent, 5);
-    normalize(&mut palette.favorites, 5);
+    normalize(&mut palette.recent, Some(5));
+    normalize(&mut palette.favorites, None);
 }
 
 pub fn record_palette_color(palette: &mut ColorPaletteConfig, value: &str) -> Result<(), String> {
@@ -208,6 +254,15 @@ pub fn set_palette_favorite(
     favorite: bool,
 ) -> Result<(), String> {
     let color = normalize_color(value).ok_or_else(|| "颜色必须为 #RRGGBB".to_string())?;
+    if favorite
+        && palette
+            .favorites
+            .iter()
+            .any(|item| normalize_color(item).as_ref() == Some(&color))
+    {
+        normalize_palette(palette);
+        return Ok(());
+    }
     palette.favorites.retain(|item| item != &color);
     if favorite {
         palette.favorites.insert(0, color);

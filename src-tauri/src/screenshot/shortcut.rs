@@ -1,5 +1,5 @@
 use super::{
-    handle_start_capture, open_screenshot_history, pin_recent_screenshot, start_quick_ocr_capture,
+    open_screenshot_history, pin_recent_screenshot, start_capture, start_quick_ocr_capture,
     toggle_latest_pin, AppState,
 };
 use crate::config::ScreenshotConfig;
@@ -106,7 +106,7 @@ pub(super) fn validate_bindings(config: &ScreenshotConfig) -> Result<(), String>
 
 fn dispatch(app: &AppHandle, action: ShortcutAction) {
     match action {
-        ShortcutAction::Capture => handle_start_capture(app),
+        ShortcutAction::Capture => start_capture(app),
         ShortcutAction::PinRecent => pin_recent_screenshot(app),
         ShortcutAction::OpenHistory => open_screenshot_history(app),
         ShortcutAction::ToggleLatestPin => toggle_latest_pin(app),

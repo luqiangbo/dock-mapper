@@ -1,6 +1,11 @@
 use crate::AppState;
 use serde::Serialize;
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    io::{self, Write},
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use tauri::{AppHandle, Manager, State};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
@@ -10,7 +15,41 @@ const MAX_EXPORTED_LOG_BYTES: usize = 2 * 1024 * 1024;
 
 pub struct DiagnosticsState {
     _guard: WorkerGuard,
-    log_dir: PathBuf,
+    pub(crate) log_dir: PathBuf,
+    pub(crate) writer: SharedLogWriter,
+}
+
+#[derive(Clone)]
+pub struct SharedLogWriter(Arc<Mutex<tracing_appender::rolling::RollingFileAppender>>);
+impl Write for SharedLogWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0
+            .lock()
+            .map_err(|_| io::Error::other("日志写入锁不可用"))?
+            .write(bytes)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.0
+            .lock()
+            .map_err(|_| io::Error::other("日志写入锁不可用"))?
+            .flush()
+    }
+}
+impl SharedLogWriter {
+    pub(crate) fn exclusive<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        let _writer = self.0.lock().map_err(|_| "日志写入锁不可用")?;
+        operation()
+    }
+    pub(crate) fn write_line(&self, line: &str) -> Result<(), String> {
+        self.0
+            .lock()
+            .map_err(|_| "日志写入锁不可用")?
+            .write_all(line.as_bytes())
+            .map_err(|error| format!("日志写入失败：{error}"))
+    }
 }
 
 #[derive(Serialize)]
@@ -39,7 +78,8 @@ pub fn initialize(app: &AppHandle) -> Result<DiagnosticsState, String> {
     fs::create_dir_all(&log_dir).map_err(|error| format!("创建日志目录失败：{error}"))?;
     prune_logs(&log_dir);
     let appender = tracing_appender::rolling::daily(&log_dir, "dockmapper.log");
-    let (writer, guard) = tracing_appender::non_blocking(appender);
+    let shared = SharedLogWriter(Arc::new(Mutex::new(appender)));
+    let (writer, guard) = tracing_appender::non_blocking(shared.clone());
     let subscriber = tracing_subscriber::registry()
         .with(EnvFilter::new("dock_mapper=info"))
         .with(fmt::layer().with_ansi(false).with_writer(writer));
@@ -47,6 +87,7 @@ pub fn initialize(app: &AppHandle) -> Result<DiagnosticsState, String> {
     Ok(DiagnosticsState {
         _guard: guard,
         log_dir,
+        writer: shared,
     })
 }
 
@@ -62,6 +103,10 @@ pub fn export(
         .clone();
     let (transient_image_count, transient_image_bytes) = state.images.stats()?;
     let screenshot_history_count = state.history.list()?.len();
+    let sampling = app
+        .state::<crate::sys_monitor::SysMonitorControl>()
+        .metrics
+        .snapshot()?;
     let sanitized = SanitizedConfig {
         mapping_count: config.key_mappings.len(),
         memory_scheme: config.widget_config.memory_scheme,
@@ -93,6 +138,10 @@ pub fn export(
         serde_json::to_string_pretty(&sanitized).map_err(|error| error.to_string())?
     );
     let mut remaining = MAX_EXPORTED_LOG_BYTES;
+    report.push_str(&format!(
+        "\nsampling={}\n",
+        serde_json::to_string_pretty(&sampling).map_err(|error| error.to_string())?
+    ));
     for path in log_files_newest_first(&diagnostics.log_dir) {
         if remaining == 0 {
             break;
@@ -109,7 +158,7 @@ pub fn export(
     Ok(Some(path.to_string_lossy().into_owned()))
 }
 
-fn redact_sensitive_text(value: &str) -> String {
+pub(crate) fn redact_sensitive_text(value: &str) -> String {
     let mut redacted = value.to_owned();
     for key in ["USERPROFILE", "USERNAME"] {
         if let Ok(secret) = std::env::var(key) {
@@ -131,11 +180,12 @@ fn redact_sensitive_text(value: &str) -> String {
             line.split_whitespace()
                 .map(|token| {
                     let bytes = token.as_bytes();
-                    if bytes.len() >= 3
-                        && bytes[0].is_ascii_alphabetic()
-                        && bytes[1] == b':'
-                        && matches!(bytes[2], b'\\' | b'/')
-                    {
+                    let drive = bytes.windows(3).any(|part| {
+                        part[0].is_ascii_alphabetic()
+                            && part[1] == b':'
+                            && matches!(part[2], b'\\' | b'/')
+                    });
+                    if drive || token.contains("\\\\") {
                         "<path>"
                     } else {
                         token
@@ -177,5 +227,28 @@ mod tests {
         let redacted = redact_sensitive_text(r#"error reading C:\Users\person\secret.png"#);
         assert!(!redacted.contains("C:\\"));
         assert!(!redacted.contains("secret.png"));
+    }
+    #[test]
+    fn checked_log_writes_can_be_read_after_writer_reopens() {
+        let root = std::env::temp_dir().join(format!(
+            "dockmapper-writer-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let writer = SharedLogWriter(Arc::new(Mutex::new(tracing_appender::rolling::daily(
+            &root,
+            "dockmapper.log",
+        ))));
+        writer.write_line("persisted runtime entry\n").unwrap();
+        drop(writer);
+        let file = fs::read_dir(&root).unwrap().next().unwrap().unwrap().path();
+        assert!(fs::read_to_string(file)
+            .unwrap()
+            .contains("persisted runtime entry"));
+        fs::remove_dir_all(root).unwrap();
     }
 }

@@ -1,3 +1,4 @@
+import "./utils/disableBrowserContextMenu";
 import { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { listen } from "@tauri-apps/api/event";

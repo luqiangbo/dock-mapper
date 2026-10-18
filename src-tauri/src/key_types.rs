@@ -9,6 +9,7 @@ pub enum KeyCode {
     ControlLeft,
     ControlRight,
     Alt,
+    AltRight,
     AltGr,
     MetaLeft,
     MetaRight,
@@ -97,6 +98,7 @@ impl KeyCode {
             Self::ControlLeft => "ControlLeft",
             Self::ControlRight => "ControlRight",
             Self::Alt => "Alt",
+            Self::AltRight => "AltRight",
             Self::AltGr => "AltGr",
             Self::MetaLeft => "MetaLeft",
             Self::MetaRight => "MetaRight",
@@ -187,6 +189,7 @@ impl KeyCode {
             Self::ControlLeft => 0xA2,
             Self::ControlRight => 0xA3,
             Self::Alt => 0xA4,
+            Self::AltRight => 0xA5,
             Self::AltGr => 0xA5,
             Self::CapsLock => 0x14,
             Self::Escape => 0x1B,
@@ -268,6 +271,7 @@ impl KeyCode {
         matches!(
             self,
             Self::ControlRight
+                | Self::AltRight
                 | Self::AltGr
                 | Self::MetaLeft
                 | Self::MetaRight
@@ -309,6 +313,7 @@ pub(crate) fn supported_keys() -> Vec<SupportedKey> {
         KeyCode::ControlLeft,
         KeyCode::ControlRight,
         KeyCode::Alt,
+        KeyCode::AltRight,
         KeyCode::AltGr,
         KeyCode::MetaLeft,
         KeyCode::MetaRight,
@@ -400,9 +405,91 @@ pub(crate) fn supported_keys() -> Vec<SupportedKey> {
             } else if raw.starts_with('F') && raw[1..].chars().all(|char| char.is_ascii_digit()) {
                 (raw, "功能键")
             } else {
-                (raw, "控制与导航")
+                match code {
+                    KeyCode::Disabled => ("禁用按键", "特殊操作"),
+                    KeyCode::ControlLeft => ("左 Ctrl", "修饰键"),
+                    KeyCode::ControlRight => ("右 Ctrl", "修饰键"),
+                    KeyCode::ShiftLeft => ("左 Shift", "修饰键"),
+                    KeyCode::ShiftRight => ("右 Shift", "修饰键"),
+                    KeyCode::Alt => ("左 Alt", "修饰键"),
+                    KeyCode::AltRight => ("右 Alt", "修饰键"),
+                    KeyCode::AltGr => ("AltGr", "修饰键"),
+                    KeyCode::MetaLeft => ("左 Win", "修饰键"),
+                    KeyCode::MetaRight => ("右 Win", "修饰键"),
+                    KeyCode::CapsLock => ("大写锁定 Caps Lock", "常用编辑键"),
+                    KeyCode::Tab => ("制表 Tab", "常用编辑键"),
+                    KeyCode::Escape => ("退出 Esc", "常用编辑键"),
+                    KeyCode::Space => ("空格 Space", "常用编辑键"),
+                    KeyCode::Return => ("回车 Enter", "常用编辑键"),
+                    KeyCode::Backspace => ("退格 Backspace", "常用编辑键"),
+                    KeyCode::Delete => ("删除 Delete", "常用编辑键"),
+                    KeyCode::Insert => ("插入 Insert", "常用编辑键"),
+                    KeyCode::Home => ("行首 Home", "方向与导航"),
+                    KeyCode::End => ("行末 End", "方向与导航"),
+                    KeyCode::PageUp => ("上翻页 Page Up", "方向与导航"),
+                    KeyCode::PageDown => ("下翻页 Page Down", "方向与导航"),
+                    KeyCode::ArrowUp => ("↑ 上", "方向与导航"),
+                    KeyCode::ArrowDown => ("↓ 下", "方向与导航"),
+                    KeyCode::ArrowLeft => ("← 左", "方向与导航"),
+                    KeyCode::ArrowRight => ("→ 右", "方向与导航"),
+                    _ => (raw, "控制与导航"),
+                }
             };
             SupportedKey { code, label, group }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod display_tests {
+    use super::*;
+    #[test]
+    fn mapping_names_distinguish_sides_and_use_familiar_names_without_changing_codes() {
+        let keys = supported_keys();
+        for (code, expected, group) in [
+            (KeyCode::ControlLeft, "左 Ctrl", "修饰键"),
+            (KeyCode::Alt, "左 Alt", "修饰键"),
+            (KeyCode::AltRight, "右 Alt", "修饰键"),
+            (KeyCode::ControlRight, "右 Ctrl", "修饰键"),
+            (KeyCode::ShiftLeft, "左 Shift", "修饰键"),
+            (KeyCode::ShiftRight, "右 Shift", "修饰键"),
+            (KeyCode::MetaLeft, "左 Win", "修饰键"),
+            (KeyCode::MetaRight, "右 Win", "修饰键"),
+            (KeyCode::Return, "回车 Enter", "常用编辑键"),
+            (KeyCode::PageUp, "上翻页 Page Up", "方向与导航"),
+            (KeyCode::ArrowUp, "↑ 上", "方向与导航"),
+            (KeyCode::Disabled, "禁用按键", "特殊操作"),
+        ] {
+            let key = keys.iter().find(|key| key.code == code).unwrap();
+            assert_eq!(key.label, expected);
+            assert_eq!(key.group, group);
+        }
+        assert!(keys
+            .iter()
+            .any(|key| key.code == KeyCode::KeyA && key.label == "A"));
+        assert!(keys.iter().any(|key| key.code == KeyCode::Num0));
+        assert!(keys.iter().any(|key| key.code == KeyCode::Kp0));
+        assert_eq!(KeyCode::ControlLeft.code(), "ControlLeft");
+    }
+    #[test]
+    fn right_alt_round_trips_separately_from_left_alt_and_legacy_altgr() {
+        let mut config = crate::config::AppConfig::default();
+        config.key_mappings.push(KeyMapping {
+            id: "right-alt".into(),
+            source_key: KeyCode::AltRight,
+            target_key: KeyCode::Alt,
+            enabled: true,
+        });
+        let json = serde_json::to_string(&config).unwrap();
+        let restored: crate::config::AppConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.key_mappings[0].source_key, KeyCode::AltRight);
+        assert_eq!(restored.key_mappings[0].target_key, KeyCode::Alt);
+        assert_eq!(
+            serde_json::from_str::<KeyCode>("\"AltGr\"").unwrap(),
+            KeyCode::AltGr
+        );
+        assert_eq!(KeyCode::AltRight.vk(), 0xa5);
+        assert!(KeyCode::AltRight.is_extended());
+        assert!(!KeyCode::Alt.is_extended());
+    }
 }

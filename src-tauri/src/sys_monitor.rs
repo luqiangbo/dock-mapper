@@ -10,10 +10,6 @@ pub struct SysStatusPayload {
     memory_usage: f32,
     network_available: bool,
     cpu_usage: Option<f32>,
-    cpu_temperature_celsius: Option<f32>,
-    cpu_temperature_error: Option<String>,
-    gpu_usage: Option<f32>,
-    gpu_usage_error: Option<String>,
     battery: Option<BatteryStatus>,
 }
 
@@ -31,6 +27,7 @@ struct MonitorSettings {
 
 pub struct SysMonitorControl {
     settings: watch::Sender<MonitorSettings>,
+    pub metrics: crate::sampling_metrics::SamplingMetrics,
 }
 
 impl SysMonitorControl {
@@ -39,7 +36,10 @@ impl SysMonitorControl {
             interval_secs: interval_secs.clamp(1, 5),
             shutdown: false,
         });
-        Self { settings }
+        Self {
+            settings,
+            metrics: crate::sampling_metrics::SamplingMetrics::default(),
+        }
     }
 
     pub fn set_interval(&self, interval_secs: u8) {
@@ -55,7 +55,9 @@ impl SysMonitorControl {
 }
 
 pub fn start_sys_monitor(app: AppHandle) {
+    tracing::info!(target: "dock_mapper::monitor", "system sampling started");
     let mut settings = app.state::<SysMonitorControl>().settings.subscribe();
+    let metrics = app.state::<SysMonitorControl>().metrics.clone();
     tauri::async_runtime::spawn(async move {
         let mut sys = System::new_all();
         let mut networks = Networks::new_with_refreshed_list();
@@ -63,14 +65,14 @@ pub fn start_sys_monitor(app: AppHandle) {
         let mut previous_tick = Instant::now();
         let mut last_list_refresh = Instant::now();
         let mut last_hidden_main_emit: Option<Instant> = None;
-        let temperature_monitor = crate::cpu_temperature::CpuTemperatureMonitor::default();
-        let gpu_monitor = crate::gpu_usage::GpuUsageMonitor::default();
+        let mut last_network_available = None;
 
         loop {
             let current = settings.borrow().clone();
             if current.shutdown {
                 break;
             }
+            let sample_started = Instant::now();
             if last_list_refresh.elapsed() >= Duration::from_secs(30) {
                 networks.refresh_list();
                 last_list_refresh = Instant::now();
@@ -79,6 +81,14 @@ pub fn start_sys_monitor(app: AppHandle) {
             sys.refresh_memory();
             sys.refresh_cpu_usage();
             let network_available = networks.iter().any(|(name, _)| !is_virtual_adapter(name));
+            if last_network_available != Some(network_available) {
+                if network_available {
+                    tracing::info!(target: "dock_mapper::monitor", "network sampling available");
+                } else {
+                    tracing::warn!(target: "dock_mapper::monitor", "no usable network adapter");
+                }
+                last_network_available = Some(network_available);
+            }
             let total_rx = networks
                 .iter()
                 .filter(|(name, _)| !is_virtual_adapter(name))
@@ -95,28 +105,6 @@ pub fn start_sys_monitor(app: AppHandle) {
                 baseline.sample(None, network_available, total_rx, total_tx, elapsed);
             previous_tick = now;
             let total_memory = sys.total_memory() as f32;
-            let (temperature_enabled, gpu_enabled) = app
-                .state::<crate::AppState>()
-                .config
-                .lock()
-                .map(|config| {
-                    let enabled = |kind| {
-                        config
-                            .widget_config
-                            .metrics
-                            .iter()
-                            .any(|m| m.enabled && m.kind == kind)
-                    };
-                    (
-                        config.widget_config.metrics.iter().any(|m| {
-                            m.enabled && m.kind == crate::widget::WidgetMetricKind::CpuTemperature
-                        }),
-                        enabled(crate::widget::WidgetMetricKind::GpuUsage),
-                    )
-                })
-                .unwrap_or((false, false));
-            let temperature = temperature_monitor.sample(temperature_enabled);
-            let gpu = gpu_monitor.sample(gpu_enabled);
             let payload = SysStatusPayload {
                 upload_speed,
                 download_speed,
@@ -127,15 +115,12 @@ pub fn start_sys_monitor(app: AppHandle) {
                 },
                 network_available,
                 cpu_usage: Some(sys.global_cpu_info().cpu_usage()),
-                cpu_temperature_celsius: temperature.celsius,
-                cpu_temperature_error: temperature.error,
-                gpu_usage: gpu.usage,
-                gpu_usage_error: gpu.error,
                 battery: battery_status(),
             };
 
             let widget_visible = emit_if_visible(&app, "taskbar_widget", payload.clone());
             let main_visible = emit_to_main(&app, payload, now, &mut last_hidden_main_emit);
+            metrics.record(sample_started.elapsed());
             let interval = if widget_visible || main_visible {
                 current.interval_secs.into()
             } else {

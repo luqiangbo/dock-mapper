@@ -6,6 +6,8 @@ import {
   responsiveHistoryColumnCount,
   selectScreenshotHistory,
   screenshotHistoryPhase,
+  groupScreenshotHistory,
+  localDateKey,
 } from "./screenshotHistoryView";
 
 const entries: ScreenshotHistorySummary[] = [
@@ -15,6 +17,54 @@ const entries: ScreenshotHistorySummary[] = [
 ];
 
 describe("screenshot history view", () => {
+  it("按本机日期分组，并包含起止日期当天的全部记录", () => {
+    const records = [
+      new Date(2026, 9, 16, 23, 59),
+      new Date(2026, 9, 17, 0, 0),
+      new Date(2026, 9, 17, 23, 59),
+      new Date(2026, 9, 18, 0, 0),
+    ].map((date, index) => ({ ...entries[0], id: String(index), createdAtMs: date.getTime() }));
+    const result = selectScreenshotHistory(records, {
+      ...DEFAULT_SCREENSHOT_HISTORY_VIEW,
+      startDate: "2026-10-17",
+      endDate: "2026-10-17",
+    });
+    expect(result.map((entry) => entry.id)).toEqual(["2", "1"]);
+    expect(
+      groupScreenshotHistory(result).map((group) => [group.date, group.entries.length]),
+    ).toEqual([["2026-10-17", 2]]);
+    expect(localDateKey(records[0].createdAtMs)).toBe("2026-10-16");
+  });
+  it("收藏排序在日期组内生效，日期组顺序仍然明确", () => {
+    const records = [
+      { ...entries[0], createdAtMs: new Date(2026, 9, 17).getTime() },
+      { ...entries[1], createdAtMs: new Date(2026, 9, 16).getTime() },
+    ];
+    expect(
+      selectScreenshotHistory(records, {
+        ...DEFAULT_SCREENSHOT_HISTORY_VIEW,
+        sort: "favorite",
+      }).map((entry) => entry.id),
+    ).toEqual(["old", "favorite"]);
+  });
+  it("迁移旧偏好，非法或反向日期范围恢复为不限日期", () => {
+    const saved = {
+      ...DEFAULT_SCREENSHOT_HISTORY_VIEW,
+      startDate: "2026-10-16",
+      endDate: "2026-10-17",
+      filter: "favorite" as const,
+    };
+    expect(parseScreenshotHistoryView(JSON.stringify(saved))).toEqual(saved);
+    expect(
+      parseScreenshotHistoryView(JSON.stringify({ startDate: "2026-02-30", endDate: "2026-10-17" }))
+        .startDate,
+    ).toBe("");
+    expect(
+      parseScreenshotHistoryView(
+        JSON.stringify({ startDate: "2026-10-18", endDate: "2026-10-17" }),
+      ),
+    ).toMatchObject({ startDate: "", endDate: "" });
+  });
   it("首次读取失败显示错误，重试后可进入空历史", () => {
     expect(screenshotHistoryPhase(true, null, 0, 0)).toBe("loading");
     expect(screenshotHistoryPhase(false, "读取失败", 0, 0)).toBe("error");
@@ -57,7 +107,7 @@ describe("screenshot history view", () => {
   it("validates every stored preference and falls back after corruption", () => {
     expect(
       parseScreenshotHistoryView(JSON.stringify({ sort: "oldest", filter: "invalid", columns: 7 })),
-    ).toEqual({ sort: "oldest", filter: "all", columns: 7 });
+    ).toEqual({ ...DEFAULT_SCREENSHOT_HISTORY_VIEW, sort: "oldest", filter: "all", columns: 7 });
     expect(parseScreenshotHistoryView(JSON.stringify({ columns: 0 }))).toEqual(
       DEFAULT_SCREENSHOT_HISTORY_VIEW,
     );

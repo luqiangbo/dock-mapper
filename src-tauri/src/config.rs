@@ -1,7 +1,9 @@
 use crate::{KeyMapping, WidgetConfig};
 use serde::{Deserialize, Serialize};
+mod installation;
 mod migration;
 mod storage;
+pub use installation::prepare_installation;
 
 #[cfg(test)]
 pub(crate) use migration::normalize_annotation_tool_style;
@@ -10,6 +12,8 @@ pub use migration::{
     clear_recent_palette, normalize_key_visualizer_config, normalize_palette,
     normalize_screenshot_config, record_palette_color, set_palette_favorite,
 };
+pub use storage::load_for_build;
+pub use storage::load_for_installation;
 pub use storage::{load, load_for_mutation, save};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -54,7 +58,14 @@ impl Default for ColorCopyFormat {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
+    #[serde(rename = "_installation_id")]
+    pub installation_id: Option<String>,
+    #[serde(default, rename = "_defaults_build_id")]
+    pub defaults_build_id: Option<String>,
     pub key_mappings: Vec<KeyMapping>,
+    #[serde(default)]
+    pub key_mapping_runtime_version: u8,
+    pub key_mapping_enabled: bool,
     pub widget_config: WidgetConfig,
     pub minimize_to_tray: bool,
     pub screenshot_config: ScreenshotConfig,
@@ -62,9 +73,9 @@ pub struct AppConfig {
     pub key_visualizer_config: KeyVisualizerConfig,
     #[serde(default, rename = "presentation_config", skip_serializing)]
     legacy_presentation_config: Option<LegacyPresentationConfig>,
-    /// 接管前 Scancode Map 的 Base64 备份；外部修改后再次接管时会更新。
+    /// 遗留系统映射恢复资料，保留兼容；运行时映射不读取或覆盖。
     pub scancode_map_backup: Option<String>,
-    /// DockMapper 最后一次成功写入的 Scancode Map，用于区分草稿与外部修改。
+    /// 遗留系统映射的历史标记，显式清理后清空；不参与运行时规则。
     pub applied_scancode_map: Option<String>,
 }
 
@@ -144,6 +155,7 @@ pub struct ScreenshotConfig {
     /// The size unit preferred by the capture overlay. PNG export is always
     /// physical pixels; DIP is only an editing/display convenience.
     pub capture_size_unit: CaptureSizeUnit,
+    pub text_font_favorites: Vec<String>,
 }
 
 fn annotation_styles_not_initialized() -> bool {
@@ -167,6 +179,19 @@ impl Default for ScreenshotConfig {
             annotation_styles: ScreenshotAnnotationStyles::default(),
             annotation_styles_initialized: true,
             capture_size_unit: CaptureSizeUnit::Px,
+            text_font_favorites: [
+                "microsoft-yahei",
+                "simsun",
+                "simhei",
+                "kaiti",
+                "arial",
+                "segoe-ui",
+                "times-new-roman",
+                "consolas",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
         }
     }
 }
@@ -347,6 +372,7 @@ pub struct AnnotationToolStyleConfig {
     pub mosaic_effect: MosaicEffect,
     pub blur_radius: u32,
     pub font_size: u32,
+    pub font_family: String,
     pub marker_size: u32,
     pub outline_enabled: bool,
     pub outline_color: String,
@@ -357,11 +383,11 @@ impl Default for AnnotationToolStyleConfig {
     fn default() -> Self {
         Self {
             stroke_color: "#e03131".into(),
-            background_color: "#ffc9c9".into(),
-            stroke_width: 3.0,
+            background_color: "#e03131".into(),
+            stroke_width: 6.0,
             stroke_style: AnnotationStrokeStyle::Solid,
             fill_style: AnnotationFillStyle::None,
-            roughness: 0,
+            roughness: 2,
             opacity: 1.0,
             arrow_type: AnnotationArrowType::Sharp,
             start_arrowhead: AnnotationArrowhead::None,
@@ -370,8 +396,9 @@ impl Default for AnnotationToolStyleConfig {
             block_size: 12,
             mosaic_effect: MosaicEffect::Pixelate,
             blur_radius: 12,
-            font_size: 20,
-            marker_size: 32,
+            font_size: 24,
+            font_family: "microsoft-yahei".into(),
+            marker_size: 36,
             outline_enabled: true,
             outline_color: "#ffffff".into(),
             outline_width: 1.0,
@@ -396,13 +423,13 @@ impl Default for ScreenshotAnnotationStyles {
     fn default() -> Self {
         let base = AnnotationToolStyleConfig::default();
         let mut highlight = base.clone();
-        highlight.stroke_width = 20.0;
+        highlight.stroke_width = 24.0;
         highlight.opacity = 0.32;
         highlight.pressure = false;
         let mut text = base.clone();
         text.background_color = "#000000".into();
         let mut number = base.clone();
-        number.background_color = "#ef4444".into();
+        number.background_color = "#e03131".into();
         number.stroke_color = "#ffffff".into();
         Self {
             shape: base.clone(),
@@ -439,6 +466,10 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             key_mappings: Vec::new(),
+            key_mapping_runtime_version: 1,
+            key_mapping_enabled: true,
+            installation_id: None,
+            defaults_build_id: None,
             widget_config: WidgetConfig::default(),
             minimize_to_tray: true,
             screenshot_config: ScreenshotConfig::default(),
@@ -455,6 +486,42 @@ impl Default for AppConfig {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn screenshot_defaults_have_red_handdrawn_lines_and_bounded_system_fonts() {
+        let mut config = ScreenshotConfig::default();
+        assert_eq!(config.annotation_styles.line.stroke_color, "#e03131");
+        assert_eq!(config.annotation_styles.line.roughness, 2);
+        for style in [
+            &config.annotation_styles.shape,
+            &config.annotation_styles.line,
+            &config.annotation_styles.arrow,
+            &config.annotation_styles.pen,
+        ] {
+            assert_eq!(style.stroke_width, 6.0);
+            assert_eq!(style.stroke_color, "#e03131");
+            assert_eq!(style.roughness, 2);
+        }
+        assert_eq!(config.annotation_styles.text.font_size, 24);
+        assert_eq!(config.annotation_styles.highlight.stroke_width, 24.0);
+        assert_eq!(config.annotation_styles.highlight.opacity, 0.32);
+        assert_eq!(config.annotation_styles.number.marker_size, 36);
+        assert_eq!(
+            config.annotation_styles.shape.fill_style,
+            AnnotationFillStyle::None
+        );
+        config.text_font_favorites = (0..20)
+            .map(|_| "arial".to_owned())
+            .chain(["unknown".to_owned(), "simsun".to_owned()])
+            .collect();
+        normalize_screenshot_config(&mut config);
+        assert_eq!(config.text_font_favorites, vec!["arial", "simsun"]);
+        assert_eq!(config.annotation_styles.text.font_family, "arial");
+        let restored: ScreenshotConfig =
+            serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
+        assert_eq!(restored.annotation_styles.text.font_family, "arial");
+        assert_eq!(restored.text_font_favorites, config.text_font_favorites);
+    }
 
     #[test]
     fn round_trip_preserves_disabled_mapping() {
@@ -885,7 +952,7 @@ mod tests {
         };
         normalize_palette(&mut palette);
         assert_eq!(palette.recent, vec!["#AABBCC"]);
-        assert_eq!(palette.favorites.len(), 5);
+        assert_eq!(palette.favorites.len(), 20);
     }
 
     #[test]
@@ -922,5 +989,30 @@ mod tests {
 
         set_palette_favorite(&mut palette, "#AABBCC", false).expect("remove favorite");
         assert!(palette.favorites.is_empty());
+    }
+
+    #[test]
+    fn more_than_one_hundred_favorites_survive_save_reload_and_repeat_favorite_keeps_order() {
+        let mut config = AppConfig::default();
+        for index in 0..128 {
+            set_palette_favorite(&mut config.color_palette, &format!("#{index:06x}"), true)
+                .unwrap();
+        }
+        let before = config.color_palette.favorites.clone();
+        set_palette_favorite(&mut config.color_palette, "#000001", true).unwrap();
+        assert_eq!(config.color_palette.favorites, before);
+        let path = std::env::temp_dir().join(format!(
+            "dock-mapper-palette-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        save(&path, &config).unwrap();
+        let loaded = load(&path);
+        assert_eq!(loaded.color_palette.favorites, before);
+        let _ = fs::remove_file(storage::test_backup_path(&path));
+        let _ = fs::remove_file(path);
     }
 }

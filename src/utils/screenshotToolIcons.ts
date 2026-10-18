@@ -1,5 +1,5 @@
 import {
-  ArrowUpRight,
+  MoveUpRight,
   Circle,
   PenLine,
   Square,
@@ -16,7 +16,7 @@ import {
 export const screenshotToolIcons = {
   select: MousePointer2,
   rect: Square,
-  arrow: ArrowUpRight,
+  arrow: MoveUpRight,
   pen: PenLine,
   text: Type,
   mosaic: Grid2X2,

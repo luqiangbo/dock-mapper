@@ -9,6 +9,7 @@ import {
   type MetricDrag,
 } from "./widgetMetricOrder";
 import styles from "./components.module.scss";
+import { usePageActive } from "./PageActivity";
 import { pairWidgetMetrics } from "../widgetColumns";
 
 const labels = {
@@ -16,8 +17,6 @@ const labels = {
   upload: "上传",
   download: "下载",
   cpu: "CPU",
-  cpu_temperature: "CPU 温度",
-  gpu_usage: "GPU 占用率",
   memory: "内存",
   battery: "电池",
 };
@@ -36,6 +35,7 @@ export function WidgetMetricList({
   batteryAvailable: boolean;
   onChange: (metrics: WidgetMetricConfig[]) => void;
 }) {
+  const pageActive = usePageActive();
   const visible = metrics.filter((metric) => batteryAvailable || metric.kind !== "battery");
   const kinds = visible.map((metric) => metric.kind);
   const [drag, setDrag] = useState<MetricDrag | null>(null);
@@ -51,6 +51,10 @@ export function WidgetMetricList({
       activePointer.current = null;
       setDrag(null);
     };
+    if (!pageActive) {
+      cancel();
+      return;
+    }
     const escape = (event: KeyboardEvent) => {
       if (event.key === "Escape") cancel();
     };
@@ -60,7 +64,7 @@ export function WidgetMetricList({
       window.removeEventListener("blur", cancel);
       window.removeEventListener("keydown", escape);
     };
-  }, []);
+  }, [pageActive]);
   const commit = (next: WidgetMetricConfig[], kind: WidgetMetricKind) => {
     if (next === metrics) return;
     onChange(next);
@@ -89,7 +93,7 @@ export function WidgetMetricList({
     }
   };
   useEffect(() => {
-    if (!drag?.active) return;
+    if (!pageActive || !drag?.active) return;
     let frame = 0;
     const scroll = () => {
       let ancestor = host.current?.parentElement;
@@ -114,7 +118,7 @@ export function WidgetMetricList({
     };
     frame = requestAnimationFrame(scroll);
     return () => cancelAnimationFrame(frame);
-  }, [drag?.active, metrics, batteryAvailable]);
+  }, [drag?.active, metrics, batteryAvailable, pageActive]);
   const finish = (cancelled: boolean) => {
     const current = dragRef.current;
     dragRef.current = null;
@@ -200,13 +204,7 @@ export function WidgetMetricList({
               aria-label={`${labels[metric.kind]}展示样式`}
               value={metric.usage_scheme}
               disabled={!metric.enabled}
-              options={
-                metric.kind === "cpu_temperature"
-                  ? schemes.filter(
-                      (scheme) => scheme.value === "number" || scheme.value === "capsule",
-                    )
-                  : schemes
-              }
+              options={schemes}
               onChange={(usage_scheme) =>
                 onChange(
                   metrics.map((item) =>

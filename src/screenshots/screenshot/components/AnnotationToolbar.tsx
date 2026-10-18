@@ -101,7 +101,7 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
     const { main, more } = screenshotToolbarGroups(toolbarTools);
     const selectedMore = more.find((item) => item === tool);
     const MoreIcon = selectedMore ? icons[selectedMore] : MoreHorizontal;
-    const iconProps = { size: 18, strokeWidth: 1.8, "aria-hidden": true };
+    const iconProps = { size: 20, strokeWidth: 1.8, "aria-hidden": true };
     const items: MenuProps["items"] = [
       ...more.map((key) => {
         const Icon = icons[key];
@@ -211,7 +211,7 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
               <Pin {...iconProps} />
             </TooltipButton>
             <TooltipButton
-              label="复制图片（Enter）"
+              label="复制图片（Ctrl+C / Enter）"
               loading={busy}
               success
               disabled={actionsDisabled || confirmDisabled}

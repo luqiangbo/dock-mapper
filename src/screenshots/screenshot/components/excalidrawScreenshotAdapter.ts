@@ -1,16 +1,44 @@
 import type { AnnotTool } from "./AnnotationToolbar";
-import type { Arrowhead, ArrowStyle, ElementRoundness, FillStyle, LineStyle, Roughness, TextStyle } from "./annotationTypes";
+import type {
+  Arrowhead,
+  ArrowStyle,
+  ElementRoundness,
+  FillStyle,
+  LineStyle,
+  Roughness,
+  TextStyle,
+  NumberStyle,
+} from "./annotationTypes";
+
+export function excalidrawFillPatch(
+  changes: { fillColor?: string; fillStyle?: FillStyle },
+  currentColor: string,
+  defaultColor: string,
+) {
+  return {
+    backgroundColor:
+      changes.fillStyle === "none"
+        ? "transparent"
+        : (changes.fillColor ?? (currentColor === "transparent" ? defaultColor : currentColor)),
+    ...(changes.fillStyle === undefined
+      ? {}
+      : {
+          fillStyle:
+            changes.fillStyle === "none"
+              ? "solid"
+              : changes.fillStyle === "cross_hatch"
+                ? "cross-hatch"
+                : changes.fillStyle,
+        }),
+  };
+}
 
 /** AppState stores the choice as text; rectangle elements store type 3. */
-export function excalidrawCurrentItemRoundness(
-  roundness: ElementRoundness,
-): ElementRoundness {
+export function excalidrawCurrentItemRoundness(roundness: ElementRoundness): ElementRoundness {
   return roundness;
 }
 
-export function excalidrawRectangleRoundness(
-  roundness: ElementRoundness,
-): { type: 3 } | null {
+export function excalidrawRectangleRoundness(roundness: ElementRoundness): { type: 3 } | null {
   return roundness === "round" ? { type: 3 } : null;
 }
 
@@ -31,6 +59,7 @@ export interface ExcalidrawSelectionState {
   startArrowhead?: Arrowhead;
   endArrowhead?: Arrowhead;
   textStyle?: TextStyle;
+  numberStyle?: NumberStyle;
 }
 
 function sameValues<T extends string | null>(left: readonly T[], right: readonly T[]): boolean {
@@ -39,10 +68,16 @@ function sameValues<T extends string | null>(left: readonly T[], right: readonly
 }
 
 function sameTextStyle(left?: TextStyle, right?: TextStyle): boolean {
-  return left?.fontSize === right?.fontSize && left?.color === right?.color &&
-    left?.font === right?.font && left?.textAlign === right?.textAlign &&
-    left?.opacity === right?.opacity && left?.bold === right?.bold &&
-    left?.strokeColor === right?.strokeColor && left?.strokeWidth === right?.strokeWidth;
+  return (
+    left?.fontSize === right?.fontSize &&
+    left?.color === right?.color &&
+    left?.font === right?.font &&
+    left?.textAlign === right?.textAlign &&
+    left?.opacity === right?.opacity &&
+    left?.bold === right?.bold &&
+    left?.strokeColor === right?.strokeColor &&
+    left?.strokeWidth === right?.strokeWidth
+  );
 }
 
 /** Avoid feeding Excalidraw's repeated onChange notifications back into React. */
@@ -50,15 +85,25 @@ export function isSameExcalidrawSelection(
   left: ExcalidrawSelectionState,
   right: ExcalidrawSelectionState,
 ): boolean {
-  return left.tool === right.tool && left.count === right.count &&
-    sameValues(left.tools, right.tools) && sameValues(left.mixedProperties ?? [], right.mixedProperties ?? []) &&
+  return (
+    left.tool === right.tool &&
+    left.count === right.count &&
+    sameValues(left.tools, right.tools) &&
+    sameValues(left.mixedProperties ?? [], right.mixedProperties ?? []) &&
     left.strokeColor === right.strokeColor &&
-    left.strokeWidth === right.strokeWidth && left.lineStyle === right.lineStyle &&
-    left.fillColor === right.fillColor && left.fillStyle === right.fillStyle &&
-    left.roughness === right.roughness && left.roundness === right.roundness &&
-    left.opacity === right.opacity && left.arrowStyle === right.arrowStyle &&
-    left.startArrowhead === right.startArrowhead && left.endArrowhead === right.endArrowhead &&
-    sameTextStyle(left.textStyle, right.textStyle);
+    left.strokeWidth === right.strokeWidth &&
+    left.lineStyle === right.lineStyle &&
+    left.fillColor === right.fillColor &&
+    left.fillStyle === right.fillStyle &&
+    left.roughness === right.roughness &&
+    left.roundness === right.roundness &&
+    left.opacity === right.opacity &&
+    left.arrowStyle === right.arrowStyle &&
+    left.startArrowhead === right.startArrowhead &&
+    left.endArrowhead === right.endArrowhead &&
+    sameTextStyle(left.textStyle, right.textStyle) &&
+    JSON.stringify(left.numberStyle) === JSON.stringify(right.numberStyle)
+  );
 }
 
 export const EXCALIDRAW_TOOL_TYPES: Partial<Record<Exclude<AnnotTool, null>, string>> = {
@@ -69,6 +114,7 @@ export const EXCALIDRAW_TOOL_TYPES: Partial<Record<Exclude<AnnotTool, null>, str
   line: "line",
   arrow: "arrow",
   pen: "freedraw",
+  highlight: "freedraw",
   text: "text",
   eraser: "eraser",
 };
@@ -80,6 +126,7 @@ export const EXCALIDRAW_STYLE_TOOLS = new Set([
   "line",
   "arrow",
   "pen",
+  "highlight",
   "text",
 ] as const);
 
@@ -102,12 +149,16 @@ export function excalidrawStyleCapabilities(
   tools: readonly AnnotTool[],
 ): ExcalidrawStyleCapabilities {
   const kinds = [...new Set(tools.filter(isExcalidrawStyleTool))];
-  const all = (predicate: (tool: typeof kinds[number]) => boolean) =>
+  const all = (predicate: (tool: (typeof kinds)[number]) => boolean) =>
     kinds.length > 0 && kinds.every(predicate);
   const frames = all((tool) => tool === "rect" || tool === "ellipse" || tool === "diamond");
   const linear = all(
-    (tool) => tool === "rect" || tool === "ellipse" || tool === "diamond" ||
-      tool === "line" || tool === "arrow",
+    (tool) =>
+      tool === "rect" ||
+      tool === "ellipse" ||
+      tool === "diamond" ||
+      tool === "line" ||
+      tool === "arrow",
   );
   return {
     fill: frames,
@@ -128,14 +179,33 @@ export function excalidrawToolType(tool: AnnotTool): string {
 /** Mosaic uses a host pointer layer while the native editor stays in selection. */
 export function screenshotToolFromActiveType(type: string, mosaicActive = false): AnnotTool {
   if (type === "selection" && mosaicActive) return "mosaic";
-  return type === "rectangle" ? "rect"
-    : type === "ellipse" ? "ellipse"
-      : type === "diamond" ? "diamond"
-        : type === "line" ? "line"
-          : type === "arrow" ? "arrow"
-            : type === "freedraw" ? "pen"
-              : type === "text" ? "text"
-                : type === "eraser" ? "eraser" : "select";
+  return type === "rectangle"
+    ? "rect"
+    : type === "ellipse"
+      ? "ellipse"
+      : type === "diamond"
+        ? "diamond"
+        : type === "line"
+          ? "line"
+          : type === "arrow"
+            ? "arrow"
+            : type === "freedraw"
+              ? "pen"
+              : type === "text"
+                ? "text"
+                : type === "eraser"
+                  ? "eraser"
+                  : "select";
+}
+
+export function resolveScreenshotTool(
+  type: string,
+  requested: AnnotTool,
+  mosaicActive = false,
+): AnnotTool {
+  if (type === "selection" && (requested === "picker" || requested === "number")) return requested;
+  if (type === "freedraw" && requested === "highlight") return "highlight";
+  return screenshotToolFromActiveType(type, mosaicActive);
 }
 
 export function captureBackgroundSkeleton(fileId: string, width: number, height: number) {
@@ -175,15 +245,19 @@ export function transformBetweenCrops(
   previous: PhysicalCrop,
   next: PhysicalCrop,
 ): { x: number; y: number; scaleX: number; scaleY: number } {
-  const scaleX = (previous.sourceWidth / previous.outputWidth) *
-    (next.outputWidth / next.sourceWidth);
-  const scaleY = (previous.sourceHeight / previous.outputHeight) *
-    (next.outputHeight / next.sourceHeight);
+  const scaleX =
+    (previous.sourceWidth / previous.outputWidth) * (next.outputWidth / next.sourceWidth);
+  const scaleY =
+    (previous.sourceHeight / previous.outputHeight) * (next.outputHeight / next.sourceHeight);
   return {
-    x: (previous.sourceX + x * previous.sourceWidth / previous.outputWidth - next.sourceX) *
-      next.outputWidth / next.sourceWidth,
-    y: (previous.sourceY + y * previous.sourceHeight / previous.outputHeight - next.sourceY) *
-      next.outputHeight / next.sourceHeight,
+    x:
+      ((previous.sourceX + (x * previous.sourceWidth) / previous.outputWidth - next.sourceX) *
+        next.outputWidth) /
+      next.sourceWidth,
+    y:
+      ((previous.sourceY + (y * previous.sourceHeight) / previous.outputHeight - next.sourceY) *
+        next.outputHeight) /
+      next.sourceHeight,
     scaleX,
     scaleY,
   };

@@ -1,0 +1,16 @@
+[
+  { "key": "microsoft-yahei", "family": "Microsoft YaHei", "label": "微软雅黑", "id": 1001 },
+  { "key": "simsun", "family": "SimSun", "label": "宋体", "id": 1002 },
+  { "key": "simhei", "family": "SimHei", "label": "黑体", "id": 1003 },
+  { "key": "kaiti", "family": "KaiTi", "label": "楷体", "id": 1004 },
+  { "key": "dengxian", "family": "DengXian", "label": "等线", "id": 1005 },
+  { "key": "fangsong", "family": "FangSong", "label": "仿宋", "id": 1006 },
+  { "key": "arial", "family": "Arial", "label": "Arial", "id": 1007 },
+  { "key": "segoe-ui", "family": "Segoe UI", "label": "Segoe UI", "id": 1008 },
+  { "key": "times-new-roman", "family": "Times New Roman", "label": "Times New Roman", "id": 1009 },
+  { "key": "consolas", "family": "Consolas", "label": "Consolas", "id": 1010 },
+  { "key": "calibri", "family": "Calibri", "label": "Calibri", "id": 1011 },
+  { "key": "cambria", "family": "Cambria", "label": "Cambria", "id": 1012 },
+  { "key": "georgia", "family": "Georgia", "label": "Georgia", "id": 1013 },
+  { "key": "verdana", "family": "Verdana", "label": "Verdana", "id": 1014 }
+]
