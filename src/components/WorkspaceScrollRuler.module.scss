@@ -17,34 +17,6 @@
   height: 100%;
   width: 20px;
 
-  &::before,
-  &::after {
-    content: "";
-    position: absolute;
-    inset: 0 0 0 auto;
-    width: 10px;
-    pointer-events: none;
-    transform-origin: right center;
-    transform: scaleX(0.4);
-    background: repeating-linear-gradient(to bottom, currentColor 0 1px, transparent 1px 8px);
-    transition:
-      transform 180ms ease,
-      opacity 180ms ease;
-  }
-  &::before {
-    opacity: 0.35;
-  }
-  &::after {
-    color: var(--accent-ink);
-    opacity: 0;
-    mask-image: linear-gradient(
-      to bottom,
-      transparent calc(var(--ruler-position) - 64px),
-      #000 var(--ruler-position),
-      transparent calc(var(--ruler-position) + 64px)
-    );
-  }
-
   :global(.ant-slider) {
     position: absolute;
     inset: 0;
@@ -62,24 +34,10 @@
     width: 20px;
     height: 24px;
     margin: 0;
-    // Keep antd's focusable hit target; render only a thin position needle.
-    &::before {
-      display: none;
-    }
+    // Keep antd's hit target and focus ring; the wave peak is the only position marker.
+    &::before,
     &::after {
-      position: absolute;
-      inset-inline-start: 10px !important;
-      inset-block-start: 11px !important;
-      width: 10px !important;
-      height: 2px !important;
-      border-radius: 1px;
-      background: var(--accent-ink);
-      box-shadow: none !important;
-      opacity: 0.6;
-      transform-origin: right center;
-      transition:
-        transform 180ms ease,
-        opacity 180ms ease;
+      display: none !important;
     }
     &:focus-visible {
       outline-offset: 1px;
@@ -88,56 +46,85 @@
   }
 }
 
-.ruler[data-active="true"] .scale::after {
+.waves {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding-block: 1px;
+  pointer-events: none;
+  transform: scaleX(0.85);
+  transform-origin: right center;
   opacity: 0.85;
+  transition: opacity 180ms ease;
 }
-.ruler[data-active="true"] :global(.ant-slider-handle)::after {
-  opacity: 1;
+
+.bar {
+  width: 18px;
+  height: 1.5px;
+  flex-shrink: 0;
+  background: var(--accent-ink);
+  min-height: 0;
+  border-radius: 2px;
+  transform-origin: right center;
+  animation: waterWave 7.5s ease-in-out infinite;
+  animation-play-state: paused;
 }
-.ruler[data-expanded="true"] {
-  .scale::before,
-  .scale::after {
-    transform: scaleX(1);
+
+@keyframes waterWave {
+  0%,
+  100% {
+    transform: translateY(var(--wave-offset-0)) scaleX(var(--wave-size-0));
   }
-  .scale::before {
-    opacity: 0.65;
+  12.5% {
+    transform: translateY(var(--wave-offset-1)) scaleX(var(--wave-size-1));
   }
-  :global(.ant-slider-handle)::after {
-    transform: scaleX(1.4);
+  25% {
+    transform: translateY(var(--wave-offset-2)) scaleX(var(--wave-size-2));
+  }
+  37.5% {
+    transform: translateY(var(--wave-offset-3)) scaleX(var(--wave-size-3));
+  }
+  50% {
+    transform: translateY(var(--wave-offset-4)) scaleX(var(--wave-size-4));
+  }
+  62.5% {
+    transform: translateY(var(--wave-offset-5)) scaleX(var(--wave-size-5));
+  }
+  75% {
+    transform: translateY(var(--wave-offset-6)) scaleX(var(--wave-size-6));
+  }
+  87.5% {
+    transform: translateY(var(--wave-offset-7)) scaleX(var(--wave-size-7));
   }
 }
 
-.tooltip {
-  &,
-  & * {
-    pointer-events: none !important;
-  }
-  animation-duration: 180ms !important;
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  :global(.ant-tooltip-container) {
-    min-height: 0;
-    padding: 3px 7px;
-    font-size: 11px;
-    line-height: 18px;
+.ruler[data-motion="true"] .bar {
+  animation-play-state: running;
+}
+.ruler[data-active="true"] .waves {
+  opacity: 1;
+}
+.ruler[data-expanded="true"] {
+  .waves {
+    opacity: 1;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .scale::before,
-  .scale::after,
-  .scale :global(.ant-slider-handle)::after {
+  .waves {
     transition: none;
   }
-  .tooltip {
+  .ruler .bar {
     animation: none !important;
-    transition: none !important;
+    transform: scaleX(var(--wave-high));
   }
 }
 
 @media (prefers-contrast: more), (forced-colors: active) {
-  .ruler,
-  .tooltip {
+  .ruler {
     display: none;
   }
 }

@@ -1,5 +1,8 @@
 import {
   useLayoutEffect,
+  useEffect,
+  useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
   type CSSProperties,
@@ -8,6 +11,7 @@ import {
 import { Slider } from "antd";
 import { observeWorkspaceScroll, scrollOffset } from "./workspaceScroll";
 import { createRulerActivity } from "./rulerActivity";
+import { createRulerWaves } from "./rulerWaves";
 import styles from "./WorkspaceScrollRuler.module.scss";
 
 export default function WorkspaceScrollRuler({
@@ -19,12 +23,50 @@ export default function WorkspaceScrollRuler({
 }) {
   const [position, setPosition] = useState({ pageKey, percent: 0, overflowing: false });
   const [interaction] = useState(createRulerActivity);
+  const scaleRef = useRef<HTMLDivElement>(null);
+  const [waveHeight, setWaveHeight] = useState(0);
+  const [waveSeed] = useState(() => Math.floor(Math.random() * 0x100000000));
+  const waves = useMemo(
+    () => createRulerWaves(waveHeight, position.percent, waveSeed),
+    [waveHeight, position.percent, waveSeed],
+  );
+  const [motionVisible, setMotionVisible] = useState(false);
+  useEffect(() => {
+    const syncVisibility = () => setMotionVisible(!document.hidden && document.hasFocus());
+    syncVisibility();
+    document.addEventListener("visibilitychange", syncVisibility);
+    window.addEventListener("focus", syncVisibility);
+    window.addEventListener("blur", syncVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", syncVisibility);
+      window.removeEventListener("focus", syncVisibility);
+      window.removeEventListener("blur", syncVisibility);
+    };
+  }, []);
   const activity = useSyncExternalStore(
     interaction.subscribe,
     interaction.getSnapshot,
     interaction.getSnapshot,
   );
   const visible = position.pageKey === pageKey && position.overflowing;
+  useLayoutEffect(() => {
+    const scale = scaleRef.current;
+    if (!scale || !visible) return;
+    let frame: number | undefined;
+    const schedule = () => {
+      frame ??= requestAnimationFrame(() => {
+        frame = undefined;
+        setWaveHeight(scale.clientHeight);
+      });
+    };
+    const observer = new ResizeObserver(schedule);
+    observer.observe(scale);
+    schedule();
+    return () => {
+      observer.disconnect();
+      if (frame !== undefined) cancelAnimationFrame(frame);
+    };
+  }, [visible]);
   useLayoutEffect(() => {
     interaction.reset();
     const content = contentRef.current;
@@ -62,7 +104,7 @@ export default function WorkspaceScrollRuler({
       hidden={!visible}
       data-active={visible && activity.active}
       data-expanded={visible && activity.expanded}
-      style={{ "--ruler-position": `${position.percent}%` } as CSSProperties}
+      data-motion={visible && motionVisible}
       aria-label="页面滚动位置"
       onPointerEnter={() => interaction.set("hovered", true)}
       onPointerLeave={() => interaction.set("hovered", false)}
@@ -90,7 +132,29 @@ export default function WorkspaceScrollRuler({
         });
       }}
     >
-      <div className={styles.scale}>
+      <div className={styles.scale} ref={scaleRef}>
+        <div className={styles.waves} aria-hidden="true">
+          {waves.map((wave, index) => (
+            <span
+              key={index}
+              className={styles.bar}
+              style={
+                {
+                  opacity: wave.opacity,
+                  animationDuration: `${wave.duration}s`,
+                  animationDelay: `${wave.delay}s`,
+                  "--wave-high": wave.high,
+                  ...Object.fromEntries(
+                    wave.frames.slice(0, 8).flatMap((frame, node) => [
+                      [`--wave-size-${node}`, frame.scale],
+                      [`--wave-offset-${node}`, `${frame.offset}px`],
+                    ]),
+                  ),
+                } as CSSProperties
+              }
+            />
+          ))}
+        </div>
         <Slider
           orientation="vertical"
           reverse
@@ -99,15 +163,7 @@ export default function WorkspaceScrollRuler({
           step={0.1}
           value={position.percent}
           included={false}
-          tooltip={{
-            open: visible && activity.active,
-            formatter: (value) => `${Math.round(value ?? 0)}%`,
-            placement: "left",
-            autoAdjustOverflow: true,
-            zIndex: 20,
-            getPopupContainer: (trigger) => trigger.closest<HTMLElement>("aside") ?? document.body,
-            rootClassName: styles.tooltip,
-          }}
+          tooltip={{ open: false }}
           onChangeComplete={() => interaction.set("dragging", false)}
           ariaLabelForHandle="页面滚动位置"
           ariaValueTextFormatterForHandle={(value) => `已滚动 ${Math.round(value)}%`}
