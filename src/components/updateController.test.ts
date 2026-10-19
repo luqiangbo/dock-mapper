@@ -9,6 +9,15 @@ function handle(version = "2026.1017.1") {
   };
 }
 describe("软件更新状态", () => {
+  it("静态创建控制器不发请求或通知，用户操作后才记录状态", async () => {
+    const check = vi.fn(async () => null);
+    const onStateChange = vi.fn();
+    const controller = createUpdateController({ check, relaunch: vi.fn(), onStateChange });
+    expect(check).not.toHaveBeenCalled();
+    expect(onStateChange).not.toHaveBeenCalled();
+    await controller.check();
+    expect(onStateChange.mock.calls.map(([state]) => state.phase)).toEqual(["checking", "latest"]);
+  });
   it("失败下载的迟到进度不会污染重试中的新下载", async () => {
     const first = handle();
     let oldProgress!: Parameters<UpdateHandle["download"]>[0];

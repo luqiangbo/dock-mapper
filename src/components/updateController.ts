@@ -36,6 +36,7 @@ export function updatePercent(state: UpdateState): number | undefined {
 export function createUpdateController(deps: {
   check: () => Promise<UpdateHandle | null>;
   relaunch: () => Promise<void>;
+  onStateChange?: (state: UpdateState) => void;
 }) {
   let state: UpdateState = {
     phase: "idle",
@@ -52,6 +53,7 @@ export function createUpdateController(deps: {
   const listeners = new Set<() => void>();
   const publish = (patch: Partial<UpdateState>) => {
     state = { ...state, ...patch };
+    deps.onStateChange?.(state);
     listeners.forEach((listener) => listener());
   };
   const fail = (stage: Stage, error: unknown) =>
@@ -63,7 +65,9 @@ export function createUpdateController(deps: {
       try {
         await previous.close();
       } catch (error) {
-        publish({ warning: `清理上一次更新失败：${String(error)}。若反复出现，请重启应用后重试。` });
+        publish({
+          warning: `清理上一次更新失败：${String(error)}。若反复出现，请重启应用后重试。`,
+        });
       }
   };
   const restart = async () => {

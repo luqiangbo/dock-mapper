@@ -1,0 +1,143 @@
+.ruler {
+  position: absolute;
+  z-index: 11;
+  top: var(--workspace-content-inset);
+  right: 2px;
+  bottom: 16px;
+  width: 20px;
+  color: var(--text-tertiary);
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+.scale {
+  position: relative;
+  height: 100%;
+  width: 20px;
+
+  &::before,
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0 0 0 auto;
+    width: 10px;
+    pointer-events: none;
+    transform-origin: right center;
+    transform: scaleX(0.4);
+    background: repeating-linear-gradient(to bottom, currentColor 0 1px, transparent 1px 8px);
+    transition:
+      transform 180ms ease,
+      opacity 180ms ease;
+  }
+  &::before {
+    opacity: 0.35;
+  }
+  &::after {
+    color: var(--accent-ink);
+    opacity: 0;
+    mask-image: linear-gradient(
+      to bottom,
+      transparent calc(var(--ruler-position) - 64px),
+      #000 var(--ruler-position),
+      transparent calc(var(--ruler-position) + 64px)
+    );
+  }
+
+  :global(.ant-slider) {
+    position: absolute;
+    inset: 0;
+    height: 100%;
+    width: 20px;
+    margin: 0;
+    padding: 0 8px;
+  }
+  :global(.ant-slider-rail),
+  :global(.ant-slider-track) {
+    background: transparent !important;
+  }
+  :global(.ant-slider-handle) {
+    inset-inline-start: 0 !important;
+    width: 20px;
+    height: 24px;
+    margin: 0;
+    // Keep antd's focusable hit target; render only a thin position needle.
+    &::before {
+      display: none;
+    }
+    &::after {
+      position: absolute;
+      inset-inline-start: 10px !important;
+      inset-block-start: 11px !important;
+      width: 10px !important;
+      height: 2px !important;
+      border-radius: 1px;
+      background: var(--accent-ink);
+      box-shadow: none !important;
+      opacity: 0.6;
+      transform-origin: right center;
+      transition:
+        transform 180ms ease,
+        opacity 180ms ease;
+    }
+    &:focus-visible {
+      outline-offset: 1px;
+      border-radius: 3px;
+    }
+  }
+}
+
+.ruler[data-active="true"] .scale::after {
+  opacity: 0.85;
+}
+.ruler[data-active="true"] :global(.ant-slider-handle)::after {
+  opacity: 1;
+}
+.ruler[data-expanded="true"] {
+  .scale::before,
+  .scale::after {
+    transform: scaleX(1);
+  }
+  .scale::before {
+    opacity: 0.65;
+  }
+  :global(.ant-slider-handle)::after {
+    transform: scaleX(1.4);
+  }
+}
+
+.tooltip {
+  &,
+  & * {
+    pointer-events: none !important;
+  }
+  animation-duration: 180ms !important;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  :global(.ant-tooltip-container) {
+    min-height: 0;
+    padding: 3px 7px;
+    font-size: 11px;
+    line-height: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scale::before,
+  .scale::after,
+  .scale :global(.ant-slider-handle)::after {
+    transition: none;
+  }
+  .tooltip {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+@media (prefers-contrast: more), (forced-colors: active) {
+  .ruler,
+  .tooltip {
+    display: none;
+  }
+}

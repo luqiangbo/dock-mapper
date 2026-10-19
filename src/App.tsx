@@ -30,6 +30,7 @@ import {
 import { useTheme } from "./ThemeContext";
 import appIcon from "./assets/app-icon.png";
 import styles from "./App.module.scss";
+import { revealWorkspaceFocus } from "./utils/workspaceFocus";
 import { MAIN_EVENTS } from "./api/commands";
 import {
   loadSidebarWidth,
@@ -38,7 +39,14 @@ import {
   SIDEBAR_MIN_WIDTH,
 } from "./utils/sidebarPreferences";
 
-import DeferredPage from "./components/DeferredPage";
+import PageBoundary from "./components/PageBoundary";
+import WorkspaceScrollRuler from "./components/WorkspaceScrollRuler";
+import ConnectedDashboard from "./components/ConnectedDashboard";
+import KeyMapper from "./components/KeyMapper";
+import KeyVisualizerSettings from "./components/KeyVisualizerSettings";
+import ScreenshotSettings from "./components/ScreenshotSettings";
+import WidgetSettings from "./components/WidgetSettings";
+import GeneralSettings from "./components/GeneralSettings";
 import { PageScope } from "./components/PageActivity";
 import TelemetryCollector from "./components/TelemetryCollector";
 import CaptureStartupFeedback from "./components/CaptureStartupFeedback";
@@ -51,14 +59,6 @@ import {
   type MainNavigation,
 } from "./utils/navigationPreferences";
 import { useCompactNavigation } from "./hooks/useCompactNavigation";
-const LOADERS = {
-  dashboard: () => import("./components/ConnectedDashboard"),
-  keymapper: () => import("./components/KeyMapper"),
-  keyvisualizer: () => import("./components/KeyVisualizerSettings"),
-  screenshot: () => import("./components/ScreenshotSettings"),
-  widget: () => import("./components/WidgetSettings"),
-  settings: () => import("./components/GeneralSettings"),
-};
 
 const { Header, Content } = Layout;
 const { Text, Title } = Typography;
@@ -81,12 +81,7 @@ const menuItem = ({ key, label, icon }: PageItem) => ({
   key,
   label,
   icon,
-  onMouseEnter: () => preloadPage(key),
-  onFocus: () => preloadPage(key),
 });
-function preloadPage(key: PageKey) {
-  void LOADERS[key]().catch((error) => console.warn(`页面预加载失败：${key}`, error));
-}
 
 export default function App() {
   const { notification } = AntApp.useApp();
@@ -201,23 +196,19 @@ export default function App() {
   const renderPage = (key: PageKey) => {
     switch (key) {
       case "keymapper":
-        return <DeferredPage key="keymapper" load={LOADERS.keymapper} pageProps={{}} />;
+        return <KeyMapper />;
       case "screenshot":
         return (
-          <DeferredPage
-            key="screenshot"
-            load={LOADERS.screenshot}
-            pageProps={{ activeTab: screenshotTab, onActiveTabChange: setScreenshotTab }}
-          />
+          <ScreenshotSettings activeTab={screenshotTab} onActiveTabChange={setScreenshotTab} />
         );
       case "widget":
-        return <DeferredPage key="widget" load={LOADERS.widget} pageProps={{}} />;
+        return <WidgetSettings />;
       case "keyvisualizer":
-        return <DeferredPage key="keyvisualizer" load={LOADERS.keyvisualizer} pageProps={{}} />;
+        return <KeyVisualizerSettings />;
       case "settings":
-        return <DeferredPage key="settings" load={LOADERS.settings} pageProps={{}} />;
+        return <GeneralSettings />;
       default:
-        return <DeferredPage key="dashboard" load={LOADERS.dashboard} pageProps={{}} />;
+        return <ConnectedDashboard />;
     }
   };
 
@@ -343,19 +334,34 @@ export default function App() {
                 </div>
               </div>
             </Header>
-            <Content ref={contentRef} className={styles.content}>
-              <Tabs
-                activeKey={activePage}
-                destroyOnHidden={false}
-                renderTabBar={() => <></>}
-                animated={false}
-                items={PAGES.map(({ key, label }) => ({
-                  key,
-                  label,
-                  children: <PageScope active={activePage === key}>{renderPage(key)}</PageScope>,
-                }))}
-              />
+            <Content
+              id="workspace-content"
+              ref={contentRef}
+              className={styles.content}
+              onFocusCapture={(event) => {
+                if (contentRef.current && event.target instanceof HTMLElement)
+                  revealWorkspaceFocus(contentRef.current, event.target);
+              }}
+            >
+              <div>
+                <Tabs
+                  activeKey={activePage}
+                  destroyOnHidden={false}
+                  renderTabBar={() => <></>}
+                  animated={false}
+                  items={PAGES.map(({ key, label }) => ({
+                    key,
+                    label,
+                    children: (
+                      <PageScope active={activePage === key}>
+                        <PageBoundary pageKey={key}>{renderPage(key)}</PageBoundary>
+                      </PageScope>
+                    ),
+                  }))}
+                />
+              </div>
             </Content>
+            <WorkspaceScrollRuler contentRef={contentRef} pageKey={activePage} />
           </Layout>
         </Splitter.Panel>
       </Splitter>

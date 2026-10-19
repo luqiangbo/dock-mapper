@@ -51,6 +51,8 @@ export default defineConfig(({ command }) => ({
     },
   },
   plugins: [pluginReact(), pluginSass()],
+  // Compile dynamic imports up front; keep runtime loading independent of HMR.
+  dev: { lazyCompilation: false },
   source: {
     define: {
       __DOCKMAPPER_DEV_MODE__: JSON.stringify(command === "dev"),

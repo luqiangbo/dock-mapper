@@ -1,0 +1,81 @@
+/* Independent of the entry bundle so the first frame remains readable without React. */
+:root {
+  --dock-boot-bg: #f3f5f7;
+  --dock-boot-text: #20252b;
+  --dock-boot-muted: #59636f;
+}
+:root[data-theme="dark"] {
+  --dock-boot-bg: #202328;
+  --dock-boot-text: #f0f2f5;
+  --dock-boot-muted: #b6bdc7;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --dock-boot-bg: #202328;
+    --dock-boot-text: #f0f2f5;
+    --dock-boot-muted: #b6bdc7;
+  }
+}
+.dock-startup {
+  box-sizing: border-box;
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  padding: 24px;
+  background: var(--dock-boot-bg, #f3f5f7);
+  color: var(--dock-boot-text, #20252b);
+  font:
+    14px/1.6 "Segoe UI Variable",
+    "Segoe UI",
+    "Microsoft YaHei UI",
+    sans-serif;
+}
+.dock-startup__card {
+  display: flex;
+  width: min(100%, 480px);
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+.dock-startup__name {
+  font-size: 20px;
+  font-weight: 600;
+}
+.dock-startup__indicator {
+  display: grid;
+  width: 96px;
+  height: 40px;
+  place-items: center;
+}
+.dock-startup__indicator progress {
+  width: 80px;
+  height: 6px;
+  accent-color: #526d87;
+}
+.dock-startup__detail,
+.dock-startup__hint {
+  color: var(--dock-boot-muted, #59636f);
+}
+.dock-startup__hint {
+  min-height: 23px;
+  font-size: 12px;
+}
+.dock-startup__error {
+  width: 100%;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+@media (forced-colors: active) {
+  .dock-startup {
+    background: Canvas;
+    color: CanvasText;
+  }
+  .dock-startup__detail,
+  .dock-startup__hint {
+    color: CanvasText;
+  }
+}

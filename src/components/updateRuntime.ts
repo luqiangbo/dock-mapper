@@ -1,6 +1,6 @@
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { createUpdateController } from "./updateController";
+import { createUpdateController, type UpdateState } from "./updateController";
 import { recordRuntimeLog } from "./runtimeLogging";
 
 // Keep the active download and its state when the settings page unmounts.
@@ -17,6 +17,7 @@ export const updateController = createUpdateController({
       : null;
   },
   relaunch,
+  onStateChange: recordUpdateState,
 });
 
 let lastStage = "";
@@ -31,8 +32,7 @@ const STAGES = {
   ready: "已发起重启",
   error: "更新失败",
 };
-updateController.subscribe(() => {
-  const state = updateController.getSnapshot();
+function recordUpdateState(state: UpdateState) {
   const signature = `${state.phase}:${state.error ?? ""}`;
   if (signature === lastStage) return;
   lastStage = signature;
@@ -41,4 +41,4 @@ updateController.subscribe(() => {
     `${STAGES[state.phase]}${state.version ? ` v${state.version}` : ""}${state.error ? `（${state.failedAt}）：${state.error}` : ""}`,
     state.phase === "error" ? "error" : "info",
   );
-});
+}

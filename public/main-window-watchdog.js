@@ -44,7 +44,7 @@
     panel.id = "main-window-boot-error";
     panel.setAttribute("role", "alert");
     panel.style.cssText =
-      "position:fixed;inset:0;z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:32px;background:#f5f7fa;color:#17202a;font:14px/1.6 'Segoe UI','Microsoft YaHei UI',sans-serif;text-align:center";
+      "position:fixed;inset:0;z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:32px;background:var(--dock-boot-bg,#f3f5f7);color:var(--dock-boot-text,#20252b);font:14px/1.6 'Segoe UI','Microsoft YaHei UI',sans-serif;text-align:center";
     const title = document.createElement("strong");
     title.textContent = "主窗口资源加载失败";
     title.style.fontSize = "20px";

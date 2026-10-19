@@ -4,9 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>极客效率工具箱 - 配置中心</title>
+    <script src="/main-window-appearance.js"></script>
+    <link rel="stylesheet" href="/main-window-startup.css" />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <main class="dock-startup" aria-busy="true">
+        <div class="dock-startup__card">
+          <strong class="dock-startup__name">DockMapper</strong>
+          <div class="dock-startup__indicator"><progress aria-label="正在启动"></progress></div>
+          <span class="dock-startup__detail" role="status">正在启动…</span>
+          <span class="dock-startup__hint"></span>
+        </div>
+      </main>
+    </div>
     <script src="/main-window-watchdog.js"></script>
   </body>
 </html>
