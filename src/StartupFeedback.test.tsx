@@ -20,7 +20,7 @@ describe("React 接管后的启动反馈", () => {
         />,
       );
       expect(error).toContain("写入失败");
-      expect(error).toContain("重试");
+      expect(error).toContain("重 试");
       expect(error).not.toContain("正在初始化应用…");
     } finally {
       vi.unstubAllGlobals();

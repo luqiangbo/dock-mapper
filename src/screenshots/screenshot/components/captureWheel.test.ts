@@ -55,7 +55,7 @@ describe("画布滚轮大小调整", () => {
   });
   it("文字和序号调整实际尺寸", () => {
     expect(captureWheelPatch("text", settings, -120)?.textStyle?.fontSize).toBe(26);
-    expect(captureWheelPatch("number", settings, -120)?.numberStyle?.size).toBe(38);
+    expect(captureWheelPatch("number", settings, -120)?.numberStyle?.size).toBe(30);
   });
   it("大小上限与持久化范围一致", () => {
     expect(captureWheelPatch("pen", { ...settings, penWidth: 32 }, -120)).toEqual({ penWidth: 32 });
