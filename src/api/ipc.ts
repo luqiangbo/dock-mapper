@@ -37,12 +37,44 @@ export interface HistoryPreviewSession {
   ids: string[];
 }
 
+export interface NativeStartupStatus {
+  generation: number;
+  phase: "initializing" | "ready" | "failed";
+  stage: string;
+  error: string | null;
+  running: boolean;
+}
+
 interface CommandContract {
+  schedule_screenshot: {
+    args: {
+      delayMs: number;
+      cancel: boolean;
+      physical?: boolean;
+      selection?: { x: number; y: number; width: number; height: number };
+      screenId?: number;
+    };
+    result: number | null;
+  };
+  update_capture_preferences: {
+    args: {
+      experience?: import("../screenshots/screenshot/components/captureExperience").CaptureExperience;
+      toolbarTools?: ScreenshotConfig["toolbar_tools"];
+    };
+    result: ScreenshotConfig;
+  };
+  get_pin_restore_error: { args: undefined; result: string | null };
+  restore_closed_pin: { args: undefined; result: string };
+  query_capture_elements: {
+    args: { generation: number; x: number; y: number };
+    result: import("./screenshotTypes").WindowCandidate[];
+  };
   initialize_defaults: {
     args: { buildId: string; activate: boolean };
     result: { reset: boolean; identity: string; restartRequired: boolean };
   };
   application_ready: { args: undefined; result: boolean };
+  get_startup_status: { args: undefined; result: NativeStartupStatus };
   get_runtime_logs: { args: undefined; result: RuntimeLogSnapshot };
   get_runtime_log_text: { args: undefined; result: string };
   clear_runtime_logs: { args: undefined; result: void };
@@ -146,7 +178,7 @@ interface CommandContract {
   pin_image_ready: { args: { id: string }; result: boolean };
   get_pin_options: { args: { id: string }; result: PinOptions };
   update_pin_options: {
-    args: { id: string; opacity: number; locked: boolean };
+    args: { id: string; opacity: number; locked: boolean; deferSave?: boolean };
     result: PinOptions;
   };
   copy_pin_image: { args: { id: string }; result: boolean };

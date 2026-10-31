@@ -26,8 +26,8 @@ describe("taskbar widget responsive layout", () => {
       { cpu_usage: 20, battery: null },
     );
     expect(metrics.map((m) => m.kind)).toEqual(["cpu"]);
-    expect(DEFAULT_WIDGET_LAYOUT.font_size).toBe(14);
-    expect(DEFAULT_WIDGET_LAYOUT.icon_size).toBe(18);
+    expect(DEFAULT_WIDGET_LAYOUT.font_size).toBe(12);
+    expect(DEFAULT_WIDGET_LAYOUT.icon_size).toBe(14);
   });
 
   it("keeps standard dimensions and custom spacing when standard mode is locked", () => {

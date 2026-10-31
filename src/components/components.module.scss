@@ -12,12 +12,23 @@ $compact-radius: 10px;
   gap: 16px;
 }
 
-.softwareUpdateRow {
+.updateToolbar {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 12px;
-  padding-block: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.aboutIdentity {
+  display: flex;
+  align-items: center;
+  flex: 1 1 180px;
+  gap: 10px;
+  min-width: 0;
+
+  :global(.ant-typography-secondary) {
+    font-size: 12px;
+  }
 }
 .historyDateGroup {
   min-width: 0;
@@ -236,22 +247,13 @@ $compact-radius: 10px;
   justify-content: space-between;
   margin-bottom: 12px;
 }
-.widgetLayoutField {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-width: 0;
-}
-.widgetLayoutField :global(.ant-select),
-.widgetLayoutField :global(.ant-input-number) {
-  width: 140px;
-  flex: 0 0 140px;
+.widgetLayoutControls > .widgetLayoutField {
+  max-width: 280px;
 }
 .widgetDistanceGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 12px 24px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+  gap: 12px 16px;
   margin: 12px 0;
 }
 .widgetOptionCard {
@@ -402,7 +404,7 @@ $compact-radius: 10px;
   width: 100%;
   flex: 0 0 auto;
   align-items: center;
-  flex-wrap: wrap;
+  min-width: 0;
   justify-content: flex-end;
 
   :global(.ant-tag) {
@@ -424,7 +426,7 @@ $compact-radius: 10px;
   display: flex;
   max-width: 148px;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: 3px;
 }
 
@@ -432,11 +434,12 @@ $compact-radius: 10px;
   color: var(--ant-color-error);
   font-size: 11px;
   line-height: 1.25;
-  text-align: right;
+  text-align: left;
 }
 
 .shortcutItem {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 360px);
   min-height: 58px;
   align-items: center;
   justify-content: space-between;
@@ -450,6 +453,26 @@ $compact-radius: 10px;
 
 .shortcutCopy {
   min-width: 0;
+}
+
+.shortcutName {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.shortcutBinding .shortcutFormItem,
+.shortcutBinding .shortcutSelectField {
+  width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 600px) {
+  .shortcutItem {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
 }
 
 .shortcutSelectField {
@@ -528,7 +551,77 @@ $compact-radius: 10px;
   }
 
   :global(.ant-select) {
-    min-width: 140px;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  :global(.ant-color-picker-trigger) {
+    align-items: center;
+  }
+}
+
+.captureExperience {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.captureToggles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 8px 16px;
+}
+
+.captureToggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+}
+
+.settingsFieldGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+  gap: 12px 16px;
+  min-width: 0;
+}
+
+.settingsSwitchControl {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+}
+
+.settingsField,
+.widgetLayoutField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+
+  > span:first-child {
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 20px;
+  }
+
+  :global(.ant-select),
+  :global(.ant-input-number),
+  :global(.ant-input-affix-wrapper) {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+.scheduledPresetRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  :global(.ant-input) {
+    flex: 1;
+    min-width: 0;
   }
 }
 
@@ -605,7 +698,7 @@ $compact-radius: 10px;
   background: transparent;
   border-bottom: 1px solid var(--glass-border);
   padding: 12px 0;
-  align-items: flex-start;
+  align-items: center;
 }
 
 .visualizerMetric {
@@ -677,30 +770,10 @@ $compact-radius: 10px;
   width: 100%;
 }
 
-.actionRow,
-.historyHeader,
-.historyActions {
+.actionRow {
   display: flex;
   align-items: center;
   gap: 8px;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  justify-content: flex-end;
-  transition:
-    opacity 140ms ease,
-    transform 140ms ease;
-  position: static;
-  opacity: 1;
-  transform: none;
-  pointer-events: auto;
-  background: transparent;
-  backdrop-filter: none;
-  border-top: 1px solid var(--glass-border);
-  padding: 4px 8px;
-}
-
-.actionRow {
   flex-wrap: wrap;
 }
 
@@ -718,13 +791,9 @@ $compact-radius: 10px;
 }
 
 .historyHeader {
-  flex-wrap: wrap;
-  justify-content: space-between;
-  padding: 12px 14px;
-  @include glass.surface(var(--glass-surface), 10px);
-  align-items: stretch;
+  display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
 .historyHeading {
@@ -736,33 +805,56 @@ $compact-radius: 10px;
 }
 
 .historyToolbar {
-  flex: 0 0 auto;
-  align-items: center;
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-end;
   gap: 12px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--glass-border);
-  justify-content: flex-start;
 }
 
-.historyControl {
+.historyToolbar .historyControl {
+  flex: 1 1 128px;
+  min-width: 0;
+  max-width: 144px;
+  margin: 0;
+
+  :global(.ant-form-item-label) {
+    padding-bottom: 4px;
+  }
+
+  :global(.ant-form-item-label > label) {
+    height: auto;
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+
+  :global(.ant-select),
+  :global(.ant-picker) {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+.historyToolbar .historyDateControl {
+  flex: 2 1 256px;
+  max-width: 320px;
+}
+
+.historyToolbar .historyColumnsControl {
+  flex: 0 0 96px;
+}
+
+.historyToolbarActions {
   display: flex;
   align-items: center;
-  gap: 6px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-
-  :global(.ant-select) {
-    min-width: 112px;
-  }
+  gap: 8px;
+  min-height: 32px;
+  margin-left: auto;
 }
 
 .historyCount {
   min-width: 42px;
   text-align: right;
   white-space: nowrap;
-  margin-left: auto;
 }
 
 .historyMasonry {
@@ -773,27 +865,59 @@ $compact-radius: 10px;
   position: relative;
   min-width: 0;
   overflow: hidden;
-  outline: none;
-  @include glass.surface(var(--glass-surface), 10px);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: var(--surface-muted);
 
   &:focus-visible {
-    box-shadow: inset 0 0 0 2px var(--accent);
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
+  &:hover,
+  &:focus-within,
+  &[data-active="true"] {
+    .historyMeta,
+    .historyActions {
+      opacity: 1;
+      transform: none;
+    }
+    .historyActions {
+      pointer-events: auto;
+    }
+    .historyImage {
+      transform: scale(1.025);
+    }
+  }
+}
 
-  &:hover .historyActions,
-  &:focus-within .historyActions {
-    pointer-events: auto;
-    opacity: 1;
-    transform: translateY(0);
+.historyActions {
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+  flex-wrap: wrap;
+  padding: 12px 6px 5px;
+  color: #fff;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.76));
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+  :global(.ant-btn) {
+    color: inherit;
   }
-
-  &:hover .historyMeta,
-  &:focus-within .historyMeta {
-    opacity: 1;
-    transform: translateY(0);
+  :global(.ant-btn:disabled) {
+    color: rgba(255, 255, 255, 0.45);
   }
-  background: var(--surface-base);
-  border-radius: 10px;
+  :global(.ant-btn:hover) {
+    background: rgba(255, 255, 255, 0.2);
+  }
 }
 
 .historyPreview {
@@ -801,6 +925,7 @@ $compact-radius: 10px;
   place-items: center;
   overflow: hidden;
   background: var(--surface-muted);
+  min-height: 88px;
 
   :global(.ant-image) {
     width: 100%;
@@ -829,6 +954,7 @@ $compact-radius: 10px;
   width: 100%;
   height: 100%;
   object-fit: contain;
+  transition: transform 160ms ease;
 }
 
 .historyOriginalImage {
@@ -854,44 +980,53 @@ $compact-radius: 10px;
 }
 
 .historyMeta {
+  position: absolute;
   top: 0;
   right: 0;
   left: 0;
   z-index: 1;
   display: flex;
-  min-width: 0;
-  flex-direction: column;
+  justify-content: space-between;
+  gap: 2px 8px;
+  flex-wrap: wrap;
+  padding: 7px 10px 16px;
   pointer-events: none;
-  color: var(--text-secondary);
-  line-height: 1.3;
+  color: #fff;
+  background: linear-gradient(rgba(0, 0, 0, 0.72), transparent);
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0;
+  transform: translateY(-4px);
   transition:
-    opacity 140ms ease,
-    transform 140ms ease;
-
+    opacity 160ms ease,
+    transform 160ms ease;
   :global(.ant-typography),
   .description {
     margin: 0;
     color: inherit;
     font-size: inherit;
   }
-  position: static;
-  opacity: 1;
-  transform: none;
-  background: transparent;
-  font-size: 12px;
-  padding: 8px 12px;
 }
 
 @media (hover: none) {
-  .historyMeta {
-    opacity: 0.68;
+  .historyMeta,
+  .historyActions {
+    opacity: 1;
     transform: none;
   }
-
   .historyActions {
-    position: static;
     pointer-events: auto;
-    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .historyImage,
+  .historyMeta,
+  .historyActions {
+    transition: none;
+  }
+  .historyCard:hover .historyImage,
+  .historyCard:focus-within .historyImage,
+  .historyCard[data-active="true"] .historyImage {
     transform: none;
   }
 }
@@ -930,20 +1065,9 @@ $compact-radius: 10px;
     align-items: flex-start;
   }
 
-  .shortcutItem {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 8px;
-  }
-
   .shortcutBinding,
   .shortcutSelectField {
     width: 100%;
-  }
-
-  .shortcutBinding {
-    align-items: stretch;
-    flex-direction: column;
   }
 
   .visualizerHeader,
@@ -1035,12 +1159,17 @@ $compact-radius: 10px;
   .historyToolbar {
     gap: 8px;
   }
-  .historyControl {
+  .historyToolbar .historyControl {
     flex: 1 1 120px;
+    max-width: none;
   }
-  .historyControl :global(.ant-select),
-  .historyControl :global(.ant-input-number) {
-    width: 100% !important;
+
+  .historyToolbar .historyDateControl {
+    flex-basis: 256px;
+  }
+
+  .historyToolbar .historyColumnsControl {
+    flex: 0 0 96px;
   }
 }
 

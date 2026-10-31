@@ -3,6 +3,7 @@
   "commands": [
     "initialize_defaults",
     "application_ready",
+    "get_startup_status",
     "get_runtime_logs",
     "get_runtime_log_text",
     "clear_runtime_logs",
@@ -80,6 +81,11 @@
     "get_minimize_to_tray",
     "set_minimize_to_tray",
     "open_screenshot_history_preview",
-    "get_screenshot_history_preview_session"
+    "get_screenshot_history_preview_session",
+    "restore_closed_pin",
+    "get_pin_restore_error",
+    "query_capture_elements",
+    "update_capture_preferences",
+    "schedule_screenshot"
   ]
 }

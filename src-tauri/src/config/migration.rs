@@ -1,6 +1,59 @@
 use super::*;
 
 pub fn normalize_screenshot_config(config: &mut ScreenshotConfig) {
+    let experience = &mut config.experience;
+    if !default_screenshot_toolbar_tools()
+        .iter()
+        .any(|tool| tool.id == experience.last_tool)
+    {
+        experience.last_tool = "select".into();
+    }
+    experience.zoom = experience.zoom.clamp(4, 24);
+    experience.radius = experience.radius.min(200);
+    experience.border = experience.border.min(32);
+    experience.shadow = experience.shadow.min(64);
+    // Collapse legacy designs once while keeping fixed palette colors.
+    let legacy_colors = match experience.number_palette.as_str() {
+        "pink" => Some(("#F4B8C4", "#553C48")),
+        "mint" => Some(("#BDE3CF", "#335B48")),
+        "sky" => Some(("#BDDAF5", "#35516D")),
+        "lavender" => Some(("#D3C4ED", "#53436B")),
+        "butter" => Some(("#F5DDA6", "#655230")),
+        "peach" => Some(("#F5C9AE", "#6A4938")),
+        "custom" => None,
+        _ => Some(("#e03131", "#ffffff")),
+    };
+    if let Some((fill, text)) = legacy_colors {
+        config.annotation_styles.number.background_color = fill.into();
+        config.annotation_styles.number.stroke_color = text.into();
+    }
+    experience.number_appearance = "flat".into();
+    experience.number_palette = "custom".into();
+    experience.number_start = experience.number_start.clamp(1, 9999);
+    experience.number_comment = experience.number_comment.chars().take(500).collect();
+    if !["decimal", "alpha", "roman"].contains(&experience.number_format.as_str()) {
+        experience.number_format = "decimal".into();
+    }
+    experience.presets.truncate(20);
+    for preset in &mut experience.presets {
+        preset.name = preset.name.chars().take(80).collect();
+        preset.delay_ms = preset.delay_ms.min(60_000);
+    }
+    experience.region_limit = experience.region_limit.min(100);
+    experience.pin_history_limit = experience.pin_history_limit.min(100);
+    experience.regions.retain(|r| {
+        !r.screen.is_empty()
+            && r.x.is_finite()
+            && r.y.is_finite()
+            && r.width.is_finite()
+            && r.height.is_finite()
+            && r.width >= 8.0
+            && r.height >= 8.0
+    });
+    experience.regions.truncate(experience.region_limit);
+    if !["elements", "windows", "manual"].contains(&experience.detection.as_str()) {
+        experience.detection = "elements".into();
+    }
     let fonts: Vec<serde_json::Value> = serde_json::from_str(include_str!(
         "../../../src/screenshots/screenshot/components/systemFonts.json"
     ))

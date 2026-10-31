@@ -22,7 +22,11 @@ export function screenshotViewport(
   const insetX = (rect.width - width * safeZoom) / 2;
   const insetY = (rect.height - height * safeZoom) / 2;
   return {
-    ...rect,
+    // DOMRect exposes these through prototype getters, so object spread loses them.
+    left: rect.left,
+    top: rect.top,
+    width: rect.width,
+    height: rect.height,
     zoom: safeZoom,
     insetX,
     insetY,
@@ -43,4 +47,15 @@ export function clientToBitmap(point: { x: number; y: number }, view: Screenshot
     x: (point.x - view.left - view.insetX) / view.zoom,
     y: (point.y - view.top - view.insetY) / view.zoom,
   };
+}
+
+export function screenAnchoredViewport(
+  width: number,
+  height: number,
+  rect: ViewportRect,
+  originX: number,
+  originY: number,
+): ScreenshotViewport {
+  const view = screenshotViewport(width, height, rect);
+  return { ...view, scrollX: view.scrollX - originX, scrollY: view.scrollY - originY };
 }

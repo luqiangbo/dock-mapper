@@ -1,9 +1,10 @@
 import {
   Excalidraw,
   CaptureUpdateAction,
+  getCommonBounds,
+  viewportCoordsToSceneCoords,
   FONT_FAMILY,
   convertToExcalidrawElements,
-  exportToBlob,
   newElementWith,
 } from "@excalidraw/excalidraw";
 import type { ExcalidrawImperativeAPI, ExcalidrawProps } from "@excalidraw/excalidraw/types";
@@ -19,6 +20,12 @@ import {
 import type { AnnotTool } from "./AnnotationToolbar";
 import { MosaicDrawingLayer } from "./MosaicDrawingLayer";
 import { SpecialToolLayer } from "./SpecialToolLayer";
+import {
+  applyNumberBadgeStyle,
+  isNumberBadgeBody,
+  numberStyleForBadge,
+  replaceNumberBadges,
+} from "./numberBadge";
 import { numberGroupsToErase } from "./specialToolState";
 import { editorHistory, type EditorHistoryState, EMPTY_EDITOR_HISTORY } from "./editorHistory";
 import type { NumberStyle } from "./annotationTypes";
@@ -37,7 +44,6 @@ import type {
 } from "./annotationTypes";
 import {
   captureBackgroundSkeleton,
-  captureExportDimensions,
   excalidrawCurrentItemRoundness,
   excalidrawFillPatch,
   excalidrawRectangleRoundness,
@@ -45,12 +51,15 @@ import {
   isSameExcalidrawSelection,
   screenshotEditorPresentation,
   resolveScreenshotTool,
-  transformBetweenCrops,
   type ExcalidrawSelectionState,
 } from "./excalidrawScreenshotAdapter";
+import { annotationHitTest } from "./annotationHitTest";
+import { captureAnnotationCanvas } from "./captureAnnotationCanvas";
 import { SYSTEM_FONTS } from "./systemFonts";
 
 export interface ExcalidrawScreenshotEditorHandle {
+  clearSelection: () => void;
+  hitTest: (clientX: number, clientY: number) => boolean;
   exportPng: () => Promise<Uint8Array>;
   setTool: (tool: AnnotTool) => void;
   applyStyle: (changes: ExcalidrawStyleChanges, commit?: boolean) => void;
@@ -238,7 +247,14 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
       alignViewport,
       scheduleAlignment,
       revision: viewportRevision,
-    } = useScreenshotViewport(api, props.baseCanvas, props.displayCanvas, props.captureKey);
+    } = useScreenshotViewport(
+      api,
+      props.baseCanvas,
+      props.displayCanvas,
+      props.captureKey,
+      props.crop?.sourceX ?? 0,
+      props.crop?.sourceY ?? 0,
+    );
     const baseCanvasRef = useRef(props.baseCanvas);
     const alignViewportRef = useRef(alignViewport);
     baseCanvasRef.current = props.baseCanvas;
@@ -248,6 +264,7 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
     const selectionCallbackRef = useRef(props.onSelectionChange);
     const toolCallbackRef = useRef(props.onToolChange);
     const textStyleRef = useRef(props.textStyle);
+    const previousNumberCount = useRef(0);
     const numberStyleRef = useRef(props.numberStyle);
     numberStyleRef.current = props.numberStyle;
     const defaultFillColorRef = useRef(props.fillColor);
@@ -328,6 +345,10 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
     const applySelectionStyle = useCallback((changes: ExcalidrawStyleChanges, commit = true) => {
       const api = apiRef.current;
       if (!api) return;
+      if (changes.numberStyle && baseCanvasRef.current) {
+        applyNumberBadgeStyle(api, baseCanvasRef.current, changes.numberStyle, commit);
+        return;
+      }
       const selectedIds = api.getAppState().selectedElementIds;
       const selectedCount = Object.keys(selectedIds).length;
       if (!selectedCount) return;
@@ -336,46 +357,6 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
         const kind = annotationToolFromElement(element);
         const isFrame = kind === "rect" || kind === "ellipse" || kind === "diamond";
         const isLinear = isFrame || kind === "line" || kind === "arrow";
-        if (kind === "number" && changes.numberStyle) {
-          const circle = api
-            .getSceneElements()
-            .find(
-              (candidate) =>
-                candidate.type === "ellipse" &&
-                candidate.customData?.dockmapperTool === "number" &&
-                candidate.groupIds.some((id) => element.groupIds.includes(id)),
-            );
-          if (circle) {
-            const style = changes.numberStyle;
-            const zoom = Math.max(0.01, api.getAppState().zoom.value);
-            const size = style.size / zoom;
-            const scale = size / Math.max(1, circle.width);
-            const x = circle.x + (circle.width - size) / 2,
-              y = circle.y + (circle.height - size) / 2;
-            const numberPatch =
-              element.type === "text"
-                ? {
-                    x: x + (element.x - circle.x) * scale,
-                    y: y + (element.y - circle.y) * scale,
-                    width: element.width * scale,
-                    height: element.height * scale,
-                    fontSize: element.fontSize * scale,
-                    strokeColor: style.textColor,
-                  }
-                : {
-                    x,
-                    y,
-                    width: size,
-                    height: size,
-                    backgroundColor: style.backgroundColor,
-                    strokeColor: style.outline.enabled
-                      ? style.outline.color
-                      : style.backgroundColor,
-                    strokeWidth: style.outline.enabled ? 1.5 / zoom : 0,
-                  };
-            return newElementWith(element, numberPatch as never);
-          }
-        }
         const patch = {
           ...(changes.strokeColor === undefined ? {} : { strokeColor: changes.strokeColor }),
           ...(changes.strokeWidth === undefined || kind === "text"
@@ -501,7 +482,11 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
         const fileId = `dockmapper-capture-${props.captureKey}`;
         if (cancelled) return;
         const [background] = convertToExcalidrawElements([
-          captureBackgroundSkeleton(fileId, base.width, base.height) as never,
+          {
+            ...captureBackgroundSkeleton(fileId, base.width, base.height),
+            x: props.crop?.sourceX ?? 0,
+            y: props.crop?.sourceY ?? 0,
+          } as never,
         ]);
         api.updateScene({
           elements: [background],
@@ -546,33 +531,18 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
       )
         return;
 
-      const transform = transformBetweenCrops(0, 0, previous, next);
-      const { scaleX, scaleY } = transform;
-      const elements = api.getSceneElements().map((element) => {
-        if (element.locked) {
-          return newElementWith(element, {
-            x: 0,
-            y: 0,
-            width: next.outputWidth,
-            height: next.outputHeight,
-          } as never);
-        }
-        const position = transformBetweenCrops(element.x, element.y, previous, next);
-        const points =
-          "points" in element && Array.isArray(element.points)
-            ? element.points.map(([pointX, pointY]) => [pointX * scaleX, pointY * scaleY])
-            : undefined;
-        return newElementWith(element, {
-          x: position.x,
-          y: position.y,
-          width: element.width * scaleX,
-          height: element.height * scaleY,
-          ...(points ? { points } : {}),
-          ...(element.type === "text" ? { fontSize: element.fontSize * scaleY } : {}),
-        } as never);
-      });
+      // Annotation coordinates remain anchored to the frozen screen. Only the viewport moves.
+      const elements = api.getSceneElementsIncludingDeleted().map((element) =>
+        element.id === `dockmapper-capture-${props.captureKey}`
+          ? newElementWith(element, {
+              x: next.sourceX,
+              y: next.sourceY,
+              width: next.outputWidth,
+              height: next.outputHeight,
+            })
+          : element,
+      );
       api.updateScene({ elements, captureUpdate: CaptureUpdateAction.NEVER });
-      api.history.clear();
       cropRef.current = next;
       alignViewport();
     }, [alignViewport, props.captureKey, props.crop, ready]);
@@ -586,6 +556,19 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
       (elements, appState) => {
         appStateRef.current = appState as unknown as Record<string, unknown>;
         scheduleAlignment();
+        if (appState.activeTool.type === "line") {
+          const capture = captureKeyRef.current;
+          const editor = apiRef.current;
+          queueMicrotask(() => {
+            if (
+              apiRef.current === editor &&
+              captureKeyRef.current === capture &&
+              editor?.getAppState().activeTool.type === "line"
+            )
+              editor.setActiveTool({ type: "arrow", locked: true });
+          });
+          return;
+        }
         if (mosaicActiveRef.current && appState.activeTool.type !== "selection") {
           mosaicActiveRef.current = false;
           setMosaicActive(false);
@@ -595,6 +578,39 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
           requestedToolRef.current,
           mosaicActiveRef.current,
         );
+        const circles = elements.filter(isNumberBadgeBody);
+        if (
+          circles.length < previousNumberCount.current &&
+          numberStyleRef.current.renumber !== false
+        ) {
+          previousNumberCount.current = circles.length;
+          const editor = apiRef.current,
+            capture = captureKeyRef.current;
+          queueMicrotask(() => {
+            if (
+              !editor ||
+              apiRef.current !== editor ||
+              captureKeyRef.current !== capture ||
+              !baseCanvasRef.current
+            )
+              return;
+            const all = editor.getSceneElementsIncludingDeleted();
+            const bodies = all.filter(isNumberBadgeBody);
+            const zoom = editor.getAppState().zoom.value;
+            const updated = replaceNumberBadges(
+              all,
+              bodies,
+              baseCanvasRef.current,
+              zoom,
+              (body) => numberStyleForBadge(body, numberStyleRef.current, zoom),
+              (_body, index) => (numberStyleRef.current.start ?? 1) + index,
+            );
+            editor.updateScene({
+              elements: updated,
+              captureUpdate: CaptureUpdateAction.EVENTUALLY,
+            });
+          });
+        } else previousNumberCount.current = circles.length;
         const ids = numberGroupsToErase(elements);
         if (ids.size && requestedToolRef.current === "eraser") {
           apiRef.current?.updateScene({
@@ -655,12 +671,7 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
         const onlyNumbers =
           selected.length > 0 &&
           selected.every((element) => annotationToolFromElement(element) === "number");
-        const numberCircle = onlyNumbers
-          ? selected.find((element) => element.type === "ellipse")
-          : undefined;
-        const numberText = onlyNumbers
-          ? selected.find((element) => element.type === "text")
-          : undefined;
+        const numberCircle = onlyNumbers ? selected.find(isNumberBadgeBody) : undefined;
         const mixedProperties = onlyNumbers
           ? []
           : selected.length > 1
@@ -679,17 +690,10 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
                 .map(annotationToolFromElement)
                 .filter((value): value is AnnotTool => value !== null),
               count: selected.length,
-              numberStyle: onlyNumbers
-                ? {
-                    ...numberStyleRef.current,
-                    backgroundColor:
-                      numberCircle?.backgroundColor ?? numberStyleRef.current.backgroundColor,
-                    textColor: numberText?.strokeColor ?? numberStyleRef.current.textColor,
-                    size: numberCircle
-                      ? Math.round(numberCircle.width * appState.zoom.value)
-                      : numberStyleRef.current.size,
-                  }
-                : undefined,
+              numberStyle:
+                onlyNumbers && numberCircle
+                  ? numberStyleForBadge(numberCircle, numberStyleRef.current, appState.zoom.value)
+                  : undefined,
               mixedProperties,
               strokeColor: element.strokeColor,
               strokeWidth: element.strokeWidth,
@@ -732,6 +736,33 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
     useImperativeHandle(
       ref,
       () => ({
+        clearSelection: () => {
+          apiRef.current?.updateScene({
+            appState: { selectedElementIds: {}, editingGroupId: null },
+          });
+        },
+        hitTest: (clientX, clientY) => {
+          const api = apiRef.current;
+          if (!api) return false;
+          const point = viewportCoordsToSceneCoords({ clientX, clientY }, api.getAppState());
+          const margin = 5 / api.getAppState().zoom.value;
+          const elements = api.getSceneElements();
+          const selected = elements.filter(
+            (element) => api.getAppState().selectedElementIds[element.id] && !element.locked,
+          );
+          if (selected.length) {
+            const [left, top, right, bottom] = getCommonBounds(selected);
+            const handleMargin = 40 / api.getAppState().zoom.value;
+            if (
+              point.x >= left - handleMargin &&
+              point.x <= right + handleMargin &&
+              point.y >= top - handleMargin &&
+              point.y <= bottom + handleMargin
+            )
+              return true;
+          }
+          return elements.some((element) => annotationHitTest(element, point, margin));
+        },
         exportPng: async () => {
           const api = apiRef.current;
           const base = props.baseCanvas;
@@ -746,36 +777,19 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
             );
             return new Uint8Array(await original.arrayBuffer());
           }
-          const blob = await exportToBlob({
-            // Keep the transparent locked boundary in the export scene so
-            // Excalidraw preserves absolute screenshot coordinates.
-            elements: api.getSceneElements(),
-            files: api.getFiles(),
-            appState: {
-              ...appStateRef.current,
-              exportBackground: false,
-              exportWithDarkMode: false,
-              exportEmbedScene: false,
-            } as never,
-            getDimensions: () => captureExportDimensions(base.width, base.height),
-            exportPadding: 0,
-            mimeType: "image/png",
-          });
+          const annotations = await captureAnnotationCanvas(
+            api,
+            base,
+            props.crop?.sourceX ?? 0,
+            props.crop?.sourceY ?? 0,
+          );
           const overlay = document.createElement("canvas");
           overlay.width = base.width;
           overlay.height = base.height;
           const context = overlay.getContext("2d");
           if (!context) throw new Error("标注层画布不可用");
           context.drawImage(base, 0, 0);
-          const image = new Image();
-          const objectUrl = URL.createObjectURL(blob);
-          try {
-            image.src = objectUrl;
-            await image.decode();
-            context.drawImage(image, 0, 0, base.width, base.height);
-          } finally {
-            URL.revokeObjectURL(objectUrl);
-          }
+          context.drawImage(annotations, 0, 0);
           const result = await new Promise<Blob>((resolve, reject) =>
             overlay.toBlob(
               (value) => (value ? resolve(value) : reject(new Error("截图合成失败"))),
@@ -811,7 +825,16 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
         isEditingText: () => Boolean(appStateRef.current.editingTextElement),
         getStatus: () => (failed ? "failed" : ready ? "ready" : "loading"),
       }),
-      [applySelectionStyle, failed, props.baseCanvas, ready],
+      // Recropping reuses the base canvas. Refresh the exporter when its screen
+      // origin changes so annotations are composited relative to the new crop.
+      [
+        applySelectionStyle,
+        failed,
+        props.baseCanvas,
+        props.crop?.sourceX,
+        props.crop?.sourceY,
+        ready,
+      ],
     );
 
     const presentation = screenshotEditorPresentation(ready);
@@ -887,17 +910,20 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
               api={api}
               base={props.baseCanvas}
               numberStyle={props.numberStyle}
+              origin={{ x: props.crop?.sourceX ?? 0, y: props.crop?.sourceY ?? 0 }}
               format={props.pickerFormat}
               keyboardBlocked={props.pickerKeyboardBlocked}
               onCopyColor={props.onCopyColor}
               onError={props.onDrawingError ?? props.onError ?? console.error}
             />
           )}
+
         {mosaicActive && ready && !props.interactionDisabled && api && props.baseCanvas && (
           <MosaicDrawingLayer
             key={`${props.captureKey}:${viewportRevision}:${props.crop?.sourceX}:${props.crop?.sourceY}:${props.crop?.sourceWidth}:${props.crop?.sourceHeight}:${props.crop?.outputWidth}:${props.crop?.outputHeight}`}
             api={api}
             baseCanvas={props.baseCanvas}
+            origin={{ x: props.crop?.sourceX ?? 0, y: props.crop?.sourceY ?? 0 }}
             blockSize={props.mosaicBlock}
             effect={props.mosaicEffect}
             blurRadius={props.blurRadius}

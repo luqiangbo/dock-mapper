@@ -12,7 +12,7 @@ pub struct PinWindowGeometryRequest {
     pub sequence: u64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PinWindowGeometry {
     pub x: i32,

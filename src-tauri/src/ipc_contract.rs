@@ -29,6 +29,36 @@ mod tests {
         }
     }
     #[test]
+    fn only_main_window_can_change_its_native_background() {
+        for (source, allowed) in [
+            (include_str!("../capabilities/main.json"), true),
+            (include_str!("../capabilities/widget.json"), false),
+            (
+                include_str!("../capabilities/screenshot-overlay.json"),
+                false,
+            ),
+            (include_str!("../capabilities/pinned-image.json"), false),
+            (include_str!("../capabilities/history-preview.json"), false),
+            (include_str!("../capabilities/key-visualizer.json"), false),
+        ] {
+            let value: serde_json::Value = serde_json::from_str(source).unwrap();
+            for permission in [
+                "core:window:allow-set-background-color",
+                "core:webview:allow-set-webview-background-color",
+            ] {
+                assert_eq!(
+                    value["permissions"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|value| value == permission),
+                    allowed
+                );
+            }
+        }
+    }
+
+    #[test]
     fn only_main_window_can_copy_all_or_clear_stored_logs() {
         for (source, allowed) in [
             (include_str!("../capabilities/main.json"), true),

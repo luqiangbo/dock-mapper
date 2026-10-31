@@ -1,6 +1,5 @@
-import { createContext, useContext, useEffect, useMemo, type PropsWithChildren } from "react";
+import { createContext, useContext, useMemo, type PropsWithChildren } from "react";
 import { emit } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { ThemeMode } from "./types";
 import { useWindowTheme } from "./hooks/useWindowTheme";
 import { THEME_KEY, ACCENT_COLOR_KEY, THEME_CHANGED, parseAccent } from "./themePalette";
@@ -18,11 +17,6 @@ function notifyTheme() {
 }
 export function ThemeProvider({ children }: PropsWithChildren) {
   const state = useWindowTheme();
-  useEffect(() => {
-    void getCurrentWindow()
-      .setTheme(state.resolved)
-      .catch((error) => console.error("原生窗口主题设置失败", error));
-  }, [state.resolved]);
   const value = useMemo<ThemeContextValue>(
     () => ({
       ...state,

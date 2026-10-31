@@ -7,7 +7,7 @@ $compact-radius: 6px;
   height: 100vh;
   padding: 10px;
   overflow: visible !important;
-  background: var(--app-surface);
+  background: var(--main-window-surface, var(--app-surface));
 }
 
 .siderPanel {
@@ -24,7 +24,7 @@ $compact-radius: 6px;
   min-width: 0;
   flex-direction: column;
   overflow: hidden;
-  @include glass.surface(var(--glass-panel), 10px, none, 12px);
+  @include glass.surface(var(--surface-base), 10px, none);
 }
 
 .brand {
@@ -75,6 +75,13 @@ $compact-radius: 6px;
   padding: 8px !important;
   border: 0 !important;
   background: transparent !important;
+  // Window resizing already supplies the geometry change. Menu collapse must
+  // not keep animating font metrics and text spacing after the window settles.
+  transition: none !important;
+
+  :global(.ant-menu-title-content) {
+    transition: none !important;
+  }
 
   :global(.ant-menu-item) {
     min-width: 0;
@@ -96,6 +103,8 @@ $compact-radius: 6px;
 
   :global(.ant-menu-item-icon) {
     color: var(--text-secondary);
+    font-size: 16px !important;
+    transition-property: color !important;
   }
 
   :global(.ant-menu-item-selected .ant-menu-item-icon) {
@@ -134,7 +143,7 @@ $compact-radius: 6px;
   align-items: center;
   justify-content: space-between;
   padding: 0 14px;
-  @include glass.surface(var(--glass-panel), 10px, none, 16px);
+  @include glass.surface(var(--surface-base), 10px, none);
 }
 
 .pageTitle,

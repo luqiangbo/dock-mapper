@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-query-capture-elements"
+description = "Enables the query_capture_elements command without any pre-configured scope."
+commands.allow = ["query_capture_elements"]
+
+[[permission]]
+identifier = "deny-query-capture-elements"
+description = "Denies the query_capture_elements command without any pre-configured scope."
+commands.deny = ["query_capture_elements"]

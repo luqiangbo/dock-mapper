@@ -29,14 +29,32 @@ const event = (key: string, control = false) => ({
   isComposing: false,
 });
 describe("截图宿主快捷键", () => {
-  it("标注选中、工具激活或菜单打开时，Esc 均一次关闭截图", () => {
+  it("保存和贴图仅在图片就绪时响应", () => {
+    const output = { ...options, save: vi.fn(), pin: vi.fn() };
+    expect(overlayKeyAction(event("s", true), output)).toBe("save");
+    expect(overlayKeyAction(event("t", true), output)).toBe("pin");
+    expect(overlayKeyAction(event("s", true), { ...output, shotReady: false })).toBeNull();
+  });
+  it("Shift 加数字及对应符号切换同一个工具", () => {
+    const tools = { ...options, changeTool: vi.fn() };
+    expect(overlayKeyAction({ ...event("3"), shiftKey: true }, tools)).toBe("tool:arrow");
+    expect(overlayKeyAction({ ...event("#"), shiftKey: true }, tools)).toBe("tool:arrow");
+    expect(overlayKeyAction({ ...event(")"), shiftKey: true }, tools)).toBeNull();
+    expect(overlayKeyAction({ ...event("0"), shiftKey: true }, tools)).toBeNull();
+    expect(overlayKeyAction({ ...event("2"), shiftKey: true }, tools)).toBeNull();
+    expect(overlayKeyAction({ ...event("@"), shiftKey: true }, tools)).toBeNull();
+  });
+  it("选中标注对象后 Ctrl+C 留给对象复制", () => {
+    expect(overlayKeyAction(event("c", true), { ...options, hasEditorSelection: true })).toBeNull();
+  });
+  it("菜单和文字编辑优先处理 Esc", () => {
     expect(
       overlayKeyAction(
         event("Escape"),
         { ...options, blocked: true, hasEditorSelection: true, isEditingText: () => true },
         true,
       ),
-    ).toBe("cancel");
+    ).toBeNull();
   });
   it("输入法组字时 Esc 不关闭截图", () => {
     expect(overlayKeyAction({ ...event("Escape"), isComposing: true }, options)).toBeNull();

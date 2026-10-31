@@ -1,12 +1,8 @@
 import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 import { Alert, Button, Spin } from "antd";
-import {
-  exportToCanvas,
-  sceneCoordsToViewportCoords,
-  viewportCoordsToSceneCoords,
-} from "@excalidraw/excalidraw";
+import { sceneCoordsToViewportCoords, viewportCoordsToSceneCoords } from "@excalidraw/excalidraw";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
-import { captureExportDimensions } from "./excalidrawScreenshotAdapter";
+import { captureAnnotationCanvas } from "./captureAnnotationCanvas";
 import { formatPickerColor, type ColorCopyFormat, type PickerSample } from "./pickerColor";
 import {
   INITIAL_PICKER_STATE,
@@ -20,10 +16,18 @@ interface Props {
   api: ExcalidrawImperativeAPI;
   base: HTMLCanvasElement;
   format: ColorCopyFormat;
+  origin?: { x: number; y: number };
   keyboardBlocked?: boolean;
   onCopyColor: (color: string, formatted: string) => Promise<void>;
 }
-export function PickerLayer({ api, base, format, onCopyColor, keyboardBlocked = false }: Props) {
+export function PickerLayer({
+  api,
+  base,
+  format,
+  onCopyColor,
+  keyboardBlocked = false,
+  origin = { x: 0, y: 0 },
+}: Props) {
   const [state, dispatch] = useReducer(pickerReducer, INITIAL_PICKER_STATE);
   const [image, setImage] = useState<HTMLCanvasElement | null>(null);
   const [prepareError, setPrepareError] = useState<string | null>(null);
@@ -59,13 +63,7 @@ export function PickerLayer({ api, base, format, onCopyColor, keyboardBlocked = 
       setPrepareError(null);
       setCopied(false);
       void (async () => {
-        const annotations = await exportToCanvas({
-          elements,
-          files: api.getFiles(),
-          appState: { ...api.getAppState(), exportBackground: false, exportWithDarkMode: false },
-          exportPadding: 0,
-          getDimensions: () => captureExportDimensions(base.width, base.height),
-        });
+        const annotations = await captureAnnotationCanvas(api, base, origin.x, origin.y);
         if (disposed || revision !== request) return;
         const canvas = document.createElement("canvas");
         canvas.width = base.width;
@@ -86,7 +84,7 @@ export function PickerLayer({ api, base, format, onCopyColor, keyboardBlocked = 
       revision += 1;
       off();
     };
-  }, [api, base, attempt]);
+  }, [api, base, attempt, origin.x, origin.y]);
   useEffect(() => {
     setCopied(false);
     setCopyError(null);
@@ -183,7 +181,7 @@ export function PickerLayer({ api, base, format, onCopyColor, keyboardBlocked = 
   }, [base, keyboardBlocked]);
   const point = state.point
     ? sceneCoordsToViewportCoords(
-        { sceneX: state.point.x + 0.5, sceneY: state.point.y + 0.5 },
+        { sceneX: state.point.x + origin.x + 0.5, sceneY: state.point.y + origin.y + 0.5 },
         api.getAppState(),
       )
     : null;
@@ -193,7 +191,7 @@ export function PickerLayer({ api, base, format, onCopyColor, keyboardBlocked = 
     setAnchor({ x: clientX, y: clientY });
     dispatch({
       type: lock ? "lock" : "hover",
-      point: pixel,
+      point: { x: pixel.x - origin.x, y: pixel.y - origin.y },
       width: base.width,
       height: base.height,
     });

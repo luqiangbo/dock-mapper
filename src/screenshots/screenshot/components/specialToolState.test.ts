@@ -53,6 +53,6 @@ describe("截图特殊工具", () => {
       });
     expect(DEFAULT_ANNOTATION_STYLES.text.font_size).toBe(24);
     expect(DEFAULT_ANNOTATION_STYLES.highlight).toMatchObject({ stroke_width: 24, opacity: 0.32 });
-    expect(DEFAULT_ANNOTATION_STYLES.number.marker_size).toBe(36);
+    expect(DEFAULT_ANNOTATION_STYLES.number.marker_size).toBe(28);
   });
 });

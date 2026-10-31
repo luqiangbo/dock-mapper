@@ -43,7 +43,7 @@ pub(super) fn build_overlay_window(
     Ok(())
 }
 
-pub(super) fn open_overlay(app: &AppHandle, capture: &CaptureData) -> Result<(), String> {
+fn prepare_overlay(app: &AppHandle, capture: &CaptureData) -> Result<(), String> {
     let label = overlay_label(capture);
     if app.get_webview_window(&label).is_none() {
         build_overlay_window(
@@ -53,12 +53,30 @@ pub(super) fn open_overlay(app: &AppHandle, capture: &CaptureData) -> Result<(),
             capture.bounds.y,
             capture.bounds.width,
             capture.bounds.height,
-        )?;
+        )
+        .or_else(|error| {
+            if app.get_webview_window(&label).is_some() {
+                Ok(())
+            } else {
+                Err(error)
+            }
+        })?;
     }
+    Ok(())
+}
+
+pub(super) fn open_overlay(app: &AppHandle, capture: &CaptureData) -> Result<(), String> {
+    let label = overlay_label(capture);
     *app.state::<AppState>().active_overlay.lock_or_recover() = Some(label.clone());
     let window = app
         .get_webview_window(&label)
         .ok_or_else(|| "Capture overlay is unavailable".to_string())?;
+    unsafe {
+        let _ = windows::Win32::UI::WindowsAndMessaging::SetWindowDisplayAffinity(
+            window.hwnd().map_err(|e| e.to_string())?,
+            windows::Win32::UI::WindowsAndMessaging::WDA_NONE,
+        );
+    }
     // A prewarmed overlay can be reused after a display-mode change or for a
     // history image whose editor window is smaller than the monitor. Always
     // refresh native geometry instead of assuming its first size is current.
@@ -126,10 +144,7 @@ pub(super) fn prewarm_overlay(app: &AppHandle) {
             let position = monitor.position();
             let size = monitor.size();
             let scale = monitor.scale_factor().max(1.0);
-            let id = (position.x as u32).wrapping_mul(31)
-                ^ (position.y as u32).wrapping_mul(131)
-                ^ size.width.wrapping_mul(17)
-                ^ size.height;
+            let id = screen_identity(monitor.name().map(String::as_str), position.x, position.y);
             let label = format!("overlay-{id}");
             if app.get_webview_window(&label).is_some() {
                 continue;
@@ -156,15 +171,56 @@ pub(super) fn prewarm_overlay(app: &AppHandle) {
 }
 
 pub(super) fn handle_start_capture(app: &AppHandle) -> Result<u64, String> {
-    handle_start_capture_with_mode(app, CaptureMode::Screenshot)
+    handle_start_capture_with_mode(app, CaptureMode::Screenshot, None, None, false)
 }
 
 pub(super) fn handle_start_quick_ocr(app: &AppHandle) -> Result<u64, String> {
-    handle_start_capture_with_mode(app, CaptureMode::QuickOcr)
+    handle_start_capture_with_mode(app, CaptureMode::QuickOcr, None, None, false)
 }
 
-fn handle_start_capture_with_mode(app: &AppHandle, mode: CaptureMode) -> Result<u64, String> {
+pub(super) fn handle_start_capture_with_region(
+    app: &AppHandle,
+    selection: Option<Rect>,
+    screen_id: Option<u32>,
+    physical: bool,
+) -> Result<u64, String> {
+    handle_start_capture_with_mode(app, CaptureMode::Screenshot, selection, screen_id, physical)
+}
+
+fn handle_start_capture_with_mode(
+    app: &AppHandle,
+    mode: CaptureMode,
+    selection: Option<Rect>,
+    screen_id: Option<u32>,
+    physical: bool,
+) -> Result<u64, String> {
+    crate::defaults_bootstrap::require_runtime_ready(app)?;
+    // Freeze the target before hiding the main window or scheduling the worker.
+    let screen = active_screen(app)?;
+    if screen_id.is_some_and(|id| id != screen.id) {
+        return Err("请将鼠标移到预设所属显示器后重试".into());
+    }
+    let selection = if physical {
+        let sx = screen.physical_width as f64 / screen.bounds.width;
+        let sy = screen.physical_height as f64 / screen.bounds.height;
+        selection.map(|r| Rect {
+            x: r.x / sx,
+            y: r.y / sy,
+            width: r.width / sx,
+            height: r.height / sy,
+        })
+    } else {
+        selection
+    };
     let state = app.state::<AppState>();
+    let hide_main_window = app
+        .state::<crate::AppState>()
+        .config
+        .lock()
+        .map_err(|_| "配置状态已损坏")?
+        .screenshot_config
+        .experience
+        .hide_main_window;
     let mut startup = state.startup.lock_or_recover();
     if startup.generation().is_some() {
         return Err("截图正在启动，请稍候".into());
@@ -173,6 +229,7 @@ fn handle_start_capture_with_mode(app: &AppHandle, mode: CaptureMode) -> Result<
     // refer to one generation, even when the capture worker finishes late.
     let generation = state.capture_generation.fetch_add(1, Ordering::SeqCst) + 1;
     let status = startup.begin(generation)?;
+    scheduled_capture::remember(generation, selection);
     match crate::visualizer_effects::suspend_for_capture(app) {
         Ok(token) => *state.visualizer_suspend_token.lock_or_recover() = token,
         Err(error) => {
@@ -189,6 +246,24 @@ fn handle_start_capture_with_mode(app: &AppHandle, mode: CaptureMode) -> Result<
     startup::publish(app, &status);
     drop(startup);
 
+    let transition = if let Some(main) = app.get_webview_window("main").filter(|_| hide_main_window)
+    {
+        let hidden = capture_window::CaptureWindowTransition::suppress(&main).and_then(|guard| {
+            main.hide()
+                .map_err(|error| format!("截图前隐藏主窗口失败：{error}"))?;
+            Ok(guard)
+        });
+        match hidden {
+            Ok(guard) => Some(guard),
+            Err(error) => {
+                startup::fail_startup(app, generation, error.clone());
+                return Err(error);
+            }
+        }
+    } else {
+        None
+    };
+
     let timeout_app = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(startup::STARTUP_TIMEOUT).await;
@@ -201,7 +276,28 @@ fn handle_start_capture_with_mode(app: &AppHandle, mode: CaptureMode) -> Result<
     });
     let worker_app = app.clone();
     thread::spawn(move || {
+        let _transition = transition;
         let started = Instant::now();
+        // hide() is scheduled through the window event loop. Confirm it on the
+        // worker instead of rejecting a still-queued hide on the UI thread.
+        if let Some(main) = worker_app
+            .get_webview_window("main")
+            .filter(|_| hide_main_window)
+        {
+            let hidden = (|| {
+                while main.is_visible().map_err(|error| error.to_string())? {
+                    if started.elapsed() >= std::time::Duration::from_millis(500) {
+                        return Err("主窗口隐藏超时，请重试截图".to_string());
+                    }
+                    thread::sleep(std::time::Duration::from_millis(8));
+                }
+                Ok(())
+            })();
+            if let Err(error) = hidden {
+                startup::fail_startup(&worker_app, generation, error);
+                return;
+            }
+        }
         #[cfg(target_os = "windows")]
         unsafe {
             let _ = windows::Win32::Graphics::Dwm::DwmFlush();
@@ -215,9 +311,22 @@ fn handle_start_capture_with_mode(app: &AppHandle, mode: CaptureMode) -> Result<
             return;
         }
         tracing::info!(target: "dock_mapper::capture", generation, "Native capture started");
-        let result = capture_active_screen(&worker_app, generation).map(|mut capture| {
+        let result = capture_active_screen(&worker_app, generation, screen).map(|mut capture| {
             capture.mode = mode;
             capture
+        });
+        // WebView creation must not block a synchronous command or the UI event loop.
+        let result = result.and_then(|capture| {
+            if !worker_app
+                .state::<AppState>()
+                .startup
+                .lock_or_recover()
+                .pending(generation)
+            {
+                return Err("截图会话已过期".into());
+            }
+            prepare_overlay(&worker_app, &capture)?;
+            Ok(capture)
         });
         let native_ready_ms = started.elapsed().as_millis();
         let ui_app = worker_app.clone();

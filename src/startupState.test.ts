@@ -12,7 +12,7 @@ const pending = () => {
 describe("连续应用初始化状态", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
-  it("八秒后只提示耗时较长，不重复调用或错误结束初始化", async () => {
+  it("八秒显示慢启动，二十秒超时且不重复启动任务", async () => {
     const task = pending();
     const work = vi.fn(() => task.promise);
     const states: StartupState[] = [];
@@ -21,11 +21,15 @@ describe("连续应用初始化状态", () => {
     expect(states).toEqual([{ phase: "loading", slow: false }]);
     await vi.advanceTimersByTimeAsync(1);
     expect(states[states.length - 1]).toEqual({ phase: "loading", slow: true });
-    await vi.advanceTimersByTimeAsync(16000);
+    await vi.advanceTimersByTimeAsync(12000);
+    expect(states[states.length - 1]).toMatchObject({
+      phase: "error",
+      error: expect.stringContaining("超时"),
+    });
     expect(work).toHaveBeenCalledOnce();
     task.resolve();
     await vi.advanceTimersByTimeAsync(0);
-    expect(states[states.length - 1]).toEqual({ phase: "ready" });
+    expect(states[states.length - 1].phase).toBe("error");
     cancel();
   });
   it("快速成功立即展示正常界面，没有最短等待时间或迟到的慢启动提示", async () => {

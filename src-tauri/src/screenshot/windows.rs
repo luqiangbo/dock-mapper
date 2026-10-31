@@ -15,6 +15,8 @@ use windows::{
 #[serde(rename_all = "camelCase")]
 pub struct WindowCandidate {
     pub id: String,
+    #[serde(skip)]
+    pub native_handle: usize,
     pub x: f64,
     pub y: f64,
     pub width: f64,
@@ -79,6 +81,7 @@ fn candidate_from_rect(
     let scale = scale.max(1.0);
     Some(WindowCandidate {
         id,
+        native_handle: 0,
         x: (left - origin_x) as f64 / scale,
         y: (top - origin_y) as f64 / scale,
         width: (right - left) as f64 / scale,
@@ -128,8 +131,8 @@ unsafe extern "system" fn collect_window(hwnd: HWND, parameter: LPARAM) -> BOOL 
     {
         return BOOL(1);
     }
-    if let Some(candidate) = candidate_from_rect(
-        format!("{:x}", hwnd.0 as usize),
+    if let Some(mut candidate) = candidate_from_rect(
+        format!("window-{}", enumeration.candidates.len()),
         rect,
         enumeration.origin_x,
         enumeration.origin_y,
@@ -138,6 +141,7 @@ unsafe extern "system" fn collect_window(hwnd: HWND, parameter: LPARAM) -> BOOL 
         enumeration.scale,
         enumeration.candidates.len(),
     ) {
+        candidate.native_handle = hwnd.0 as usize;
         enumeration.candidates.push(candidate);
     }
     BOOL(1)

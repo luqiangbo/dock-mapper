@@ -26,8 +26,8 @@ import {
   Alert,
   Button,
   Empty,
+  Form,
   Grid,
-  InputNumber,
   Masonry,
   Popconfirm,
   Select,
@@ -54,12 +54,6 @@ import { historyDateLocale, historyDateRange, historyDatesFromRange } from "./hi
 
 const { Text } = Typography;
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
-}
-
 type HistoryAction = "copy" | "pin" | "favorite" | "delete";
 
 export default function ScreenshotHistory() {
@@ -80,6 +74,7 @@ export default function ScreenshotHistory() {
     captureStartup.getSnapshot,
   );
   const startingCapture = captureStarting(captureSnapshot);
+  const [confirming, setConfirming] = useState<string | null>(null);
   const [working, setWorking] = useState<{ id: string; action: HistoryAction } | null>(null);
   const workingRef = useRef(false);
   const refreshGenerationRef = useRef(0);
@@ -91,14 +86,6 @@ export default function ScreenshotHistory() {
   const onColumnCountChange = (columns: number | null) => {
     if (columns === null || !Number.isInteger(columns) || columns < 1 || columns > 10) return;
     setView((current) => ({ ...current, columns }));
-  };
-  const sharedProps = {
-    mode: "spinner" as const,
-    min: 1,
-    max: 10,
-    defaultValue: 3,
-    onChange: onColumnCountChange,
-    style: { width: 150 },
   };
   const visibleColumnCount = responsiveHistoryColumnCount(view.columns, screens);
   const phase = screenshotHistoryPhase(
@@ -213,52 +200,51 @@ export default function ScreenshotHistory() {
 
   return (
     <div className={styles.historyPanel}>
-      <div className={styles.historyHeader}>
-        <div className={styles.historyTitleRow}>
-          <div className={styles.historyHeading}>
-            <Text strong>本地截图历史</Text>
-            <span className={styles.description}>
-              未收藏记录最多保留 100 条且不超过 30 天；连续点击贴图可创建多个独立窗口。
-            </span>
+      <ConfigProvider componentSize="middle" locale={historyDateLocale}>
+        <div className={styles.historyHeader}>
+          <div className={styles.historyTitleRow}>
+            <div className={styles.historyHeading}>
+              <Text strong>本地截图历史</Text>
+              <span className={styles.description}>未收藏截图保留 30 天，最多 100 张</span>
+            </div>
+            <Button
+              type="primary"
+              icon={<CameraOutlined />}
+              loading={startingCapture}
+              onClick={() => void startCapture()}
+            >
+              开始截图
+            </Button>
           </div>
-          <Button
-            type="primary"
-            icon={<CameraOutlined />}
-            loading={startingCapture}
-            onClick={() => void startCapture()}
-          >
-            开始截图
-          </Button>
-        </div>
-        <div className={styles.historyToolbar}>
-          <label className={styles.historyControl}>
-            <span>排序</span>
-            <Select<HistorySort>
-              value={view.sort}
-              onChange={(sort) => setView((current) => ({ ...current, sort }))}
-              options={[
-                { value: "newest", label: "最新优先" },
-                { value: "oldest", label: "最早优先" },
-                { value: "favorite", label: "当日收藏优先" },
-              ]}
-            />
-          </label>
-          <label className={styles.historyControl}>
-            <span>筛选</span>
-            <Select<HistoryFilter>
-              value={view.filter}
-              onChange={(filter) => setView((current) => ({ ...current, filter }))}
-              options={[
-                { value: "all", label: "全部" },
-                { value: "favorite", label: "仅收藏" },
-              ]}
-            />
-          </label>
-          <div className={styles.historyControl}>
-            <span>日期范围</span>
-            <ConfigProvider locale={historyDateLocale}>
+          <Form component="div" layout="vertical" className={styles.historyToolbar}>
+            <Form.Item label="排序" htmlFor="history-sort" className={styles.historyControl}>
+              <Select<HistorySort>
+                id="history-sort"
+                value={view.sort}
+                onChange={(sort) => setView((current) => ({ ...current, sort }))}
+                options={[
+                  { value: "newest", label: "最新优先" },
+                  { value: "oldest", label: "最早优先" },
+                  { value: "favorite", label: "当日收藏优先" },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item label="筛选" htmlFor="history-filter" className={styles.historyControl}>
+              <Select<HistoryFilter>
+                id="history-filter"
+                value={view.filter}
+                onChange={(filter) => setView((current) => ({ ...current, filter }))}
+                options={[
+                  { value: "all", label: "全部" },
+                  { value: "favorite", label: "仅收藏" },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item
+              label="日期范围"
+              className={`${styles.historyControl} ${styles.historyDateControl}`}
+            >
               <DatePicker.RangePicker
-                size="small"
                 aria-label="截图日期范围"
                 allowEmpty={[true, true]}
                 allowClear
@@ -267,37 +253,46 @@ export default function ScreenshotHistory() {
                   setView((current) => ({ ...current, ...historyDatesFromRange(range) }))
                 }
               />
-            </ConfigProvider>
-          </div>
-          {(view.startDate || view.endDate) && (
-            <Button
-              onClick={() => setView((current) => ({ ...current, startDate: "", endDate: "" }))}
+            </Form.Item>
+            <Form.Item
+              label="列数"
+              htmlFor="history-columns"
+              className={`${styles.historyControl} ${styles.historyColumnsControl}`}
             >
-              清除日期
-            </Button>
-          )}
-          <label className={styles.historyControl}>
-            <span>列数</span>
-            <InputNumber
-              {...sharedProps}
-              aria-label="截图展示列数"
-              value={view.columns}
-              precision={0}
-            />
-          </label>
-          <Text type="secondary" className={styles.historyCount}>
-            {visibleEntries.length} 条
-          </Text>
-          <Button
-            icon={<ReloadOutlined />}
-            loading={loading}
-            disabled={working !== null}
-            onClick={() => void refresh()}
-          >
-            刷新
-          </Button>
+              <Select<number>
+                id="history-columns"
+                aria-label="截图展示列数"
+                value={view.columns}
+                onChange={onColumnCountChange}
+                options={Array.from({ length: 10 }, (_, index) => ({
+                  value: index + 1,
+                  label: `${index + 1} 列`,
+                }))}
+              />
+            </Form.Item>
+            <div className={styles.historyToolbarActions}>
+              {(view.startDate || view.endDate) && (
+                <Button
+                  onClick={() => setView((current) => ({ ...current, startDate: "", endDate: "" }))}
+                >
+                  清除日期
+                </Button>
+              )}
+              <Text type="secondary" className={styles.historyCount}>
+                {visibleEntries.length} 条
+              </Text>
+              <Button
+                icon={<ReloadOutlined />}
+                loading={loading}
+                disabled={working !== null}
+                onClick={() => void refresh()}
+              >
+                刷新
+              </Button>
+            </div>
+          </Form>
         </div>
-      </div>
+      </ConfigProvider>
 
       {preferenceError && (
         <Alert
@@ -366,7 +361,11 @@ export default function ScreenshotHistory() {
               gutter={[12, 12]}
               items={group.entries.map((entry) => ({ key: entry.id, data: entry }))}
               itemRender={({ data: entry }) => (
-                <article className={styles.historyCard} tabIndex={0}>
+                <article
+                  className={styles.historyCard}
+                  tabIndex={0}
+                  data-active={working?.id === entry.id || confirming === entry.id}
+                >
                   <div
                     className={styles.historyPreview}
                     style={{ aspectRatio: `${entry.width} / ${entry.height}` }}
@@ -375,10 +374,13 @@ export default function ScreenshotHistory() {
                   </div>
                   <div className={styles.historyMeta}>
                     <Text ellipsis title={new Date(entry.createdAtMs).toLocaleString("zh-CN")}>
-                      {new Date(entry.createdAtMs).toLocaleString("zh-CN")}
+                      {new Date(entry.createdAtMs).toLocaleTimeString("zh-CN", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
                     </Text>
                     <span className={styles.description}>
-                      {entry.width} × {entry.height} · {formatBytes(entry.totalBytes)}
+                      {entry.width} × {entry.height}
                     </span>
                   </div>
                   <div className={styles.historyActions}>
@@ -451,6 +453,7 @@ export default function ScreenshotHistory() {
                     </Tooltip>
                     <Popconfirm
                       title="删除这条截图历史？"
+                      onOpenChange={(open) => setConfirming(open ? entry.id : null)}
                       okText="删除"
                       cancelText="取消"
                       onConfirm={() =>

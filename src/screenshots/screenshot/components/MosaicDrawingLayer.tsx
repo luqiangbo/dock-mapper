@@ -18,6 +18,7 @@ interface Props {
   effect: MosaicEffect;
   blurRadius: number;
   captureKey: string;
+  origin?: { x: number; y: number };
   onError?: (message: string) => void;
 }
 
@@ -29,6 +30,7 @@ export function MosaicDrawingLayer({
   effect,
   blurRadius,
   captureKey,
+  origin = { x: 0, y: 0 },
   onError,
 }: Props) {
   const layerRef = useRef<HTMLDivElement>(null);
@@ -84,6 +86,10 @@ export function MosaicDrawingLayer({
       blurRadius,
     ].join(":");
   };
+  const localPoint = (event: { clientX: number; clientY: number }) => {
+    const point = viewportCoordsToSceneCoords(event, api.getAppState());
+    return { x: point.x - origin.x, y: point.y - origin.y };
+  };
   const render = (rect: MosaicBounds) =>
     renderer.current!.render(
       baseCanvas,
@@ -102,12 +108,15 @@ export function MosaicDrawingLayer({
     }
     const state = api.getAppState();
     const patch = render(rect);
-    const position = sceneCoordsToViewportCoords({ sceneX: rect.x, sceneY: rect.y }, state);
-    const origin = layer.getBoundingClientRect();
+    const position = sceneCoordsToViewportCoords(
+      { sceneX: rect.x + origin.x, sceneY: rect.y + origin.y },
+      state,
+    );
+    const layerBounds = layer.getBoundingClientRect();
     canvas.width = patch.width;
     canvas.height = patch.height;
-    canvas.style.left = `${position.x - origin.left}px`;
-    canvas.style.top = `${position.y - origin.top}px`;
+    canvas.style.left = `${position.x - layerBounds.left}px`;
+    canvas.style.top = `${position.y - layerBounds.top}px`;
     canvas.style.width = `${rect.width * state.zoom.value}px`;
     canvas.style.height = `${rect.height * state.zoom.value}px`;
     const output = canvas.getContext("2d");
@@ -122,7 +131,7 @@ export function MosaicDrawingLayer({
       aria-label="拖动绘制马赛克"
       onPointerDown={(event) => {
         if (event.button !== 0) return;
-        const start = viewportCoordsToSceneCoords(event, api.getAppState());
+        const start = localPoint(event);
         if (!gesture.current.begin(event.pointerId, start, sessionKey())) return;
         event.preventDefault();
         event.stopPropagation();
@@ -132,7 +141,7 @@ export function MosaicDrawingLayer({
       }}
       onPointerMove={(event) => {
         if (!gesture.current.owns(event.pointerId)) return;
-        const point = viewportCoordsToSceneCoords(event, api.getAppState());
+        const point = localPoint(event);
         if (!gesture.current.move(event.pointerId, point, sessionKey())) {
           setDrawing(false);
           return;
@@ -159,7 +168,7 @@ export function MosaicDrawingLayer({
         event.stopPropagation();
         const rect = gesture.current.finish(
           event.pointerId,
-          viewportCoordsToSceneCoords(event, api.getAppState()),
+          localPoint(event),
           sessionKey(),
           baseCanvas.width,
           baseCanvas.height,
@@ -173,6 +182,8 @@ export function MosaicDrawingLayer({
             {
               type: "image",
               ...rect,
+              x: rect.x + origin.x,
+              y: rect.y + origin.y,
               fileId: id,
               status: "saved",
               scale: [1, 1],

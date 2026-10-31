@@ -19,7 +19,12 @@ export function nextNumber(elements: readonly Element[]) {
 export function numberGroupsToErase(elements: readonly Element[]): Set<string> {
   const groups = new Set(
     elements
-      .filter((element) => element.isDeleted && element.customData?.dockmapperTool === "number")
+      .filter(
+        (element) =>
+          element.isDeleted &&
+          element.customData?.dockmapperTool === "number" &&
+          !element.customData?.dockmapperRetired,
+      )
       .flatMap((element) => element.groupIds ?? []),
   );
   return new Set(

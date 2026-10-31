@@ -195,7 +195,7 @@ export function PickerPanel({
               <div className="picker-panel__instruction">
                 单击锁定
                 <br />
-                方向键微调
+                微调像素
                 <br />
                 每次 1 px
               </div>
@@ -208,7 +208,7 @@ export function PickerPanel({
             <code>{formatted}</code>
           </div>
           {locked && (
-            <Tooltip title="复制颜色（C）">
+            <Tooltip title="复制颜色">
               <Button
                 type="primary"
                 size="small"
@@ -227,7 +227,7 @@ export function PickerPanel({
           </div>
         )}
         <div className="picker-panel__hint">
-          {locked ? "方向键微调 · C 复制 · 空格继续" : "移动预览 · 单击锁定像素"}
+          {locked ? "选择像素后复制颜色" : "移动预览 · 单击锁定像素"}
         </div>
       </Card>
     </div>

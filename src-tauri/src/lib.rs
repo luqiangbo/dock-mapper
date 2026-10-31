@@ -27,6 +27,7 @@ mod runtime_logs;
 mod sampling_metrics;
 mod scancode_mapper;
 mod screenshot;
+mod startup_runtime;
 mod sys_monitor;
 mod taskbar;
 mod tray;
@@ -115,13 +116,19 @@ pub fn run() {
 
                 let app_data_dir = app.path().app_data_dir()?;
                 let config_path = app_data_dir.join("config.json");
+                let setup_started = std::time::Instant::now();
+                tracing::info!(target: "dock_mapper::startup", stage = "配置加载", "Startup stage started");
                 let mut legacy_config = config::load(&config_path);
                 legacy_key_mapping::migrate(&config_path, &mut legacy_config)?;
                 let token_path = std::env::current_exe()?.with_file_name("settings-reset.token");
                 config::prepare_installation(app, &config_path, &token_path)?;
                 let (loaded_config, _, _) =
                     config::load_for_installation(&config_path, &token_path)?;
+                tracing::info!(target: "dock_mapper::startup", stage = "配置加载", elapsed_ms = setup_started.elapsed().as_millis(), "Startup stage completed");
+                let history_started = std::time::Instant::now();
+                tracing::info!(target: "dock_mapper::startup", stage = "历史初始化", "Startup stage started");
                 let history = Arc::new(history::HistoryStore::new(app_data_dir.join("history"))?);
+                tracing::info!(target: "dock_mapper::startup", stage = "历史初始化", elapsed_ms = history_started.elapsed().as_millis(), "Startup stage completed");
                 let monitor_interval = loaded_config.widget_config.refresh_interval_secs;
                 let state = AppState::new(loaded_config, config_path, history);
                 app.manage(state);
@@ -163,6 +170,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             defaults_bootstrap::initialize_defaults,
             defaults_bootstrap::application_ready,
+            defaults_bootstrap::get_startup_status,
             runtime_logs::get_runtime_logs,
             runtime_logs::get_runtime_log_text,
             runtime_logs::clear_runtime_logs,
@@ -188,6 +196,10 @@ pub fn run() {
             history_commands::copy_screenshot_history,
             history_commands::pin_screenshot_history,
             runtime_health::get_runtime_health,
+            screenshot::pin_archive::restore_closed_pin,
+            screenshot::pin_archive::get_pin_restore_error,
+            screenshot::element_detection::query_capture_elements,
+            screenshot::scheduled_capture::schedule_screenshot,
             screenshot::start_screenshot,
             screenshot::start_quick_ocr,
             screenshot::close_overlay,
@@ -211,6 +223,7 @@ pub fn run() {
             screenshot::get_pin_window_geometry,
             screenshot::set_pin_window_geometry,
             screenshot::open_url,
+            app_commands::update_capture_preferences,
             app_commands::get_screenshot_config,
             app_commands::update_screenshot_config,
             app_commands::update_screenshot_annotation_color,
@@ -246,6 +259,18 @@ pub fn run() {
         .expect("构建 DockMapper 失败");
 
     app.run(|app, event| {
+        if let tauri::RunEvent::ExitRequested { api, .. } = &event {
+            if let Err(error) = screenshot::flush_pins_before_exit(app) {
+                api.prevent_exit();
+                use tauri::Emitter;
+                let _ = app.emit(
+                    "pin-persistence-error",
+                    format!("贴图状态未保存，暂未退出：{error}"),
+                );
+                screenshot::show_main_window(app);
+                return;
+            }
+        }
         if matches!(
             event,
             tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }

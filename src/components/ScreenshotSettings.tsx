@@ -22,6 +22,8 @@ import type { ScreenshotConfig, ShortcutRuntimeStatus } from "../types";
 import styles from "./components.module.scss";
 import ScreenshotHistory from "./ScreenshotHistory";
 import ShortcutSelect from "./ShortcutSelect";
+import ScheduledCapture from "./ScheduledCapture";
+import CaptureExperienceSettings from "./CaptureExperienceSettings";
 import ScreenshotToolbarSettings from "./ScreenshotToolbarSettings";
 import {
   SYSTEM_FONTS,
@@ -295,6 +297,7 @@ export default function ScreenshotSettings({
               开始截图
             </Button>
           </div>
+          <ScheduledCapture />
           <div className={`${styles.settingRow} ${styles.shortcutSection}`}>
             <Row className={styles.shortcutHeader} gutter={[12, 8]} align="middle">
               <Col flex="auto">
@@ -313,31 +316,32 @@ export default function ScreenshotSettings({
             </Row>
             <div className={styles.shortcutList}>
               {shortcutFields.map(([name, label, detail, id]) => (
-                <Row className={styles.shortcutItem} key={name} gutter={[12, 8]} align="middle">
-                  <Col xs={24} lg={7}>
-                    <div className={styles.shortcutCopy}>
+                <div className={styles.shortcutItem} key={name}>
+                  <div className={styles.shortcutCopy}>
+                    <div className={styles.shortcutName}>
                       <Text>{label}</Text>
-                      <span className={styles.description}>{detail}</span>
-                    </div>
-                  </Col>
-                  <Col xs={24} lg={17}>
-                    <div className={styles.shortcutBinding}>
                       {status(id)}
-                      <Form.Item
-                        className={styles.shortcutFormItem}
-                        name={name}
-                        rules={[{ required: true, message: "请选择快捷键" }]}
-                      >
-                        <ShortcutSelect aria-label={label} />
-                      </Form.Item>
                     </div>
-                  </Col>
-                </Row>
+                    <span className={styles.description}>{detail}</span>
+                  </div>
+                  <div className={styles.shortcutBinding}>
+                    <Form.Item
+                      className={styles.shortcutFormItem}
+                      name={name}
+                      rules={[{ required: true, message: "请选择快捷键" }]}
+                    >
+                      <ShortcutSelect aria-label={label} />
+                    </Form.Item>
+                  </div>
+                </div>
               ))}
             </div>
           </div>
           <Form.Item name="toolbar_tools" className={styles.screenshotToolbarField}>
             <ScreenshotToolbarSettings />
+          </Form.Item>
+          <Form.Item name="experience" label="截图操作与输出">
+            <CaptureExperienceSettings />
           </Form.Item>
           <Form.Item name="save_directory" label="默认保存目录">
             <Input

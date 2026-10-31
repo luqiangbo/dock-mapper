@@ -2,7 +2,9 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "pinned-image",
   "description": "贴图窗口仅允许关闭自身和读取其内存图片",
-  "windows": ["pin-*"],
+  "windows": [
+    "pin-*"
+  ],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
@@ -16,6 +18,11 @@
     "allow-save-pin-image",
     "allow-close-pin-window",
     "allow-get-pin-window-geometry",
-    "allow-set-pin-window-geometry"
+    "allow-set-pin-window-geometry",
+    "allow-restore-closed-pin",
+    "allow-upload-image",
+    "allow-release-image",
+    "allow-recognize-selection",
+    "allow-copy-text"
   ]
 }

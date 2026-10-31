@@ -2,9 +2,12 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "screenshot-overlay",
   "description": "冻结截图编辑器仅拥有选区、标注、识别和输出所需权限",
-  "windows": ["overlay-*"],
+  "windows": [
+    "overlay-*"
+  ],
   "permissions": [
     "core:event:allow-listen",
+    "core:event:allow-emit-to",
     "core:event:allow-unlisten",
     "core:window:allow-close",
     "allow-upload-image",
@@ -32,6 +35,11 @@
     "allow-get-color-palette",
     "allow-record-palette-color",
     "allow-set-palette-favorite",
-    "allow-clear-recent-palette"
+    "allow-clear-recent-palette",
+    "allow-list-screenshot-history",
+    "allow-get-screenshot-history-image",
+    "allow-query-capture-elements",
+    "allow-restore-closed-pin",
+    "allow-update-capture-preferences"
   ]
 }

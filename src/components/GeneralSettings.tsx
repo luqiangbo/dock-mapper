@@ -48,7 +48,7 @@ export default function GeneralSettings() {
   const [minimizeLoading, setMinimizeLoading] = useState(true);
 
   const [exportingDiagnostics, setExportingDiagnostics] = useState(false);
-  const [version, setVersion] = useState("—");
+  const [version, setVersion] = useState("读取版本…");
   const { accentColor, setAccentColor } = useTheme();
   const { notification } = AntApp.useApp();
 
@@ -91,15 +91,18 @@ export default function GeneralSettings() {
         .finally(() => {
           if (minimizeCurrent()) setMinimizeLoading(false);
         });
-    void getVersion()
-      .then((value) => {
-        if (!disposed) setVersion(value);
-      })
-      .catch((error) => {
-        if (disposed) return;
-        setVersion("未知");
-        notification.error({ message: "读取版本失败", description: errorMessage(error) });
-      });
+    // Cargo's local package baseline is not a published release version.
+    if (__DOCKMAPPER_BUILD__.releaseVersion)
+      void getVersion()
+        .then((value) => {
+          if (!value?.trim()) throw new Error("应用未返回版本号");
+          if (!disposed) setVersion(`v${value}`);
+        })
+        .catch((error) => {
+          if (disposed) return;
+          setVersion("版本未知");
+          notification.error({ message: "读取版本失败", description: errorMessage(error) });
+        });
     return () => {
       disposed = true;
     };
@@ -243,45 +246,26 @@ export default function GeneralSettings() {
 
           <Col xs={24}>
             <Card className={styles.surfaceCard} title="更新与关于">
-              <div className={styles.settingsGroup}>
-                <div className={styles.settingRow}>
-                  <div className={styles.settingCopy}>
-                    <Text strong>
-                      DockMapper{" "}
-                      {__DOCKMAPPER_BUILD__.releaseVersion ? `v${version}` : `开发版 · ${version}`}
-                    </Text>
-                    <span className={styles.description}>Windows 11 桌面工具</span>
-                    {__DOCKMAPPER_BUILD__.commit ? (
-                      <Button
-                        type="link"
-                        size="small"
-                        onClick={() => {
-                          void openUrl(
-                            `${REPOSITORY_URL}/commit/${__DOCKMAPPER_BUILD__.commit}`,
-                          ).catch((error) =>
-                            notification.error({
-                              message: "打开提交失败",
-                              description: errorMessage(error),
-                            }),
-                          );
-                        }}
-                      >
-                        提交 {__DOCKMAPPER_BUILD__.commit.slice(0, 7)}
-                      </Button>
-                    ) : (
-                      <span className={styles.description}>提交未知</span>
-                    )}
-                  </div>
-                  <Button onClick={() => void openUrl(REPOSITORY_URL)}>GitHub</Button>
+              <SoftwareUpdate>
+                <div className={styles.aboutIdentity}>
+                  <Text strong>DockMapper</Text>
+                  <Text type="secondary">
+                    {__DOCKMAPPER_BUILD__.releaseVersion ? version : "开发版"}
+                  </Text>
                 </div>
-                <div className={styles.softwareUpdateRow}>
-                  <div className={styles.settingCopy}>
-                    <Text strong>软件更新</Text>
-                    <span className={styles.description}>检查新版本并安装更新</span>
-                  </div>
-                  <SoftwareUpdate />
-                </div>
-              </div>
+                <Button
+                  onClick={() =>
+                    void openUrl(REPOSITORY_URL).catch((error) =>
+                      notification.error({
+                        message: "打开 GitHub 失败",
+                        description: errorMessage(error),
+                      }),
+                    )
+                  }
+                >
+                  GitHub
+                </Button>
+              </SoftwareUpdate>
             </Card>
           </Col>
         </Row>

@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { loadView } from "./utils/loadView";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -9,6 +19,7 @@ import {
   Layout,
   Menu,
   Splitter,
+  Spin,
   Tabs,
   Tooltip,
   Typography,
@@ -31,6 +42,7 @@ import { useTheme } from "./ThemeContext";
 import appIcon from "./assets/app-icon.png";
 import styles from "./App.module.scss";
 import { revealWorkspaceFocus } from "./utils/workspaceFocus";
+import { invokeCommand } from "./api/ipc";
 import { MAIN_EVENTS } from "./api/commands";
 import {
   loadSidebarWidth,
@@ -41,15 +53,13 @@ import {
 
 import PageBoundary from "./components/PageBoundary";
 import WorkspaceScrollRuler from "./components/WorkspaceScrollRuler";
-import ConnectedDashboard from "./components/ConnectedDashboard";
-import KeyMapper from "./components/KeyMapper";
-import KeyVisualizerSettings from "./components/KeyVisualizerSettings";
-import ScreenshotSettings from "./components/ScreenshotSettings";
-import WidgetSettings from "./components/WidgetSettings";
-import GeneralSettings from "./components/GeneralSettings";
 import { PageScope } from "./components/PageActivity";
 import TelemetryCollector from "./components/TelemetryCollector";
+import MainWindowPresentation, {
+  toggleMainWindowMaximize,
+} from "./components/MainWindowPresentation";
 import CaptureStartupFeedback from "./components/CaptureStartupFeedback";
+import RuntimeStartupNotice from "./components/RuntimeStartupNotice";
 import {
   loadNavigationPreferences,
   saveNavigationPreferences,
@@ -59,6 +69,15 @@ import {
   type MainNavigation,
 } from "./utils/navigationPreferences";
 import { useCompactNavigation } from "./hooks/useCompactNavigation";
+
+const ConnectedDashboard = lazy(() => loadView(() => import("./components/ConnectedDashboard")));
+const KeyMapper = lazy(() => loadView(() => import("./components/KeyMapper")));
+const KeyVisualizerSettings = lazy(() =>
+  loadView(() => import("./components/KeyVisualizerSettings")),
+);
+const ScreenshotSettings = lazy(() => loadView(() => import("./components/ScreenshotSettings")));
+const WidgetSettings = lazy(() => loadView(() => import("./components/WidgetSettings")));
+const GeneralSettings = lazy(() => loadView(() => import("./components/GeneralSettings")));
 
 const { Header, Content } = Layout;
 const { Text, Title } = Typography;
@@ -85,6 +104,53 @@ const menuItem = ({ key, label, icon }: PageItem) => ({
 
 export default function App() {
   const { notification } = AntApp.useApp();
+  useEffect(() => {
+    let disposed = false;
+    let off: (() => void) | undefined;
+    void listen<string>("pin-persistence-error", ({ payload }) => {
+      if (!disposed)
+        notification.error({ message: "贴图状态未保存", description: payload, duration: 0 });
+    })
+      .then((unlisten) => {
+        if (disposed) unlisten();
+        else off = unlisten;
+      })
+      .catch((error) => {
+        if (!disposed)
+          notification.error({ message: "贴图保存状态监听失败", description: String(error) });
+      });
+    return () => {
+      disposed = true;
+      off?.();
+    };
+  }, [notification]);
+  useEffect(() => {
+    let disposed = false,
+      off: (() => void) | undefined;
+    const report = (error: string | null) => {
+      if (!disposed && error)
+        notification.warning({
+          key: "pin-restore-error",
+          message: "部分贴图未恢复",
+          description: error,
+          duration: 0,
+        });
+    };
+    void listen<string>("pin-restore-failed", ({ payload }) => report(payload))
+      .then(async (unlisten) => {
+        if (disposed) {
+          unlisten();
+          return;
+        }
+        off = unlisten;
+        report(await invokeCommand("get_pin_restore_error"));
+      })
+      .catch((error) => report("贴图恢复状态读取失败：" + String(error)));
+    return () => {
+      disposed = true;
+      off?.();
+    };
+  }, [notification]);
   const screens = Grid.useBreakpoint();
   const compactNavigation = useCompactNavigation();
   const [initialNavigation] = useState(loadNavigationPreferences);
@@ -153,6 +219,7 @@ export default function App() {
         console.error("历史写入错误暂存失败", error);
       }
       notification.warning({
+        key: "screenshot-history-write-failed",
         message: "截图操作已完成，但未保存到历史",
         description: payload,
         duration: 8,
@@ -215,7 +282,9 @@ export default function App() {
   return (
     <>
       <TelemetryCollector />
+      <MainWindowPresentation />
       <CaptureStartupFeedback />
+      <RuntimeStartupNotice />
       <Splitter
         className={styles.shell}
         orientation="horizontal"
@@ -304,14 +373,12 @@ export default function App() {
                     aria-label="最大化或还原窗口"
                     title="最大化或还原"
                     onClick={() =>
-                      void getCurrentWindow()
-                        .toggleMaximize()
-                        .catch((error) =>
-                          notification.error({
-                            message: "调整窗口失败",
-                            description: String(error),
-                          }),
-                        )
+                      void toggleMainWindowMaximize().catch((error) =>
+                        notification.error({
+                          message: "调整窗口失败",
+                          description: String(error),
+                        }),
+                      )
                     }
                   />
                   <Button
@@ -354,7 +421,17 @@ export default function App() {
                     label,
                     children: (
                       <PageScope active={activePage === key}>
-                        <PageBoundary pageKey={key}>{renderPage(key)}</PageBoundary>
+                        <PageBoundary pageKey={key}>
+                          <Suspense
+                            fallback={
+                              <Spin tip="正在加载页面…">
+                                <div style={{ minHeight: 160 }} />
+                              </Spin>
+                            }
+                          >
+                            {renderPage(key)}
+                          </Suspense>
+                        </PageBoundary>
                       </PageScope>
                     ),
                   }))}

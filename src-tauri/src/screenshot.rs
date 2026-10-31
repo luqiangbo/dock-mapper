@@ -17,10 +17,15 @@ use tauri::http::{Request, Response, StatusCode};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 mod capture;
+mod capture_window;
 mod clipboard;
+mod cursor_capture;
+pub(crate) mod element_detection;
+pub(crate) mod scheduled_capture;
 use capture::*;
 pub(crate) mod output;
 mod overlay;
+pub(crate) mod pin_archive;
 mod pin_geometry;
 mod pin_runtime;
 mod runtime;
@@ -84,6 +89,7 @@ pub enum CaptureMode {
 
 #[derive(Clone)]
 struct CaptureData {
+    cursor: Option<cursor_capture::CursorCapture>,
     bmp: Arc<[u8]>,
     generation: u64,
     bounds: Rect,
@@ -146,19 +152,14 @@ pub fn create_state() -> AppState {
     }
 }
 
-pub fn initialize(app: &AppHandle) -> Result<(), String> {
-    // Build hidden WebViews up front. First capture then only captures pixels,
-    // renders the in-memory BMP frame and shows the overlay.
-    prewarm_overlay(app);
-    {
-        let warmup_app = app.clone();
-        thread::spawn(move || {
-            if let Ok(mut capture) = warmup_app.state::<AppState>().dxgi_capture.lock() {
-                capture.prewarm();
-            }
-        });
+pub(crate) fn flush_pins_before_exit(app: &AppHandle) -> Result<(), String> {
+    if pin_archive::is_restoring() {
+        return Err("正在恢复贴图，请稍后退出".into());
     }
+    pin_archive::save(app, None)
+}
 
+pub fn initialize(app: &AppHandle) -> Result<(), String> {
     let shortcuts = app
         .state::<crate::AppState>()
         .config
@@ -168,6 +169,35 @@ pub fn initialize(app: &AppHandle) -> Result<(), String> {
         .clone();
     shortcut::register_initial(app, &shortcuts);
     Ok(())
+}
+
+pub(crate) fn warmup(app: &AppHandle) {
+    static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if STARTED.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let warmup_app = app.clone();
+    thread::spawn(move || {
+        let app = warmup_app;
+        let started = Instant::now();
+        tracing::info!(target: "dock_mapper::startup", stage = "截图浮层预热", "Startup stage started");
+        prewarm_overlay(&app);
+        tracing::info!(target: "dock_mapper::startup", stage = "截图浮层预热", elapsed_ms = started.elapsed().as_millis(), "Startup stage completed");
+        let started = Instant::now();
+        tracing::info!(target: "dock_mapper::startup", stage = "贴图恢复", "Startup stage started");
+        if let Err(error) = pin_archive::restore_open(&app) {
+            pin_archive::record_restore_error(&app, error);
+        }
+        tracing::info!(target: "dock_mapper::startup", stage = "贴图恢复", elapsed_ms = started.elapsed().as_millis(), "Startup stage completed");
+    });
+    let app = app.clone();
+    thread::spawn(move || {
+        let started = Instant::now();
+        if let Ok(mut capture) = app.state::<AppState>().dxgi_capture.lock() {
+            capture.prewarm();
+        }
+        tracing::info!(target: "dock_mapper::startup", stage = "DXGI 预热", elapsed_ms = started.elapsed().as_millis(), "Startup stage completed");
+    });
 }
 
 pub fn start_capture(app: &AppHandle) {
@@ -234,7 +264,22 @@ pub fn start_quick_ocr(
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct CursorMetadata {
+    sample_x: i32,
+    sample_y: i32,
+    url: String,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FullScreenshot {
+    screen_id: u32,
+    cursor: Option<CursorMetadata>,
+    initial_selection: Option<Rect>,
     url: String,
     generation: u64,
     display_width: f64,
@@ -248,9 +293,10 @@ pub struct FullScreenshot {
 
 pub fn serve_capture_uri(request: Request<Vec<u8>>) -> Response<std::borrow::Cow<'static, [u8]>> {
     let path = request.uri().path().trim_start_matches('/');
+    let is_cursor = path.starts_with("cursor/");
     let Some(raw_generation) = path
-        .strip_prefix("capture/")
-        .and_then(|value| value.strip_suffix(".bmp"))
+        .strip_prefix(if is_cursor { "cursor/" } else { "capture/" })
+        .and_then(|value| value.strip_suffix(if is_cursor { ".png" } else { ".bmp" }))
     else {
         return Response::builder()
             .status(StatusCode::NOT_FOUND)
@@ -267,12 +313,21 @@ pub fn serve_capture_uri(request: Request<Vec<u8>>) -> Response<std::borrow::Cow
         capture
             .as_ref()
             .filter(|capture| capture.generation == generation)
-            .map(|capture| capture.bmp.to_vec())
+            .and_then(|capture| {
+                if is_cursor {
+                    capture.cursor.as_ref().map(|c| c.png.to_vec())
+                } else {
+                    Some(capture.bmp.to_vec())
+                }
+            })
     });
     match bytes {
         Some(bytes) => Response::builder()
             .status(StatusCode::OK)
-            .header("Content-Type", "image/bmp")
+            .header(
+                "Content-Type",
+                if is_cursor { "image/png" } else { "image/bmp" },
+            )
             .header("Cache-Control", "no-store, no-cache, must-revalidate")
             .header("Pragma", "no-cache")
             // The overlay is served from Tauri's application origin while the
@@ -496,6 +551,20 @@ pub fn get_full_screenshot(
     }
     tracing::info!(target: "dock_mapper::capture", generation = capture.generation, "Capture frame delivered for decoding");
     Ok(FullScreenshot {
+        screen_id: capture.screen_id,
+        initial_selection: scheduled_capture::selection(capture.generation),
+        cursor: capture.cursor.as_ref().map(|c| CursorMetadata {
+            sample_x: c.sample_x,
+            sample_y: c.sample_y,
+            url: format!(
+                "http://dockmapper-shot.localhost/cursor/{}.png",
+                capture.generation
+            ),
+            x: c.x,
+            y: c.y,
+            width: c.width,
+            height: c.height,
+        }),
         url: format!(
             "http://dockmapper-shot.localhost/capture/{}.bmp",
             capture.generation
@@ -653,7 +722,11 @@ fn pin_image_impl(
     let window_width = (natural_width * fit).max(60.0);
     let window_height = (natural_height * fit).max(60.0);
     let id = format!(
-        "pin-{}",
+        "pin-{}-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
         app.state::<AppState>()
             .pin_generation
             .fetch_add(1, Ordering::SeqCst)
@@ -689,6 +762,18 @@ fn pin_image_impl(
         let destroyed_app = app.clone();
         let destroyed_id = id.clone();
         window.on_window_event(move |event| {
+            if matches!(
+                event,
+                tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)
+            ) {
+                pin_archive::schedule(destroyed_app.clone());
+            }
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if let Err(error) = pin_archive::save(&destroyed_app, Some(&destroyed_id)) {
+                    api.prevent_close();
+                    let _ = destroyed_app.emit("pin-persistence-error", error);
+                }
+            }
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 destroyed_app
                     .state::<AppState>()
@@ -757,6 +842,7 @@ fn pin_image_impl(
         return Err(error);
     }
     remember_confirmed_image(&app, data);
+    pin_archive::schedule(app.clone());
     let fallback_app = app.clone();
     let fallback_id = id.clone();
     thread::spawn(move || {
@@ -841,6 +927,7 @@ pub fn update_pin_options(
     id: String,
     opacity: f64,
     locked: bool,
+    defer_save: Option<bool>,
 ) -> Result<PinOptions, String> {
     let options = normalized_pin_options(opacity, locked);
     let state = app.state::<AppState>();
@@ -848,16 +935,37 @@ pub fn update_pin_options(
     if !runtime.options.contains_key(&id) {
         return Err("贴图窗口不存在".into());
     }
-    runtime.options.insert(id.clone(), options);
+    let previous = runtime.options.insert(id.clone(), options);
     drop(runtime);
     app.get_webview_window(&id)
         .ok_or_else(|| "贴图窗口不存在".to_string())?;
+    if defer_save.unwrap_or(false) {
+        pin_archive::schedule(app.clone());
+    } else if let Err(error) = pin_archive::save(&app, None) {
+        if let Some(previous) = previous {
+            app.state::<AppState>()
+                .pin_runtime
+                .lock_or_recover()
+                .options
+                .insert(id, previous);
+        }
+        return Err(format!("贴图设置未保存：{error}"));
+    }
+    if let Err(error) = app.emit_to(
+        id.as_str(),
+        "pin-options-changed",
+        serde_json::json!({ "id": id, "options": options }),
+    ) {
+        tracing::warn!(%error, "贴图设置变化通知失败");
+    }
     Ok(options)
 }
 
 #[tauri::command]
-pub fn close_pin_window(app: AppHandle, id: String) {
+pub fn close_pin_window(app: AppHandle, id: String) -> Result<(), String> {
+    pin_archive::save(&app, Some(&id))?;
     release_pin_runtime(&app, &id, true);
+    Ok(())
 }
 
 #[tauri::command]
@@ -975,6 +1083,12 @@ mod tests {
         assert_eq!(&bmp[..2], b"BM");
         assert_eq!(i32::from_le_bytes(bmp[22..26].try_into().unwrap()), -1);
         assert_eq!(&bmp[54..58], &[0x56, 0x34, 0x12, 0xff]);
+    }
+
+    #[test]
+    fn gdi_pixels_with_uninitialized_alpha_remain_visible_in_the_capture() {
+        let bmp = bmp_from_bgra(2, 1, &[115, 182, 43, 0, 10, 20, 30, 128]).unwrap();
+        assert_eq!(&bmp[54..], &[115, 182, 43, 255, 10, 20, 30, 255]);
     }
 
     #[test]

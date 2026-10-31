@@ -134,6 +134,7 @@ impl Default for KeyVisualizerConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ScreenshotConfig {
+    pub experience: CaptureExperience,
     pub toolbar_tools: Vec<ScreenshotToolbarTool>,
     pub shortcut: String,
     pub pin_shortcut: String,
@@ -158,6 +159,162 @@ pub struct ScreenshotConfig {
     pub text_font_favorites: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CaptureRegion {
+    #[serde(default)]
+    pub physical: bool,
+    pub screen: String,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapturePreset {
+    pub name: String,
+    pub region: Option<CaptureRegion>,
+    pub delay_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CaptureExperience {
+    pub hide_main_window: bool,
+    pub number_start: u32,
+    pub number_appearance: String,
+    pub number_palette: String,
+    pub number_format: String,
+    pub number_renumber: bool,
+    pub number_comment: String,
+    pub presets: Vec<CapturePreset>,
+    pub restore_pins: bool,
+    pub pin_history_limit: usize,
+    pub detection: String,
+    pub grid: bool,
+    pub zoom: u32,
+    pub hints: bool,
+    pub guides: bool,
+    pub remember_tool: bool,
+    pub shared_color: bool,
+    pub last_tool: String,
+    pub region_limit: usize,
+    pub regions: Vec<CaptureRegion>,
+    pub radius: u32,
+    pub border: u32,
+    pub shadow: u32,
+}
+
+impl Default for CaptureExperience {
+    fn default() -> Self {
+        Self {
+            hide_main_window: true,
+            number_start: 1,
+            number_appearance: "flat".into(),
+            number_palette: "custom".into(),
+            number_format: "decimal".into(),
+            number_renumber: true,
+            number_comment: String::new(),
+            presets: Vec::new(),
+            restore_pins: true,
+            pin_history_limit: 20,
+            detection: "elements".into(),
+            grid: true,
+            zoom: 8,
+            hints: true,
+            guides: false,
+            remember_tool: false,
+            shared_color: true,
+            last_tool: "select".into(),
+            region_limit: 10,
+            regions: Vec::new(),
+            radius: 0,
+            border: 0,
+            shadow: 0,
+        }
+    }
+}
+
+#[cfg(test)]
+mod capture_experience_tests {
+    use super::*;
+    #[test]
+    fn existing_settings_gain_safe_capture_defaults() {
+        let config: ScreenshotConfig = serde_json::from_str("{}").unwrap();
+        assert!(config.experience.hide_main_window);
+        assert_eq!(config.experience.detection, "elements");
+        assert_eq!(config.experience.region_limit, 10);
+        assert_eq!(config.experience.pin_history_limit, 20);
+        assert!(config.experience.restore_pins);
+        assert!(!config.experience.remember_tool);
+        assert_eq!(config.experience.radius, 0);
+        assert_eq!(config.experience.number_appearance, "flat");
+        assert_eq!(config.experience.number_palette, "custom");
+        let existing: ScreenshotConfig =
+            serde_json::from_str(r#"{"experience":{"grid":false}}"#).unwrap();
+        assert!(existing.experience.hide_main_window);
+        assert!(!existing.experience.grid);
+    }
+    #[test]
+    fn capture_window_visibility_choice_survives_saving_and_reopening() {
+        let directory = std::env::temp_dir().join(format!(
+            "dock-mapper-capture-visibility-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = directory.join("config.json");
+        let mut config = AppConfig::default();
+        assert!(config.screenshot_config.experience.hide_main_window);
+        for hidden in [false, false, true] {
+            config.screenshot_config.experience.hide_main_window = hidden;
+            save(&path, &config).unwrap();
+            config = load_for_mutation(&path).unwrap();
+            assert_eq!(config.screenshot_config.experience.hide_main_window, hidden);
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn unsupported_number_designs_fall_back_without_losing_other_preferences() {
+        let mut config = ScreenshotConfig::default();
+        config.experience.number_appearance = "unknown".into();
+        config.experience.number_palette = "unknown".into();
+        config.experience.number_start = 7;
+        config.experience.number_renumber = false;
+        normalize_screenshot_config(&mut config);
+        assert_eq!(config.experience.number_appearance, "flat");
+        assert_eq!(config.experience.number_palette, "custom");
+        assert_eq!(config.experience.number_start, 7);
+        assert!(!config.experience.number_renumber);
+    }
+
+    #[test]
+    fn capture_preferences_survive_reopening_and_invalid_ranges_are_bounded() {
+        let mut config = ScreenshotConfig::default();
+        config.experience.number_format = "roman".into();
+        config.experience.number_appearance = "raised".into();
+        config.experience.number_palette = "mint".into();
+        config.experience.shared_color = false;
+        config.experience.zoom = 999;
+        config.experience.shadow = 999;
+        normalize_screenshot_config(&mut config);
+        let restored: ScreenshotConfig =
+            serde_json::from_slice(&serde_json::to_vec(&config).unwrap()).unwrap();
+        assert_eq!(restored.experience.zoom, 24);
+        assert_eq!(restored.experience.shadow, 64);
+        assert_eq!(restored.experience.number_format, "roman");
+        assert_eq!(restored.experience.number_appearance, "flat");
+        assert_eq!(restored.experience.number_palette, "custom");
+        assert!(!restored.experience.shared_color);
+        assert_eq!(
+            restored.annotation_styles.number.background_color,
+            "#bde3cf"
+        );
+    }
+}
+
 fn annotation_styles_not_initialized() -> bool {
     false
 }
@@ -166,6 +323,7 @@ impl Default for ScreenshotConfig {
     fn default() -> Self {
         Self {
             shortcut: "Control+1".into(),
+            experience: CaptureExperience::default(),
             toolbar_tools: default_screenshot_toolbar_tools(),
             pin_shortcut: "Control+2".into(),
             history_shortcut: "Control+3".into(),
@@ -212,7 +370,6 @@ pub fn default_screenshot_toolbar_tools() -> Vec<ScreenshotToolbarTool> {
         "mosaic",
         "ellipse",
         "diamond",
-        "line",
         "highlight",
         "picker",
         "number",
@@ -239,6 +396,51 @@ pub fn normalize_screenshot_toolbar_tools(tools: &mut Vec<ScreenshotToolbarTool>
 #[cfg(test)]
 mod screenshot_toolbar_tests {
     use super::*;
+    #[test]
+    fn removed_tools_are_filtered_and_last_tool_returns_to_selection() {
+        let mut config = ScreenshotConfig::default();
+        config.toolbar_tools.insert(
+            0,
+            ScreenshotToolbarTool {
+                id: "spotlight".into(),
+                visible: true,
+            },
+        );
+        config.toolbar_tools.insert(
+            1,
+            ScreenshotToolbarTool {
+                id: "magnifier".into(),
+                visible: true,
+            },
+        );
+        config.toolbar_tools.insert(
+            2,
+            ScreenshotToolbarTool {
+                id: "line".into(),
+                visible: true,
+            },
+        );
+        config.experience.last_tool = "line".into();
+        normalize_screenshot_config(&mut config);
+        assert_eq!(config.experience.last_tool, "select");
+        assert!(config
+            .toolbar_tools
+            .iter()
+            .all(|t| t.id != "spotlight" && t.id != "magnifier" && t.id != "line"));
+        assert_eq!(config.toolbar_tools[0].id, "select");
+    }
+    #[test]
+    fn wheel_width_seven_survives_normalization_and_reopening() {
+        let mut config = ScreenshotConfig::default();
+        config.annotation_styles.arrow.stroke_width = 7.0;
+        config.annotation_styles.pen.stroke_width = 7.0;
+        normalize_screenshot_config(&mut config);
+        let mut reopened: ScreenshotConfig =
+            serde_json::from_slice(&serde_json::to_vec(&config).unwrap()).unwrap();
+        normalize_screenshot_config(&mut reopened);
+        assert_eq!(reopened.annotation_styles.arrow.stroke_width, 7.0);
+        assert_eq!(reopened.annotation_styles.pen.stroke_width, 7.0);
+    }
     #[test]
     fn old_settings_keep_the_original_six_visible_tools() {
         let config: ScreenshotConfig = serde_json::from_str("{}").unwrap();
@@ -282,7 +484,7 @@ mod screenshot_toolbar_tests {
             },
         ];
         normalize_screenshot_toolbar_tools(&mut tools);
-        assert_eq!(tools.len(), 13);
+        assert_eq!(tools.len(), default_screenshot_toolbar_tools().len());
         assert_eq!(tools[0].id, "pen");
         assert!(!tools[0].visible);
         assert_eq!(tools.iter().filter(|tool| tool.id == "pen").count(), 1);
@@ -431,6 +633,7 @@ impl Default for ScreenshotAnnotationStyles {
         let mut number = base.clone();
         number.background_color = "#e03131".into();
         number.stroke_color = "#ffffff".into();
+        number.marker_size = 28;
         Self {
             shape: base.clone(),
             line: base.clone(),
@@ -505,7 +708,7 @@ mod tests {
         assert_eq!(config.annotation_styles.text.font_size, 24);
         assert_eq!(config.annotation_styles.highlight.stroke_width, 24.0);
         assert_eq!(config.annotation_styles.highlight.opacity, 0.32);
-        assert_eq!(config.annotation_styles.number.marker_size, 36);
+        assert_eq!(config.annotation_styles.number.marker_size, 28);
         assert_eq!(
             config.annotation_styles.shape.fill_style,
             AnnotationFillStyle::None

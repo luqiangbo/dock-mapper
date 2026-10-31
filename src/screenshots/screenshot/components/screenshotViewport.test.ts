@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { screenshotViewport, bitmapToClient, clientToBitmap } from "./screenshotViewport";
+import {
+  screenshotViewport,
+  screenAnchoredViewport,
+  bitmapToClient,
+  clientToBitmap,
+} from "./screenshotViewport";
 
 describe("截图底图与标注坐标", () => {
   it.each([1, 1.5, 2])("%s 倍显示缩放下不按编辑器步长取整", (scale) => {
@@ -25,4 +30,29 @@ describe("截图底图与标注坐标", () => {
     expect(bitmapToClient({ x: 0, y: 0 }, view)).toEqual({ x: 30, y: 60 });
     expect(bitmapToClient({ x: 100, y: 80 }, view)).toEqual({ x: 230, y: 220 });
   });
+});
+
+it.each([1, 1.5, 2])("%s 倍 DPI 移动取景框保持标注在原屏幕位置", (scale) => {
+  const first = screenAnchoredViewport(
+    300,
+    150,
+    { left: 100, top: 80, width: 300 / scale, height: 150 / scale },
+    100 * scale,
+    80 * scale,
+  );
+  const moved = screenAnchoredViewport(
+    300,
+    150,
+    { left: 180, top: 120, width: 300 / scale, height: 150 / scale },
+    180 * scale,
+    120 * scale,
+  );
+  const annotation = { x: 250 * scale, y: 170 * scale };
+  const client = (view: typeof first) => ({
+    x: view.left + (annotation.x + view.scrollX) * view.zoom,
+    y: view.top + (annotation.y + view.scrollY) * view.zoom,
+  });
+  expect(client(moved).x).toBeCloseTo(client(first).x);
+  expect(client(moved).y).toBeCloseTo(client(first).y);
+  expect(annotation).toEqual({ x: 250 * scale, y: 170 * scale });
 });

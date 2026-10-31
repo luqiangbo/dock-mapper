@@ -8,8 +8,8 @@ export const DEFAULT_WIDGET_LAYOUT: WidgetLayoutSettings = {
   task_list_gap: 6,
   tray_gap: 6,
   vertical_offset: 0,
-  font_size: 14,
-  icon_size: 18,
+  font_size: 12,
+  icon_size: 14,
 };
 
 export function widgetSpacing(layout: WidgetLayoutSettings, compact: boolean) {

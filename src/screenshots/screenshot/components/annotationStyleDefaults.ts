@@ -34,7 +34,7 @@ export const DEFAULT_ANNOTATION_STYLES: ScreenshotAnnotationStyles = {
   pen: toolStyle(),
   highlight: toolStyle({ stroke_width: 24, opacity: 0.32, pressure: false }),
   text: toolStyle({ background_color: "#000000" }),
-  number: toolStyle({ stroke_color: "#ffffff", background_color: "#e03131" }),
+  number: toolStyle({ stroke_color: "#ffffff", background_color: "#e03131", marker_size: 28 }),
   mosaic: toolStyle(),
 };
 

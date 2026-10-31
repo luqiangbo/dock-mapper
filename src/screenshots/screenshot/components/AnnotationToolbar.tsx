@@ -97,10 +97,9 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
       onPopupOpenChange(false);
     }, [tool, toolsDisabled, onPopupOpenChange]);
     const icons = screenshotToolIcons;
-    const labels = { ...SCREENSHOT_TOOL_LABELS, select: "选择（V）", eraser: "对象橡皮擦" };
+    const labels = { ...SCREENSHOT_TOOL_LABELS, eraser: "对象橡皮擦" };
     const { main, more } = screenshotToolbarGroups(toolbarTools);
     const selectedMore = more.find((item) => item === tool);
-    const MoreIcon = selectedMore ? icons[selectedMore] : MoreHorizontal;
     const iconProps = { size: 20, strokeWidth: 1.8, "aria-hidden": true };
     const items: MenuProps["items"] = [
       ...more.map((key) => {
@@ -145,51 +144,41 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
                   </TooltipButton>
                 );
               })}
+
               <Dropdown
                 open={moreOpen}
                 trigger={["click"]}
                 onOpenChange={changeOpen}
                 menu={{
                   items,
+                  selectable: true,
                   selectedKeys: tool ? [tool] : [],
                   onClick: ({ key }) => {
                     changeOpen(false);
                     if (key === "ocr") onOcr();
                     else if (key === "qr") onQr();
-                    else onToolChange(key as AnnotTool);
+                    else {
+                      onToolChange(key as AnnotTool);
+                    }
                   },
                 }}
               >
                 <span>
                   <TooltipButton
-                    label={
-                      selectedMore
-                        ? labels[selectedMore]
-                        : ocrRunning
-                          ? "更多工具 · 正在识别文字"
-                          : "更多工具"
-                    }
+                    label={ocrRunning ? "更多工具 · 正在识别文字" : "更多工具"}
                     active={!!selectedMore || moreOpen}
                   >
-                    <MoreIcon {...iconProps} />
+                    <MoreHorizontal {...iconProps} />
                   </TooltipButton>
                 </span>
               </Dropdown>
             </div>
             <Divider type="vertical" />
             <div className="wx-toolbar__group">
-              <TooltipButton
-                label="撤销（Ctrl+Z）"
-                disabled={toolsDisabled || !canUndo}
-                onClick={onUndo}
-              >
+              <TooltipButton label="撤销" disabled={toolsDisabled || !canUndo} onClick={onUndo}>
                 <Undo2 {...iconProps} />
               </TooltipButton>
-              <TooltipButton
-                label="重做（Ctrl+Shift+Z）"
-                disabled={toolsDisabled || !canRedo}
-                onClick={onRedo}
-              >
+              <TooltipButton label="重做" disabled={toolsDisabled || !canRedo} onClick={onRedo}>
                 <Redo2 {...iconProps} />
               </TooltipButton>
             </div>
@@ -210,17 +199,17 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
             >
               <Pin {...iconProps} />
             </TooltipButton>
+            <TooltipButton label="取消" danger onClick={onCancel}>
+              <X {...iconProps} />
+            </TooltipButton>
             <TooltipButton
-              label="复制图片（Ctrl+C / Enter）"
+              label="完成并复制图片"
               loading={busy}
               success
               disabled={actionsDisabled || confirmDisabled}
               onClick={onConfirm}
             >
               <Check {...iconProps} />
-            </TooltipButton>
-            <TooltipButton label="取消（Esc）" danger onClick={onCancel}>
-              <X {...iconProps} />
             </TooltipButton>
           </div>
         </div>

@@ -27,6 +27,8 @@ export function WidgetPreview({
           {
             "--wm-gap": `${spacing.gap}px`,
             "--wm-padding": `${spacing.padding}px`,
+            "--wm-font-size": `${config.layout.font_size}px`,
+            "--wm-icon-size": `${config.layout.icon_size}px`,
             height: 40,
             width: "max-content",
             marginLeft: config.layout.task_list_gap,

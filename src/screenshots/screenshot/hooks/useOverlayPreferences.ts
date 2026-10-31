@@ -1,3 +1,8 @@
+import {
+  DEFAULT_CAPTURE_EXPERIENCE,
+  type CaptureExperience,
+} from "../components/captureExperience";
+import { invokeCommand } from "../../../api/ipc";
 import { listen } from "@tauri-apps/api/event";
 import { defaultScreenshotTools, normalizeScreenshotTools } from "../../../utils/screenshotTools";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -46,6 +51,7 @@ export function useOverlayPreferences({ onError, getGeneration }: OverlayPrefere
   const [paletteBusy, setPaletteBusy] = useState(false);
   const [paletteLoading, setPaletteLoading] = useState(false);
   const [paletteError, setPaletteError] = useState<string | null>(null);
+  const [experience, setExperience] = useState<CaptureExperience>(DEFAULT_CAPTURE_EXPERIENCE);
   const [pickerFormat, setPickerFormat] = useState<ScreenshotConfig["color_copy_format"]>("hex");
   const [annotationColor, setAnnotationColor] = useState("#e03131");
   const [annotationOutline, setAnnotationOutline] = useState<AnnotationOutlineConfig>({
@@ -129,15 +135,35 @@ export function useOverlayPreferences({ onError, getGeneration }: OverlayPrefere
   );
 
   const updateConfig = useCallback(
-    async (changes: Partial<ScreenshotConfig>, failureMessage: string): Promise<boolean> => {
+    async (
+      changes: Omit<Partial<ScreenshotConfig>, "experience"> & {
+        experience?: Partial<CaptureExperience>;
+      },
+      failureMessage: string,
+    ): Promise<boolean> => {
+      const requestGeneration = generation();
       const revision = ++configRevision.current;
       configPending.current += 1;
       setConfigSaving(true);
       const mutation = configTail.current.then(async () => {
         const current = configRef.current ?? (await window.api.getScreenshotConfig());
-        const next = await window.api.updateScreenshotConfig({ ...current, ...changes });
+        const { experience: experienceChanges, ...configChanges } = changes;
+        const next =
+          changes.experience || changes.toolbar_tools
+            ? await invokeCommand("update_capture_preferences", {
+                experience: experienceChanges
+                  ? { ...DEFAULT_CAPTURE_EXPERIENCE, ...current.experience, ...experienceChanges }
+                  : undefined,
+                toolbarTools: changes.toolbar_tools,
+              })
+            : await window.api.updateScreenshotConfig({ ...current, ...configChanges });
         configRef.current = next;
-        if (mounted.current && revision === configRevision.current) {
+        if (
+          mounted.current &&
+          requestGeneration === generation() &&
+          revision === configRevision.current
+        ) {
+          setExperience({ ...DEFAULT_CAPTURE_EXPERIENCE, ...next.experience });
           setPickerFormat(next.color_copy_format);
           setAnnotationColor(next.annotation_color);
           setAnnotationOutline(next.annotation_outline);
@@ -155,7 +181,7 @@ export function useOverlayPreferences({ onError, getGeneration }: OverlayPrefere
         await mutation;
         return true;
       } catch (cause) {
-        if (mounted.current) {
+        if (mounted.current && requestGeneration === generation()) {
           onError(`${failureMessage}：${cause instanceof Error ? cause.message : String(cause)}`);
         }
         return false;
@@ -293,6 +319,7 @@ export function useOverlayPreferences({ onError, getGeneration }: OverlayPrefere
                 ...config,
                 toolbar_tools: configRef.current?.toolbar_tools ?? config.toolbar_tools,
               };
+        setExperience({ ...DEFAULT_CAPTURE_EXPERIENCE, ...config.experience });
         setPickerFormat(config.color_copy_format);
         setAnnotationColor(config.annotation_color);
         setAnnotationOutline(config.annotation_outline);
@@ -316,10 +343,12 @@ export function useOverlayPreferences({ onError, getGeneration }: OverlayPrefere
     let request = 0;
     const receive = (config: ScreenshotConfig) => {
       if (disposed) return;
+      setExperience({ ...DEFAULT_CAPTURE_EXPERIENCE, ...config.experience });
       toolbarRevision.current += 1;
       configRef.current = {
         ...(configRef.current ?? config),
         toolbar_tools: config.toolbar_tools,
+        experience: config.experience,
         text_font_favorites: config.text_font_favorites,
       };
       setFontFavorites(normalizeFontFavorites(config.text_font_favorites));
@@ -354,6 +383,7 @@ export function useOverlayPreferences({ onError, getGeneration }: OverlayPrefere
   }, [onError]);
 
   return {
+    experience,
     styleSaveFailed,
     styleSaveAttempted,
     palette,

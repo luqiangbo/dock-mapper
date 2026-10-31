@@ -525,6 +525,12 @@
           "markdownDescription": "Enables the get_pin_options command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_pin_restore_error command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-pin-restore-error",
+          "markdownDescription": "Enables the get_pin_restore_error command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_pin_window_geometry command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-pin-window-geometry",
@@ -583,6 +589,12 @@
           "type": "string",
           "const": "allow-get-screenshot-shortcut-statuses",
           "markdownDescription": "Enables the get_screenshot_shortcut_statuses command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_startup_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-startup-status",
+          "markdownDescription": "Enables the get_startup_status command without any pre-configured scope."
         },
         {
           "description": "Enables the get_supported_keys command without any pre-configured scope.",
@@ -669,6 +681,12 @@
           "markdownDescription": "Enables the pin_screenshot_history command without any pre-configured scope."
         },
         {
+          "description": "Enables the query_capture_elements command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-query-capture-elements",
+          "markdownDescription": "Enables the query_capture_elements command without any pre-configured scope."
+        },
+        {
           "description": "Enables the recognize_selection command without any pre-configured scope.",
           "type": "string",
           "const": "allow-recognize-selection",
@@ -711,6 +729,12 @@
           "markdownDescription": "Enables the reset_screenshot_shortcuts command without any pre-configured scope."
         },
         {
+          "description": "Enables the restore_closed_pin command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-restore-closed-pin",
+          "markdownDescription": "Enables the restore_closed_pin command without any pre-configured scope."
+        },
+        {
           "description": "Enables the restore_scancode_map command without any pre-configured scope.",
           "type": "string",
           "const": "allow-restore-scancode-map",
@@ -733,6 +757,12 @@
           "type": "string",
           "const": "allow-save-pin-image",
           "markdownDescription": "Enables the save_pin_image command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the schedule_screenshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-schedule-screenshot",
+          "markdownDescription": "Enables the schedule_screenshot command without any pre-configured scope."
         },
         {
           "description": "Enables the set_key_mapping_enabled command without any pre-configured scope.",
@@ -793,6 +823,12 @@
           "type": "string",
           "const": "allow-sync-widget-dynamic-width",
           "markdownDescription": "Enables the sync_widget_dynamic_width command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_capture_preferences command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-update-capture-preferences",
+          "markdownDescription": "Enables the update_capture_preferences command without any pre-configured scope."
         },
         {
           "description": "Enables the update_key_visualizer_config command without any pre-configured scope.",
@@ -1023,6 +1059,12 @@
           "markdownDescription": "Denies the get_pin_options command without any pre-configured scope."
         },
         {
+          "description": "Denies the get_pin_restore_error command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-pin-restore-error",
+          "markdownDescription": "Denies the get_pin_restore_error command without any pre-configured scope."
+        },
+        {
           "description": "Denies the get_pin_window_geometry command without any pre-configured scope.",
           "type": "string",
           "const": "deny-get-pin-window-geometry",
@@ -1081,6 +1123,12 @@
           "type": "string",
           "const": "deny-get-screenshot-shortcut-statuses",
           "markdownDescription": "Denies the get_screenshot_shortcut_statuses command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_startup_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-startup-status",
+          "markdownDescription": "Denies the get_startup_status command without any pre-configured scope."
         },
         {
           "description": "Denies the get_supported_keys command without any pre-configured scope.",
@@ -1167,6 +1215,12 @@
           "markdownDescription": "Denies the pin_screenshot_history command without any pre-configured scope."
         },
         {
+          "description": "Denies the query_capture_elements command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-query-capture-elements",
+          "markdownDescription": "Denies the query_capture_elements command without any pre-configured scope."
+        },
+        {
           "description": "Denies the recognize_selection command without any pre-configured scope.",
           "type": "string",
           "const": "deny-recognize-selection",
@@ -1209,6 +1263,12 @@
           "markdownDescription": "Denies the reset_screenshot_shortcuts command without any pre-configured scope."
         },
         {
+          "description": "Denies the restore_closed_pin command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-restore-closed-pin",
+          "markdownDescription": "Denies the restore_closed_pin command without any pre-configured scope."
+        },
+        {
           "description": "Denies the restore_scancode_map command without any pre-configured scope.",
           "type": "string",
           "const": "deny-restore-scancode-map",
@@ -1231,6 +1291,12 @@
           "type": "string",
           "const": "deny-save-pin-image",
           "markdownDescription": "Denies the save_pin_image command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the schedule_screenshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-schedule-screenshot",
+          "markdownDescription": "Denies the schedule_screenshot command without any pre-configured scope."
         },
         {
           "description": "Denies the set_key_mapping_enabled command without any pre-configured scope.",
@@ -1291,6 +1357,12 @@
           "type": "string",
           "const": "deny-sync-widget-dynamic-width",
           "markdownDescription": "Denies the sync_widget_dynamic_width command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_capture_preferences command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-update-capture-preferences",
+          "markdownDescription": "Denies the update_capture_preferences command without any pre-configured scope."
         },
         {
           "description": "Denies the update_key_visualizer_config command without any pre-configured scope.",

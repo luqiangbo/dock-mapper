@@ -1,14 +1,17 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { CaptureUpdateAction } from "@excalidraw/excalidraw";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
-import { screenshotViewport } from "../components/screenshotViewport";
+import { screenAnchoredViewport } from "../components/screenshotViewport";
 
-/** One exact transform drives both the native annotation scene and visible bitmap. */
+/** One exact transform drives the annotation scene and bitmap. A null display
+ * hands bitmap sizing to the live region preview until dragging ends. */
 export function useScreenshotViewport(
   api: ExcalidrawImperativeAPI | null,
   base: HTMLCanvasElement | null,
   display: HTMLCanvasElement | null,
   captureKey: string,
+  originX = 0,
+  originY = 0,
 ) {
   const rootRef = useRef<HTMLDivElement>(null);
   const frame = useRef<number | null>(null);
@@ -19,7 +22,7 @@ export function useScreenshotViewport(
     if (!api || !base || !root || !display) return;
     const rect = root.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
-    const view = screenshotViewport(base.width, base.height, rect);
+    const view = screenAnchoredViewport(base.width, base.height, rect, originX, originY);
     Object.assign(display.style, {
       position: "absolute",
       left: `${view.insetX}px`,
@@ -29,6 +32,8 @@ export function useScreenshotViewport(
     });
     const key = [
       captureKey,
+      originX,
+      originY,
       base.width,
       base.height,
       rect.left,
@@ -63,7 +68,7 @@ export function useScreenshotViewport(
       } as never,
       captureUpdate: CaptureUpdateAction.NEVER,
     });
-  }, [api, base, display, captureKey]);
+  }, [api, base, display, captureKey, originX, originY]);
   const scheduleAlignment = useCallback(() => {
     if (frame.current !== null) return;
     frame.current = requestAnimationFrame(() => {

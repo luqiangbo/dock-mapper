@@ -4,7 +4,7 @@
   gap: var(--wm-gap, 6px);
   padding: 0 var(--wm-padding, 4px);
   font:
-    var(--wm-font-size, 14px)/1.1 "Segoe UI Variable",
+    var(--wm-font-size, 12px)/1.1 "Segoe UI Variable",
     "Segoe UI",
     "Microsoft YaHei UI",
     sans-serif;
@@ -24,7 +24,7 @@
   gap: 1px;
 }
 .wm-column-paired .wm-resource {
-  font-size: min(var(--wm-font-size, 14px), 14px);
+  font-size: min(var(--wm-font-size, 12px), 14px);
 }
 .wm-column-paired .wm-icon {
   width: 14px;
@@ -44,9 +44,9 @@
 }
 .wm-icon {
   display: inline-flex;
-  width: var(--wm-icon-size, 18px);
-  height: var(--wm-icon-size, 18px);
-  flex: 0 0 var(--wm-icon-size, 18px);
+  width: var(--wm-icon-size, 14px);
+  height: var(--wm-icon-size, 14px);
+  flex: 0 0 var(--wm-icon-size, 14px);
 }
 .wm-icon svg {
   width: 100%;
@@ -126,12 +126,12 @@
   gap: 2px;
 }
 .wm-resource.wm-double .wm-icon {
-  width: min(var(--wm-icon-size, 18px), 16px);
-  height: min(var(--wm-icon-size, 18px), 16px);
-  flex-basis: 16px;
+  width: min(var(--wm-icon-size, 14px), 16px);
+  height: min(var(--wm-icon-size, 14px), 16px);
+  flex-basis: min(var(--wm-icon-size, 14px), 16px);
 }
 .wm-resource.wm-double .wm-icon-text {
-  font-size: min(var(--wm-font-size, 14px), 14px);
+  font-size: min(var(--wm-font-size, 12px), 14px);
 }
 .wm-resource.wm-double .wm-ring {
   width: 16px;

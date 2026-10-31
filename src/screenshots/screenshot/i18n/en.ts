@@ -45,7 +45,7 @@ export const en: Messages = {
     pen: "Pen",
     highlight: "Highlighter",
     mosaic: "Mosaic",
-    picker: "Color picker · C copies HEX",
+    picker: "Color picker",
     text: "Text",
     undo: "Undo",
     save: "Save",
@@ -54,7 +54,7 @@ export const en: Messages = {
     done: "Done (copy)",
   },
   hints: {
-    dragToSelect: "Drag to select a region · Esc to cancel",
+    dragToSelect: "Drag to select a region",
     capturing: "Capturing screen…",
     working: "Working…",
     adjustRegion: "Drag the handles to resize · Drag inside to move · Pick a tool to annotate",

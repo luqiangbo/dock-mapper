@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useRef, useState, type WheelEvent as ReactWheelEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type WheelEvent as ReactWheelEvent,
+} from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invokeCommand } from "../../../api/ipc";
-import type {
-  PinWindowGeometry,
-  PinWindowGeometryRequest,
-} from "../../../api/screenshotTypes";
+import type { PinWindowGeometry, PinWindowGeometryRequest } from "../../../api/screenshotTypes";
 
 interface Anchor {
   ratioX: number;
@@ -36,9 +39,13 @@ export function zoomGeometryAtAnchor(
   };
 }
 
-export function usePinZoomController(pinId: string, enabled = true): {
+export function usePinZoomController(
+  pinId: string,
+  enabled = true,
+): {
   onWheel: (event: ReactWheelEvent<HTMLDivElement>) => void;
   zoomError: string;
+  reset: () => void;
 } {
   const [zoomError, setZoomError] = useState("");
   const geometry = useRef<PinWindowGeometry | null>(null);
@@ -93,22 +100,33 @@ export function usePinZoomController(pinId: string, enabled = true): {
         sequence.current = initial.sequence;
       })
       .catch(reportError);
-    void currentWindow.onMoved(({ payload }) => {
-      if (!geometry.current || frame.current !== null || inFlight.current || pending.current) return;
-      geometry.current = { ...geometry.current, x: payload.x, y: payload.y };
-    }).then((unlisten) => {
-      if (disposed.current) unlisten();
-      else unlisteners.push(unlisten);
-    });
-    void currentWindow.onResized(({ payload }) => {
-      if (!geometry.current || frame.current !== null || inFlight.current || pending.current) return;
-      const scale = payload.width / Math.max(1, baseSize.current.width);
-      geometry.current = { ...geometry.current, width: payload.width, height: payload.height, scale };
-      targetScale.current = scale;
-    }).then((unlisten) => {
-      if (disposed.current) unlisten();
-      else unlisteners.push(unlisten);
-    });
+    void currentWindow
+      .onMoved(({ payload }) => {
+        if (!geometry.current || frame.current !== null || inFlight.current || pending.current)
+          return;
+        geometry.current = { ...geometry.current, x: payload.x, y: payload.y };
+      })
+      .then((unlisten) => {
+        if (disposed.current) unlisten();
+        else unlisteners.push(unlisten);
+      });
+    void currentWindow
+      .onResized(({ payload }) => {
+        if (!geometry.current || frame.current !== null || inFlight.current || pending.current)
+          return;
+        const scale = payload.width / Math.max(1, baseSize.current.width);
+        geometry.current = {
+          ...geometry.current,
+          width: payload.width,
+          height: payload.height,
+          scale,
+        };
+        targetScale.current = scale;
+      })
+      .then((unlisten) => {
+        if (disposed.current) unlisten();
+        else unlisteners.push(unlisten);
+      });
     return () => {
       disposed.current = true;
       unlisteners.forEach((unlisten) => unlisten());
@@ -136,8 +154,14 @@ export function usePinZoomController(pinId: string, enabled = true): {
         return;
       }
       const bounds = event.currentTarget.getBoundingClientRect();
-      const ratioX = Math.min(1, Math.max(0, (event.clientX - bounds.left) / Math.max(1, bounds.width)));
-      const ratioY = Math.min(1, Math.max(0, (event.clientY - bounds.top) / Math.max(1, bounds.height)));
+      const ratioX = Math.min(
+        1,
+        Math.max(0, (event.clientX - bounds.left) / Math.max(1, bounds.width)),
+      );
+      const ratioY = Math.min(
+        1,
+        Math.max(0, (event.clientY - bounds.top) / Math.max(1, bounds.height)),
+      );
       const delta =
         event.deltaY *
         (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? Math.max(1, bounds.height) : 1);
@@ -161,11 +185,23 @@ export function usePinZoomController(pinId: string, enabled = true): {
         sequence.current,
       );
       geometry.current = { ...pending.current };
-      if (!inFlight.current && frame.current === null)
-        frame.current = requestAnimationFrame(flush);
+      if (!inFlight.current && frame.current === null) frame.current = requestAnimationFrame(flush);
     },
     [enabled, flush, reportError],
   );
 
-  return { onWheel, zoomError };
+  const apply = (request: PinWindowGeometryRequest) => {
+    if (!enabled) return;
+    sequence.current += 1;
+    targetScale.current = request.scale;
+    pending.current = { ...request, sequence: sequence.current };
+    geometry.current = pending.current;
+    if (!inFlight.current && frame.current === null) frame.current = requestAnimationFrame(flush);
+  };
+  const reset = () => {
+    const current = geometry.current;
+    if (!current) return;
+    apply({ ...current, width: baseSize.current.width, height: baseSize.current.height, scale: 1 });
+  };
+  return { onWheel, zoomError, reset };
 }

@@ -24,9 +24,7 @@ export function WidgetLayoutControls({
     <div className={styles.widgetLayoutControls}>
       <div className={styles.widgetLayoutHeading}>
         <Typography.Text strong>布局、尺寸与距离</Typography.Text>
-        <Button size="small" onClick={() => onChange({ ...DEFAULT_WIDGET_LAYOUT })}>
-          恢复默认布局
-        </Button>
+        <Button onClick={() => onChange({ ...DEFAULT_WIDGET_LAYOUT })}>恢复默认布局</Button>
       </div>
       <label className={styles.widgetLayoutField}>
         <span>布局模式</span>

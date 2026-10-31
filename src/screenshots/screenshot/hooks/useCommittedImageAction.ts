@@ -1,3 +1,5 @@
+import { emitTo } from "@tauri-apps/api/event";
+import { MAIN_EVENTS } from "../../../api/commands";
 import { useCallback, useRef, type MutableRefObject } from "react";
 import { runImageAction, ImageActionGate } from "../utils/imageActions";
 
@@ -26,8 +28,11 @@ export function useCommittedImageAction({
       await window.api.createScreenshotHistory(resultImageId);
       resultImageId = null;
     } catch (historyError) {
-      if (resultImageId) await window.api.releaseImage(resultImageId).catch(() => undefined);
-      console.error("保存截图历史失败", historyError);
+      if (resultImageId)
+        await window.api
+          .releaseImage(resultImageId)
+          .catch((error) => console.error("历史临时图片释放失败", error));
+      throw historyError;
     }
   }, []);
 
@@ -55,6 +60,13 @@ export function useCommittedImageAction({
         },
         releaseImage: window.api.releaseImage,
         onCommitted: persistHistory,
+        onCommittedError: async (message) => {
+          try {
+            await emitTo("main", MAIN_EVENTS.historyWriteFailed, message);
+          } catch (error) {
+            console.error("历史失败通知未送达", error);
+          }
+        },
         setBusy: (value) => {
           if (action === pendingAction.current) setBusy(value);
         },

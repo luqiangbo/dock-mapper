@@ -4,6 +4,7 @@ interface ImageActionOptions {
   consumeImage: (imageId: string) => Promise<unknown>;
   releaseImage?: (imageId: string) => Promise<void>;
   onCommitted?: (png: Uint8Array) => Promise<void>;
+  onCommittedError?: (message: string) => Promise<void> | void;
   setBusy: (busy: boolean) => void;
   onError: (message: string) => void;
   fallbackError: string;
@@ -37,10 +38,25 @@ export async function runImageAction(options: ImageActionOptions): Promise<boole
     const consumed = await options.consumeImage(imageId);
     imageId = null;
     if (consumed === false) return false;
-    await options.onCommitted?.(png);
+    try {
+      await options.onCommitted?.(png);
+    } catch (error) {
+      const message =
+        "截图操作已完成，但未保存到历史：" + readableActionError(error, "历史写入失败");
+      if (options.onCommittedError) {
+        try {
+          await options.onCommittedError(message);
+        } catch (notifyError) {
+          console.error("历史失败通知未送达", notifyError);
+        }
+      } else console.error(message);
+    }
     return true;
   } catch (error) {
-    if (imageId) await options.releaseImage?.(imageId).catch(() => undefined);
+    if (imageId)
+      await options
+        .releaseImage?.(imageId)
+        .catch((cleanupError) => console.error("截图临时图片释放失败", cleanupError));
     options.onError(readableActionError(error, options.fallbackError));
     return false;
   } finally {

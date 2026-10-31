@@ -44,7 +44,7 @@ function ScreenshotWindow() {
           colorLink: colors.foreground,
           colorBgElevated: themePalettes.dark["surface-base"],
           controlHeight: 32,
-          controlHeightSM: 30,
+          controlHeightSM: 24,
           borderRadius: 6,
           fontSize: 14,
           fontWeightStrong: 600,

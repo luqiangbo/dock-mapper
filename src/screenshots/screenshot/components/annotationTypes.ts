@@ -36,11 +36,9 @@ export type FillStyle = AnnotationFillStyle;
 export type Arrowhead = AnnotationArrowhead;
 export type Roughness = 0 | 1 | 2;
 export const DEFAULT_LINE_STYLE: LineStyle = "solid";
-const EXCALIDRAW_STROKE_WIDTHS = [1, 2, 3, 4, 6, 8, 12] as const;
+/** Preserve wheel-selected widths across preference saves and capture re-entry. */
 export function normalizeExcalidrawStrokeWidth(value: number): number {
-  return EXCALIDRAW_STROKE_WIDTHS.reduce((closest, candidate) =>
-    Math.abs(candidate - value) < Math.abs(closest - value) ? candidate : closest,
-  );
+  return Number.isFinite(value) ? Math.max(1, Math.min(32, value)) : 6;
 }
 export const LINE_STYLE_OPTIONS: ReadonlyArray<{ value: LineStyle; label: string }> = [
   { value: "solid", label: "实线" },
@@ -122,7 +120,24 @@ export interface TextStyle {
   strokeWidth: number;
 }
 
+export type NumberAppearance = "flat" | "raised" | "pixel";
+export type NumberPalette =
+  | "macaron"
+  | "pink"
+  | "mint"
+  | "sky"
+  | "lavender"
+  | "butter"
+  | "peach"
+  | "classic"
+  | "custom";
 export interface NumberStyle {
+  appearance?: NumberAppearance;
+  palette?: NumberPalette;
+  start?: number;
+  format?: import("./numberSequence").NumberSequenceFormat;
+  renumber?: boolean;
+  comment?: string;
   backgroundColor: string;
   textColor: string;
   size: number;
@@ -167,8 +182,10 @@ export const DEFAULT_TEXT_STYLE: TextStyle = {
   strokeWidth: 0,
 };
 export const DEFAULT_NUMBER_STYLE: NumberStyle = {
+  appearance: "flat",
+  palette: "custom",
   backgroundColor: "#e03131",
   textColor: "#ffffff",
-  size: 36,
+  size: 28,
   outline: { enabled: true, color: "#ffffff", width: 1 },
 };

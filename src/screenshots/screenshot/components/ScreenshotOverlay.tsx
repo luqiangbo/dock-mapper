@@ -33,6 +33,17 @@ import { useOcr } from "../hooks/useOcr";
 import { RequestGeneration } from "../hooks/requestGeneration";
 import { useCaptureLifecycle, type Selection } from "../hooks/useCaptureLifecycle";
 import { useEditorSceneState } from "../hooks/useEditorSceneState";
+import { invokeCommand } from "../../../api/ipc";
+import { decorateCapturePng } from "./outputDecoration";
+import { rememberRegion } from "./captureExperience";
+import { useSelectionDrag } from "../hooks/useSelectionDrag";
+import { moveCaptureSelection } from "./selectionDrag";
+import { useCaptureControls, useCaptureGuides } from "../hooks/useCaptureControls";
+import { useCapturedCursor } from "../hooks/useCapturedCursor";
+import { useElementCandidates } from "../hooks/useElementCandidates";
+import { useCaptureNavigation } from "../hooks/useCaptureNavigation";
+import { useCaptureLoupe } from "../hooks/useCaptureLoupe";
+import { fullScreenCandidate } from "./captureInteraction";
 import { useOverlayKeyboard } from "../hooks/useOverlayKeyboard";
 import {
   calculateSelectionCrop,
@@ -115,11 +126,7 @@ import {
   isNumberObjectInteractive,
   type NumberObject,
 } from "./numberObjects";
-import {
-  advanceWindowSelectionDragMode,
-  findWindowCandidate,
-  type WindowSelectionDragMode,
-} from "./windowCandidates";
+import { advanceWindowSelectionDragMode, type WindowSelectionDragMode } from "./windowCandidates";
 import {
   annotationFromGesture,
   type ActiveAnnotationGesture,
@@ -154,7 +161,6 @@ import {
 import ExcalidrawScreenshotEditor, { loadExcalidrawEditor } from "./ScreenshotEditorLoader";
 
 const MIN_SIZE = 8;
-let lastConfirmedSelection: Selection | null = null;
 
 interface NativeCanvasPoint {
   clientX: number;
@@ -270,6 +276,14 @@ function ScreenshotOverlay(): React.JSX.Element {
   const shotViewportRef = useRef<HTMLDivElement>(null);
   const fullImageRef = useRef<HTMLImageElement | null>(null);
   const colorSampleCanvas = useRef<HTMLCanvasElement | null>(null);
+  const ocrAutoCopy = useRef<number | null>(null);
+  const [capturedCursor, setCapturedCursor] =
+    useState<import("../../../api/screenshotTypes").FullScreenshot["cursor"]>(null);
+  const enteredEditAt = useRef(0);
+  const historyImageRef = useRef(false);
+  const captureScreenRef = useRef("");
+  const lastRegionSaveRef = useRef("");
+  const autoCopyRef = useRef<number | null>(null);
   const pickerZoomRef = useRef<HTMLCanvasElement>(null);
   const origin = useRef({ x: 0, y: 0 });
   const pendingWindowSelection = useRef<Selection | null>(null);
@@ -366,15 +380,6 @@ function ScreenshotOverlay(): React.JSX.Element {
     origin: RasterAnnotation;
     changed: boolean;
   } | null>(null);
-  const regionDragRef = useRef<
-    | ({
-        handle: ResizeHandle | "move";
-        startX: number;
-        startY: number;
-        origin: Selection;
-      } & SelectionRecropBaseline)
-    | null
-  >(null);
 
   const [dragging, setDragging] = useState(false);
   const [editorReady, setEditorReady] = useState(false);
@@ -481,7 +486,7 @@ function ScreenshotOverlay(): React.JSX.Element {
     color: "#ffffff",
     width: 1,
   });
-  const [adjustingRegion, setAdjustingRegion] = useState(false);
+
   const [pickerSample, setPickerSample] = useState<PickerSample | null>(null);
   const [pickerCopied, setPickerCopied] = useState(false);
   const [aspectPreset, setAspectPreset] = useState<AspectPreset>("free");
@@ -648,6 +653,7 @@ function ScreenshotOverlay(): React.JSX.Element {
     [reportToolbarPopup],
   );
   const {
+    experience,
     palette,
     paletteBusy,
     paletteLoading,
@@ -671,7 +677,13 @@ function ScreenshotOverlay(): React.JSX.Element {
 
   useEffect(() => {
     const sharedColor = annotationStyles.shape.stroke_color;
-    updateSharedColor(sharedColor);
+    if (experience.shared_color) updateSharedColor(sharedColor);
+    else {
+      updateVisual("frame", { color: annotationStyles.shape.stroke_color });
+      updateVisual("line", { color: annotationStyles.line.stroke_color });
+      updateVisual("arrow", { color: annotationStyles.arrow.stroke_color });
+      updateVisual("pen", { color: annotationStyles.pen.stroke_color });
+    }
     updateVisual("frame", { lineStyle: annotationStyles.shape.stroke_style });
     updateVisual("line", { lineStyle: annotationStyles.line.stroke_style });
     updateVisual("arrow", { lineStyle: annotationStyles.arrow.stroke_style });
@@ -682,7 +694,7 @@ function ScreenshotOverlay(): React.JSX.Element {
     });
     setTextStyle((current) => ({
       ...current,
-      color: sharedColor,
+      color: experience.shared_color ? sharedColor : annotationStyles.text.stroke_color,
       fontSize: annotationStyles.text.font_size,
       font: annotationStyles.text.font_family ?? "microsoft-yahei",
     }));
@@ -697,12 +709,29 @@ function ScreenshotOverlay(): React.JSX.Element {
       ...current,
       backgroundColor: annotationStyles.number.background_color,
       textColor: annotationStyles.number.stroke_color,
+      appearance: experience.number_appearance,
+      palette: experience.number_palette,
+      start: experience.number_start,
+      format: experience.number_format,
+      renumber: experience.number_renumber,
+      comment: experience.number_comment,
       size: annotationStyles.number.marker_size,
     }));
     setMosaicBlock(annotationStyles.mosaic.block_size);
     setMosaicEffect(annotationStyles.mosaic.mosaic_effect);
     setBlurRadius(annotationStyles.mosaic.blur_radius);
-  }, [annotationStyles, updateSharedColor, updateVisual]);
+  }, [
+    annotationStyles,
+    experience.shared_color,
+    experience.number_appearance,
+    experience.number_palette,
+    experience.number_start,
+    experience.number_format,
+    experience.number_renumber,
+    experience.number_comment,
+    updateSharedColor,
+    updateVisual,
+  ]);
 
   useEffect(() => {
     const key = isFrameAnnotationKind(tool)
@@ -776,13 +805,18 @@ function ScreenshotOverlay(): React.JSX.Element {
 
   const copyPickerSample = useCallback(
     async (sample: PickerSample) => {
+      const generation = captureGenerationRef.current;
       try {
         const copied = await window.api.copyText(formatPickerColor(sample, pickerFormat));
         if (!copied) throw new Error("剪贴板未接受颜色文本");
+        if (generation !== captureGenerationRef.current) return;
         setPickerCopied(true);
-        window.setTimeout(() => setPickerCopied(false), 900);
+        window.setTimeout(() => {
+          if (generation === captureGenerationRef.current) setPickerCopied(false);
+        }, 900);
       } catch (cause) {
-        setError(`颜色复制失败：${cause instanceof Error ? cause.message : String(cause)}`);
+        if (generation === captureGenerationRef.current)
+          setError(`颜色复制失败：${cause instanceof Error ? cause.message : String(cause)}`);
         return;
       }
       await mutatePalette(() => paletteApi.record(`#${sample.hex}`), "最近颜色保存失败");
@@ -792,17 +826,22 @@ function ScreenshotOverlay(): React.JSX.Element {
 
   const copyPickerHex = useCallback(async () => {
     if (!pickerSample) return;
+    const generation = captureGenerationRef.current;
     try {
-      const copied = await window.api.copyText(pickerSample.hex);
+      const copied = await window.api.copyText(formatPickerColor(pickerSample, pickerFormat));
       if (!copied) throw new Error("剪贴板未接受颜色文本");
+      if (generation !== captureGenerationRef.current) return;
       setPickerCopied(true);
-      window.setTimeout(() => setPickerCopied(false), 900);
+      window.setTimeout(() => {
+        if (generation === captureGenerationRef.current) setPickerCopied(false);
+      }, 900);
     } catch (cause) {
-      setError(`颜色复制失败：${cause instanceof Error ? cause.message : String(cause)}`);
+      if (generation === captureGenerationRef.current)
+        setError(`颜色复制失败：${cause instanceof Error ? cause.message : String(cause)}`);
       return;
     }
     await mutatePalette(() => paletteApi.record(`#${pickerSample.hex}`), "最近颜色保存失败");
-  }, [mutatePalette, pickerSample, setError]);
+  }, [mutatePalette, pickerSample, pickerFormat, setError]);
 
   const copyPaletteColor = useCallback(
     async (color: string) => {
@@ -873,7 +912,7 @@ function ScreenshotOverlay(): React.JSX.Element {
     phase === "editing" &&
     shotReady &&
     !busy &&
-    (!tool || (tool === "select" && selectedIds.length === 0));
+    (!tool || (tool === "select" && selectedIds.length === 0 && editorSelection.count === 0));
   const textObjectsInteractive = isTextObjectInteractive(tool);
   const selectionSizePanel = (() => {
     const image = fullImageRef.current;
@@ -924,7 +963,7 @@ function ScreenshotOverlay(): React.JSX.Element {
     [],
   );
 
-  const exportPng = useCallback(async (): Promise<Uint8Array> => {
+  const exportRawPng = useCallback(async (): Promise<Uint8Array> => {
     if (editorReady && excalidrawEditorRef.current) return excalidrawEditorRef.current.exportPng();
     const canvas = shotRef.current;
     if (!canvas) throw new Error("No canvas");
@@ -969,6 +1008,27 @@ function ScreenshotOverlay(): React.JSX.Element {
     });
     return new Uint8Array(await blob.arrayBuffer());
   }, [editorReady, editorStatus, sceneElements, selection?.width]);
+
+  const cursorCapture = useCapturedCursor({
+    cursor: capturedCursor,
+    generation: captureGenerationRef.current,
+    enabled: phase === "selecting" || phase === "editing",
+    blocked: toolbarPopupOpen,
+    imageWidth: fullImageRef.current?.naturalWidth ?? window.innerWidth,
+    imageHeight: fullImageRef.current?.naturalHeight ?? window.innerHeight,
+    selection,
+    onError: setError,
+  });
+  const exportPng = async () =>
+    decorateCapturePng(
+      await cursorCapture.composite(
+        await exportRawPng(),
+        selection && fullImageRef.current
+          ? selectionToImageCrop(selection, fullImageRef.current)
+          : null,
+      ),
+      experience,
+    );
 
   const exportOcrPng = useCallback(async (): Promise<Uint8Array> => {
     const canvas = shotRef.current;
@@ -1044,6 +1104,31 @@ function ScreenshotOverlay(): React.JSX.Element {
     recognizeSelection();
   }, [recognizeSelection]);
 
+  useEffect(() => {
+    if (ocrAutoCopy.current !== captureGenerationRef.current || !ocrPanel.result || ocrRunning)
+      return;
+    ocrAutoCopy.current = null;
+    const generation = captureGenerationRef.current;
+    const text = ocrPanel.result.text;
+    if (!text.trim()) {
+      setError("未识别到文字。");
+      return;
+    }
+    void window.api
+      .copyText(text)
+      .then((copied) => {
+        if (generation !== captureGenerationRef.current) return;
+        if (!copied) throw new Error("剪贴板未接受文字");
+        setOcrCopyState("copied");
+      })
+      .catch((error) => {
+        if (generation === captureGenerationRef.current) {
+          setOcrCopyState("failed");
+          setError(`文字复制失败：${String(error)}`);
+        }
+      });
+  }, [ocrPanel.result, ocrRunning, setError]);
+
   const closeOcr = useCallback(() => {
     dismissOcr();
     setOcrCopyState("idle");
@@ -1109,7 +1194,7 @@ function ScreenshotOverlay(): React.JSX.Element {
     reset();
     void window.api
       .closeOverlay()
-      .catch((error) => fail(`关闭截图失败，请按 Esc 重试：${String(error)}`, "selecting"));
+      .catch((error) => fail(`关闭截图失败，请重试：${String(error)}`, "selecting"));
   }, [cancelObjectMutation, dismissOcr, reset, fail]);
 
   const screenToCanvas = useCallback(
@@ -1242,7 +1327,13 @@ function ScreenshotOverlay(): React.JSX.Element {
     label: overlayLabel,
     onCapture: async (shot, isCurrent) => {
       pendingAction.current += 1;
+      historyImageRef.current = false;
       captureGenerationRef.current = shot.generation;
+      setCapturedCursor(shot.cursor ?? null);
+      captureScreenRef.current = String(shot.screenId ?? shot.overlayLabel);
+      lastRegionSaveRef.current = "";
+      autoCopyRef.current = null;
+      ocrAutoCopy.current = null;
       setEditorReady(false);
       setEditorHistoryState(EMPTY_EDITOR_HISTORY);
       setEditorStatus("loading");
@@ -1260,7 +1351,7 @@ function ScreenshotOverlay(): React.JSX.Element {
       setDragging(false);
       setSelection(null);
       setWindowCandidates(shot.windowCandidates ?? []);
-      setHoveredWindow(null);
+      setHoveredWindow(fullScreenCandidate(window.innerWidth, window.innerHeight));
       setTool(null);
       setPickerSample(null);
       resetScene();
@@ -1268,6 +1359,9 @@ function ScreenshotOverlay(): React.JSX.Element {
       resetHistory();
       fullImageRef.current = img;
       imageScaleRef.current = syncImageScale(img);
+      if (!bgRef.current)
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      if (!isCurrent()) return;
       const canvas = bgRef.current;
       if (!canvas) throw new Error("截图背景画布尚未挂载");
       canvas.width = shot.imageWidth;
@@ -1277,6 +1371,7 @@ function ScreenshotOverlay(): React.JSX.Element {
       captureReady();
       await waitForOverlayPaint();
       if (!isCurrent()) return;
+      if (shot.initialSelection) enterEditMode(clampSelection(shot.initialSelection));
     },
     onError: (message) => fail(message, "selecting"),
   });
@@ -1291,7 +1386,7 @@ function ScreenshotOverlay(): React.JSX.Element {
   }, [selection, phase, paintBackground]);
 
   const enterEditMode = useCallback(
-    (rect: Selection) => {
+    (rect: Selection, allowDoubleClickCopy = false) => {
       const image = fullImageRef.current;
       const bg = bgRef.current;
       if (!image || !bg) {
@@ -1299,15 +1394,28 @@ function ScreenshotOverlay(): React.JSX.Element {
         return;
       }
 
-      const clamped = clampSelection(rect);
-      lastConfirmedSelection = { ...clamped };
+      const clamped = moveCaptureSelection(
+        clampSelection(rect),
+        0,
+        0,
+        image.naturalWidth,
+        image.naturalHeight,
+        window.innerWidth,
+        window.innerHeight,
+      );
+      enteredEditAt.current = allowDoubleClickCopy ? performance.now() : -Infinity;
+
       imageScaleRef.current = syncImageScale(image);
 
       beginEditing();
       setEditorReady(false);
       setEditorStatus("loading");
       resetScene();
-      setTool("select");
+      const initialTool =
+        experience.remember_tool && toolbarTools.some((item) => item.id === experience.last_tool)
+          ? (experience.last_tool as AnnotTool)
+          : "select";
+      setTool(initialTool);
       sceneClipboardRef.current = [];
       linearCreationRef.current = null;
       marqueeRef.current = null;
@@ -1321,8 +1429,10 @@ function ScreenshotOverlay(): React.JSX.Element {
       setHoveredWindow(null);
       paintBackground(clamped, clamped.height, 0, true);
 
-      // Crop synchronously from the already-frozen image — unlock tools immediately after
+      // A later capture must not receive this crop callback.
+      const generation = captureGenerationRef.current;
       requestAnimationFrame(() => {
+        if (generation !== captureGenerationRef.current || fullImageRef.current !== image) return;
         const canvas = shotRef.current;
         if (!canvas) {
           setError("Editor canvas missing");
@@ -1363,7 +1473,17 @@ function ScreenshotOverlay(): React.JSX.Element {
         setError(null);
       });
     },
-    [beginEditing, cancelObjectMutation, paintBackground, resetHistory, resetScene, setSelection],
+    [
+      beginEditing,
+      cancelObjectMutation,
+      paintBackground,
+      resetHistory,
+      resetScene,
+      setSelection,
+      experience.remember_tool,
+      experience.last_tool,
+      toolbarTools,
+    ],
   );
 
   useLayoutEffect(() => {
@@ -1422,6 +1542,15 @@ function ScreenshotOverlay(): React.JSX.Element {
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
+      next = moveCaptureSelection(
+        next,
+        0,
+        0,
+        image.naturalWidth,
+        image.naturalHeight,
+        window.innerWidth,
+        window.innerHeight,
+      );
       const crop = selectionToImageCrop(next, image);
       if (canvas.width !== crop.outputWidth) canvas.width = crop.outputWidth;
       if (canvas.height !== crop.outputHeight) canvas.height = crop.outputHeight;
@@ -1479,28 +1608,77 @@ function ScreenshotOverlay(): React.JSX.Element {
     [paintBackground, setSelection],
   );
 
-  const beginRegionDrag = useCallback(
-    (handle: ResizeHandle | "move", event: { clientX: number; clientY: number }) => {
-      const baseline = createRecropBaseline();
-      if (!selection || !baseline) return;
-
-      regionDragRef.current = {
-        handle,
-        startX: event.clientX,
-        startY: event.clientY,
-        origin: selection,
-        ...baseline,
-      };
-      // The raster changes size, so previous ImageData snapshots no longer fit.
-      resetHistory();
-      cancelObjectMutation();
-      setSelectedTextId(null);
-      setSelectedNumberId(null);
-      setSelectedRasterId(null);
-      setAdjustingRegion(true);
+  const selectionDrag = useSelectionDrag({
+    enabled: phase === "editing" && shotReady && !busy && editorStatus !== "loading",
+    blocked:
+      toolbarPopupOpen ||
+      Boolean(textEditor) ||
+      Boolean(arrowLabelEditor) ||
+      Boolean(excalidrawEditorRef.current?.isEditingText()),
+    generation: captureGenerationRef.current,
+    selection,
+    createBaseline: createRecropBaseline,
+    resolve: (origin, handle, dx, dy) => {
+      const image = fullImageRef.current;
+      if (!image) return origin;
+      if (handle === "move")
+        return moveCaptureSelection(
+          origin,
+          dx,
+          dy,
+          image.naturalWidth,
+          image.naturalHeight,
+          window.innerWidth,
+          window.innerHeight,
+        );
+      return aspectRatio && !["n", "e", "s", "w"].includes(handle)
+        ? resizeSelectionWithAspectRatio(
+            origin,
+            handle as "nw" | "ne" | "sw" | "se",
+            dx,
+            dy,
+            aspectRatio,
+            image.naturalWidth,
+            image.naturalHeight,
+            window.innerWidth,
+            window.innerHeight,
+          )
+        : resizeRect(origin, handle, dx, dy);
     },
-    [cancelObjectMutation, createRecropBaseline, resetHistory, selection],
-  );
+    commit: recropSelection,
+    clickBlank: () => excalidrawEditorRef.current?.clearSelection(),
+  });
+  const adjustingRegion = Boolean(selectionDrag.preview);
+  const viewSelection = selectionDrag.preview ?? selection;
+  useLayoutEffect(() => {
+    const next = selectionDrag.preview ?? selection,
+      image = fullImageRef.current,
+      canvas = shotRef.current;
+    if (phase !== "editing" || !next || !image || !canvas || !shotReady) return;
+    const crop = selectionToImageCrop(next, image);
+    if (canvas.width !== crop.outputWidth) canvas.width = crop.outputWidth;
+    if (canvas.height !== crop.outputHeight) canvas.height = crop.outputHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    canvas.style.width = next.width + "px";
+    canvas.style.height = next.height + "px";
+    canvas.style.left = "0px";
+    canvas.style.top = "0px";
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(
+      image,
+      crop.sourceX,
+      crop.sourceY,
+      crop.sourceWidth,
+      crop.sourceHeight,
+      0,
+      0,
+      crop.outputWidth,
+      crop.outputHeight,
+    );
+    paintBackground(next, next.height, 0, true);
+  }, [selectionDrag.preview, selection, phase, shotReady, paintBackground]);
 
   const applySelectionOutputSize = useCallback(
     (requested: Partial<OutputSize>) => {
@@ -1642,6 +1820,7 @@ function ScreenshotOverlay(): React.JSX.Element {
     },
     clearSelection: () => {
       setSelectedIds([]);
+      excalidrawEditorRef.current?.clearSelection();
     },
     returnToSelect: () => {
       setTool("select");
@@ -1656,6 +1835,21 @@ function ScreenshotOverlay(): React.JSX.Element {
     cancel: cancelOverlay,
     undo: () => excalidrawEditorRef.current?.undo(),
     redo: () => excalidrawEditorRef.current?.redo(),
+    save: () => {
+      void runCommittedImageAction(window.api.saveImage, "保存截图失败");
+    },
+    pin: () => {
+      void runCommittedImageAction(window.api.pinImage, "贴图失败");
+    },
+    ocr: () => {
+      ocrAutoCopy.current = captureGenerationRef.current;
+      runOcr();
+    },
+    changeTool: (next) => {
+      if (isFrameAnnotationKind(next)) setShapeKind(next);
+      setTool(next as AnnotTool);
+      excalidrawEditorRef.current?.setTool(next as AnnotTool);
+    },
     confirm: () => {
       void runCommittedImageAction(window.api.copyImage, "复制截图失败");
     },
@@ -1922,31 +2116,6 @@ function ScreenshotOverlay(): React.JSX.Element {
         return;
       }
 
-      const regionDrag = regionDragRef.current;
-      if (regionDrag) {
-        const dx = event.clientX - regionDrag.startX;
-        const dy = event.clientY - regionDrag.startY;
-        recropSelection(
-          regionDrag.handle === "move"
-            ? moveRect(regionDrag.origin, dx, dy)
-            : aspectRatio && !["n", "e", "s", "w"].includes(regionDrag.handle)
-              ? resizeSelectionWithAspectRatio(
-                  regionDrag.origin,
-                  regionDrag.handle as "nw" | "ne" | "sw" | "se",
-                  dx,
-                  dy,
-                  aspectRatio,
-                  fullImageRef.current?.naturalWidth ?? window.innerWidth,
-                  fullImageRef.current?.naturalHeight ?? window.innerHeight,
-                  window.innerWidth,
-                  window.innerHeight,
-                )
-              : resizeRect(regionDrag.origin, regionDrag.handle, dx, dy),
-          regionDrag,
-        );
-        return;
-      }
-
       const rasterTransform = rasterTransformRef.current;
       if (rasterTransform && rasterTransform.pointerId === event.pointerId) {
         const dx = (event.clientX - rasterTransform.startX) * scaleX;
@@ -2106,10 +2275,6 @@ function ScreenshotOverlay(): React.JSX.Element {
         if (changed) setSceneElements((previous) => resolveSceneBindings(previous));
         commitObjectMutation(changed);
       }
-      if (regionDragRef.current) {
-        regionDragRef.current = null;
-        setAdjustingRegion(false);
-      }
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -2121,25 +2286,6 @@ function ScreenshotOverlay(): React.JSX.Element {
       window.removeEventListener("pointercancel", onUp);
     };
   }, [aspectRatio, selection, recropSelection, screenToCanvas, commitObjectMutation]);
-
-  useEffect(() => {
-    const repeatLastSelection = (event: KeyboardEvent): void => {
-      if (
-        phase !== "selecting" ||
-        busy ||
-        event.ctrlKey ||
-        event.altKey ||
-        event.metaKey ||
-        event.key.toLowerCase() !== "r" ||
-        !lastConfirmedSelection
-      )
-        return;
-      event.preventDefault();
-      enterEditMode(clampSelection(lastConfirmedSelection));
-    };
-    window.addEventListener("keydown", repeatLastSelection);
-    return () => window.removeEventListener("keydown", repeatLastSelection);
-  }, [busy, enterEditMode, phase]);
 
   useEffect(() => {
     const adjustWindowSelection = (event: KeyboardEvent): void => {
@@ -2192,6 +2338,16 @@ function ScreenshotOverlay(): React.JSX.Element {
     [overlayLabel],
   );
 
+  const resolveCandidate = useElementCandidates({
+    enabled: phase === "selecting" && !dragging && !toolbarPopupOpen,
+    generation: captureGenerationRef.current,
+    mode: experience.detection,
+    windows: windowCandidates,
+    onCandidate: (candidate) => {
+      if (phase === "selecting" && !draggingRef.current)
+        setHoveredWindow(candidate ?? fullScreenCandidate(window.innerWidth, window.innerHeight));
+    },
+  });
   const flushBackgroundMove = useCallback(() => {
     if (backgroundMoveFrame.current !== null) {
       cancelAnimationFrame(backgroundMoveFrame.current);
@@ -2203,10 +2359,10 @@ function ScreenshotOverlay(): React.JSX.Element {
 
     const point = clampPoint(pending.clientX, pending.clientY);
     if (!draggingRef.current) {
-      const candidate = findWindowCandidate(windowCandidates, point.x, point.y);
+      const candidate = resolveCandidate(point.x, point.y);
       const next = candidate
         ? { x: candidate.x, y: candidate.y, width: candidate.width, height: candidate.height }
-        : null;
+        : fullScreenCandidate(window.innerWidth, window.innerHeight);
       setHoveredWindow((current) => {
         if (
           current?.x === next?.x &&
@@ -2245,7 +2401,7 @@ function ScreenshotOverlay(): React.JSX.Element {
     setSelection(nextSelection);
     if (previousMode === "candidate")
       reportSelectionTrace("manual-selection-start", point, nextSelection, candidateId, "manual");
-  }, [aspectRatio, phase, reportSelectionTrace, setSelection, windowCandidates]);
+  }, [aspectRatio, phase, reportSelectionTrace, setSelection, windowCandidates, resolveCandidate]);
 
   const onBgPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -2262,10 +2418,10 @@ function ScreenshotOverlay(): React.JSX.Element {
       setDragging(true);
       const point = clampPoint(event.clientX, event.clientY);
       origin.current = point;
-      const candidate = findWindowCandidate(windowCandidates, point.x, point.y);
+      const candidate = resolveCandidate(point.x, point.y);
       const candidateSelection = candidate
         ? { x: candidate.x, y: candidate.y, width: candidate.width, height: candidate.height }
-        : null;
+        : fullScreenCandidate(window.innerWidth, window.innerHeight);
       pendingWindowSelection.current = candidateSelection;
       pendingWindowCandidateIdRef.current = candidate?.id ?? null;
       windowSelectionDragModeRef.current = candidateSelection ? "candidate" : "manual";
@@ -2279,7 +2435,7 @@ function ScreenshotOverlay(): React.JSX.Element {
         windowSelectionDragModeRef.current,
       );
     },
-    [busy, phase, reportSelectionTrace, setSelection, windowCandidates],
+    [busy, phase, reportSelectionTrace, setSelection, windowCandidates, resolveCandidate],
   );
 
   const onBgPointerMove = useCallback(
@@ -2324,7 +2480,7 @@ function ScreenshotOverlay(): React.JSX.Element {
         completedMode,
       );
       if (current && current.width >= MIN_SIZE && current.height >= MIN_SIZE) {
-        enterEditMode(clampSelection(current));
+        enterEditMode(clampSelection(current), completedMode === "candidate");
       } else {
         setSelection(null);
       }
@@ -2467,7 +2623,7 @@ function ScreenshotOverlay(): React.JSX.Element {
       if (!tool) {
         if (canAdjustRegion) {
           event.preventDefault();
-          beginRegionDrag("move", event);
+          // Pointer-based region gestures are handled by the viewport host.
         }
         return false;
       }
@@ -2652,7 +2808,6 @@ function ScreenshotOverlay(): React.JSX.Element {
       highlightOpacity,
       mosaicBlock,
       canAdjustRegion,
-      beginRegionDrag,
       cancelPickerSample,
       samplePickerColor,
       copyPickerSample,
@@ -3238,11 +3393,12 @@ function ScreenshotOverlay(): React.JSX.Element {
       selectedRaster?.kind ?? (selectedText ? "text" : selectedNumber ? "number" : styleTool);
     const visualTool = visualToolFor(styleSource);
     const usesSharedColor =
-      isFrameAnnotationKind(styleSource) ||
-      styleSource === "line" ||
-      styleSource === "arrow" ||
-      styleSource === "pen" ||
-      styleSource === "text";
+      experience.shared_color &&
+      (isFrameAnnotationKind(styleSource) ||
+        styleSource === "line" ||
+        styleSource === "arrow" ||
+        styleSource === "pen" ||
+        styleSource === "text");
     if (changes.strokeColor !== undefined) {
       if (usesSharedColor) {
         updateSharedColor(changes.strokeColor);
@@ -3436,8 +3592,191 @@ function ScreenshotOverlay(): React.JSX.Element {
     }
   };
 
+  useCaptureNavigation({
+    enabled: (phase === "selecting" || phase === "editing") && !busy && !toolbarPopupOpen,
+    generation: captureGenerationRef.current,
+    screen: captureScreenRef.current,
+    experience,
+    scaleX: imageScaleRef.current.scaleX,
+    scaleY: imageScaleRef.current.scaleY,
+    enter: enterEditMode,
+    loadImage: (image) => {
+      historyImageRef.current = true;
+      setCapturedCursor(null);
+      fullImageRef.current = image;
+      enterEditMode(fullScreenCandidate(window.innerWidth, window.innerHeight));
+    },
+    onError: setError,
+  });
+  useEffect(() => {
+    if (phase !== "editing" || !selection || !experience.region_limit || historyImageRef.current)
+      return;
+    const next = {
+      x: Math.round(selection.x * imageScaleRef.current.scaleX),
+      y: Math.round(selection.y * imageScaleRef.current.scaleY),
+      width: Math.round(selection.width * imageScaleRef.current.scaleX),
+      height: Math.round(selection.height * imageScaleRef.current.scaleY),
+      physical: true,
+      screen: captureScreenRef.current,
+    };
+    const key = JSON.stringify(next);
+    if (lastRegionSaveRef.current === key) return;
+    const timer = window.setTimeout(() => {
+      lastRegionSaveRef.current = key;
+      void updateScreenshotConfig(
+        {
+          experience: {
+            regions: rememberRegion(experience.regions, next, experience.region_limit),
+          },
+        },
+        "截图区域保存失败",
+      );
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [phase, selection, experience, updateScreenshotConfig]);
+  useEffect(() => {
+    if (
+      phase !== "editing" ||
+      !experience.remember_tool ||
+      !tool ||
+      tool === "select" ||
+      tool === experience.last_tool
+    )
+      return;
+    const timer = window.setTimeout(() => {
+      void updateScreenshotConfig({ experience: { last_tool: tool } }, "上次工具保存失败");
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [tool, phase, experience, updateScreenshotConfig]);
+  useEffect(() => {
+    if (autoCopyRef.current !== captureGenerationRef.current || !shotReady || !editorReady || busy)
+      return;
+    autoCopyRef.current = null;
+    void runCommittedImageAction(window.api.copyImage, "复制截图失败");
+  }, [shotReady, editorReady, busy, runCommittedImageAction]);
+
+  useCaptureControls({
+    enabled: phase === "editing" && !busy && editorReady,
+    generation: captureGenerationRef.current,
+    blocked:
+      toolbarPopupOpen ||
+      Boolean(textEditor) ||
+      Boolean(arrowLabelEditor) ||
+      (excalidrawEditorRef.current?.isEditingText() ?? false),
+    selected: selectedIds.length > 0 || editorSelection.count > 0,
+    tool,
+    selectedTool: editorSelection.tool,
+    settings: displayedToolSettings,
+    selection,
+    ratio: aspectRatio ? aspectRatio.width / aspectRatio.height : null,
+    getImage: () => fullImageRef.current,
+    createBaseline: createRecropBaseline,
+    recrop: recropSelection,
+    update: updateToolSettings,
+    apply: (patch, commit) => excalidrawEditorRef.current?.applyStyle(patch, commit),
+    experience,
+  });
+  const guidesRef = useCaptureGuides(
+    experience.guides && (phase === "selecting" || adjustingRegion),
+  );
+  const captureLoupe = useCaptureLoupe({
+    enabled: (phase === "selecting" || adjustingRegion) && !busy && !toolbarPopupOpen,
+    generation: captureGenerationRef.current,
+    image: fullImageRef.current,
+    initialPoint: capturedCursor
+      ? {
+          x: (capturedCursor.sampleX ?? capturedCursor.x) / imageScaleRef.current.scaleX,
+          y: (capturedCursor.sampleY ?? capturedCursor.y) / imageScaleRef.current.scaleY,
+        }
+      : undefined,
+    format: pickerFormat,
+    grid: experience.grid,
+    magnification: experience.zoom,
+    hints: experience.hints,
+    copy: async (sample) => {
+      const generation = captureGenerationRef.current;
+      const copied = await window.api.copyText(formatPickerColor(sample, pickerFormat));
+      if (!copied) throw new Error("剪贴板未接受颜色文本");
+      if (generation !== captureGenerationRef.current) return;
+      await mutatePalette(() => paletteApi.record(`#${sample.hex}`), "最近颜色保存失败");
+    },
+    changeFormat: (format) => {
+      void updateScreenshotConfig({ color_copy_format: format }, "取色格式保存失败");
+    },
+    onError: setError,
+  });
+
   return (
-    <div className="screenshot-overlay">
+    <div
+      className="screenshot-overlay"
+      data-region-drag={selectionDrag.cursor ? "true" : undefined}
+      style={{ cursor: selectionDrag.cursor ?? undefined }}
+      onMouseDownCapture={(event) => {
+        if (
+          selectionDrag.suppressDoubleClick() ||
+          event.detail < 2 ||
+          event.button !== 0 ||
+          phase !== "editing" ||
+          busy ||
+          (event.target instanceof Element &&
+            event.target.closest(".wx-toolbar,.tool-options,input,textarea,[contenteditable=true]"))
+        )
+          return;
+        if (performance.now() - enteredEditAt.current < 650) {
+          event.preventDefault();
+          event.stopPropagation();
+          autoCopyRef.current = captureGenerationRef.current;
+          if (editorReady && shotReady) {
+            autoCopyRef.current = null;
+            void runCommittedImageAction(window.api.copyImage, "复制截图失败");
+          }
+        }
+      }}
+    >
+      {cursorCapture.preview}
+      {experience.guides && (phase === "selecting" || adjustingRegion) && (
+        <div
+          ref={guidesRef}
+          style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 25 }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              left: "var(--guide-x, 50%)",
+              top: 0,
+              bottom: 0,
+              borderLeft: "1px dashed #45b8ff",
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              top: "var(--guide-y, 50%)",
+              left: 0,
+              right: 0,
+              borderTop: "1px dashed #45b8ff",
+            }}
+          />
+        </div>
+      )}
+      {captureLoupe}
+      {phase === "selecting" && experience.hints && (
+        <div
+          style={{
+            position: "fixed",
+            left: 16,
+            bottom: 16,
+            color: "white",
+            background: "rgba(0,0,0,.75)",
+            padding: "8px 12px",
+            borderRadius: 6,
+            pointerEvents: "none",
+            zIndex: 50,
+          }}
+        >
+          单击选择 · 拖拽框选
+        </div>
+      )}
       <canvas
         ref={bgRef}
         className="screenshot-canvas"
@@ -3447,7 +3786,8 @@ function ScreenshotOverlay(): React.JSX.Element {
         onPointerUp={onBgPointerUp}
         onPointerCancel={onBgPointerCancel}
         onPointerLeave={() => {
-          if (!draggingRef.current) setHoveredWindow(null);
+          if (!draggingRef.current)
+            setHoveredWindow(fullScreenCandidate(window.innerWidth, window.innerHeight));
         }}
       />
 
@@ -3455,11 +3795,39 @@ function ScreenshotOverlay(): React.JSX.Element {
         <div
           ref={shotViewportRef}
           className="shot-viewport shot-viewport--excalidraw"
+          data-region-move={
+            !actionsLocked &&
+            (selectionDrag.space || ((tool === "select" || !tool) && selectionDrag.moveHovered))
+              ? "true"
+              : undefined
+          }
+          onPointerMoveCapture={(event) => {
+            if (event.buttons) return;
+            selectionDrag.hoverMove(
+              !actionsLocked &&
+                (selectionDrag.spaceHeld() || tool === "select" || !tool) &&
+                !excalidrawEditorRef.current?.hitTest(event.clientX, event.clientY),
+            );
+          }}
+          onPointerLeave={() => selectionDrag.hoverMove(false)}
+          onPointerDownCapture={(event) => {
+            if (
+              event.target instanceof Element &&
+              event.target.closest('input,textarea,[contenteditable="true"],button,.ant-popover')
+            )
+              return;
+            if (
+              selectionDrag.spaceHeld() ||
+              ((tool === "select" || !tool) &&
+                !excalidrawEditorRef.current?.hitTest(event.clientX, event.clientY))
+            )
+              selectionDrag.start("move", event);
+          }}
           style={{
-            left: selection.x,
-            top: selection.y,
-            width: selection.width,
-            height: shotViewportHeight,
+            left: viewSelection?.x ?? selection.x,
+            top: viewSelection?.y ?? selection.y,
+            width: viewSelection?.width ?? selection.width,
+            height: viewSelection?.height ?? shotViewportHeight,
           }}
         >
           <canvas
@@ -3470,77 +3838,90 @@ function ScreenshotOverlay(): React.JSX.Element {
               height: displayHeight,
             }}
           />
-          <Suspense fallback={<div className="excalidraw-editor-loading">标注工具加载中…</div>}>
-            {shotReady && shotBaseRef.current ? (
-              <ExcalidrawScreenshotEditor
-                ref={excalidrawEditorRef}
-                baseCanvas={shotBaseRef.current}
-                displayCanvas={shotRef.current}
-                captureKey={`capture-${captureGenerationRef.current}`}
-                crop={editorCrop}
-                strokeColor={
-                  tool === "highlight"
-                    ? visuals.highlight.color
-                    : tool === "text"
-                      ? textStyle.color
-                      : strokeColor
-                }
-                strokeWidth={
-                  tool === "pen" || (tool === "select" && editorSelection.tool === "pen")
-                    ? penWidth
-                    : tool === "highlight"
-                      ? highlightWidth
-                      : strokeWidth
-                }
-                fillColor={fillColor}
-                fillStyle={fillStyle}
-                lineStyle={lineStyle}
-                roughness={roughness}
-                roundness={roundness}
-                opacity={tool === "highlight" ? Math.round(highlightOpacity * 100) : opacity}
-                arrowStyle={arrowStyle}
-                startArrowhead={startArrowhead}
-                endArrowhead={endArrowhead}
-                textStyle={textStyle}
-                numberStyle={numberStyle}
-                pickerFormat={pickerFormat}
-                pickerKeyboardBlocked={toolbarPopupOpen}
-                onHistoryChange={setEditorHistoryState}
-                onCopyColor={async (color, formatted) => {
-                  const generation = captureGenerationRef.current;
-                  const action = pendingAction.current;
-                  const copied = await window.api.copyText(formatted);
-                  if (!copied) throw new Error("剪贴板写入失败，请重试");
-                  if (
-                    generation !== captureGenerationRef.current ||
-                    action !== pendingAction.current
-                  )
-                    return;
-                  const saved = await mutatePalette(() => {
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: selection.width,
+              height: selection.height,
+              transform: selectionDrag.preview
+                ? `translate(${selection.x - selectionDrag.preview.x}px, ${selection.y - selectionDrag.preview.y}px)`
+                : undefined,
+              pointerEvents: adjustingRegion ? "none" : undefined,
+            }}
+          >
+            <Suspense fallback={<div className="excalidraw-editor-loading">标注工具加载中…</div>}>
+              {shotReady && shotBaseRef.current ? (
+                <ExcalidrawScreenshotEditor
+                  ref={excalidrawEditorRef}
+                  baseCanvas={shotBaseRef.current}
+                  displayCanvas={adjustingRegion ? null : shotRef.current}
+                  captureKey={`capture-${captureGenerationRef.current}`}
+                  crop={editorCrop}
+                  strokeColor={
+                    tool === "highlight"
+                      ? visuals.highlight.color
+                      : tool === "text"
+                        ? textStyle.color
+                        : strokeColor
+                  }
+                  strokeWidth={
+                    tool === "pen" || (tool === "select" && editorSelection.tool === "pen")
+                      ? penWidth
+                      : tool === "highlight"
+                        ? highlightWidth
+                        : strokeWidth
+                  }
+                  fillColor={fillColor}
+                  fillStyle={fillStyle}
+                  lineStyle={lineStyle}
+                  roughness={roughness}
+                  roundness={roundness}
+                  opacity={tool === "highlight" ? Math.round(highlightOpacity * 100) : opacity}
+                  arrowStyle={arrowStyle}
+                  startArrowhead={startArrowhead}
+                  endArrowhead={endArrowhead}
+                  textStyle={textStyle}
+                  numberStyle={numberStyle}
+                  pickerFormat={pickerFormat}
+                  pickerKeyboardBlocked={toolbarPopupOpen}
+                  onHistoryChange={setEditorHistoryState}
+                  onCopyColor={async (color, formatted) => {
+                    const generation = captureGenerationRef.current;
+                    const action = pendingAction.current;
+                    const copied = await window.api.copyText(formatted);
+                    if (!copied) throw new Error("剪贴板写入失败，请重试");
                     if (
                       generation !== captureGenerationRef.current ||
                       action !== pendingAction.current
                     )
-                      throw new Error("截图已结束");
-                    return paletteApi.record(color);
-                  }, "最近颜色保存失败");
-                  if (!saved) throw new Error("颜色已复制，但最近颜色保存失败，请重试");
-                }}
-                mosaicBlock={mosaicBlock}
-                mosaicEffect={mosaicEffect}
-                blurRadius={blurRadius}
-                interactionDisabled={actionsLocked}
-                tool={tool}
-                onReady={handleEditorReady}
-                onError={handleEditorError}
-                onDrawingError={setError}
-                onSelectionChange={handleEditorSelectionChange}
-                onToolChange={setTool}
-              />
-            ) : (
-              <div className="excalidraw-editor-loading">正在准备截图底图…</div>
-            )}
-          </Suspense>
+                      return;
+                    const saved = await mutatePalette(() => {
+                      if (
+                        generation !== captureGenerationRef.current ||
+                        action !== pendingAction.current
+                      )
+                        throw new Error("截图已结束");
+                      return paletteApi.record(color);
+                    }, "最近颜色保存失败");
+                    if (!saved) throw new Error("颜色已复制，但最近颜色保存失败，请重试");
+                  }}
+                  mosaicBlock={mosaicBlock}
+                  mosaicEffect={mosaicEffect}
+                  blurRadius={blurRadius}
+                  interactionDisabled={actionsLocked}
+                  tool={tool}
+                  onReady={handleEditorReady}
+                  onError={handleEditorError}
+                  onDrawingError={setError}
+                  onSelectionChange={handleEditorSelectionChange}
+                  onToolChange={setTool}
+                />
+              ) : (
+                <div className="excalidraw-editor-loading">正在准备截图底图…</div>
+              )}
+            </Suspense>
+          </div>
           {marquee && shotRef.current && (
             <div
               className="scene-marquee"
@@ -3785,7 +4166,7 @@ function ScreenshotOverlay(): React.JSX.Element {
                   key={`${annotation.id}-node-${index}`}
                   className="linear-node"
                   style={{ left: point.x / scaleX, top: point.y / scaleY }}
-                  title="拖动节点；Ctrl 拖动端点临时禁用绑定"
+                  title="拖动节点调整"
                   onPointerDown={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
@@ -4134,7 +4515,7 @@ function ScreenshotOverlay(): React.JSX.Element {
                   ))}
                   <span
                     className="scene-selection__rotate"
-                    title="旋转（Shift 按 15°）"
+                    title="旋转"
                     onPointerDown={(event) => begin(event, "rotate")}
                   />
                 </div>
@@ -4218,36 +4599,32 @@ function ScreenshotOverlay(): React.JSX.Element {
       )}
 
       {canAdjustRegion &&
-        selection &&
+        viewSelection &&
         RESIZE_HANDLES.filter(
           (handle) => !aspectRatio || !["n", "e", "s", "w"].includes(handle),
         ).map((handle) => {
           const left = handle.includes("w")
-            ? selection.x
+            ? viewSelection.x
             : handle.includes("e")
-              ? selection.x + selection.width
-              : selection.x + selection.width / 2;
+              ? viewSelection.x + viewSelection.width
+              : viewSelection.x + viewSelection.width / 2;
           const top = handle.includes("n")
-            ? selection.y
+            ? viewSelection.y
             : handle.includes("s")
-              ? selection.y + displayHeight
-              : selection.y + displayHeight / 2;
+              ? viewSelection.y + viewSelection.height
+              : viewSelection.y + viewSelection.height / 2;
           return (
             <div
               key={handle}
               className="selection-handle"
               style={{ left, top, cursor: HANDLE_CURSORS[handle] }}
-              onMouseDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                beginRegionDrag(handle, event);
-              }}
+              onPointerDown={(event) => selectionDrag.start(handle, event)}
             />
           );
         })}
 
       {canAdjustRegion && selection && !adjustingRegion && (
-        <div className="overlay-hint-bar">{t.hints.adjustRegion}</div>
+        <div className="overlay-hint-bar">选择工具拖动空白处移动取景框</div>
       )}
 
       {selectionSizePanel && (phase === "selecting" || phase === "editing") && (
@@ -4420,6 +4797,7 @@ function ScreenshotOverlay(): React.JSX.Element {
             confirmDisabled={actionsLocked}
             ocrDisabled={!selection || !shotReady || ocrRunning}
             ocrRunning={ocrRunning}
+
             onPopupOpenChange={reportPrimaryPopup}
             style={{
               left: toolbarLayout?.primary.left ?? 8,

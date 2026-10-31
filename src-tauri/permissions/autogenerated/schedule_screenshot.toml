@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-schedule-screenshot"
+description = "Enables the schedule_screenshot command without any pre-configured scope."
+commands.allow = ["schedule_screenshot"]
+
+[[permission]]
+identifier = "deny-schedule-screenshot"
+description = "Denies the schedule_screenshot command without any pre-configured scope."
+commands.deny = ["schedule_screenshot"]

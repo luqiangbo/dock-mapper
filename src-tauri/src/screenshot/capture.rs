@@ -16,6 +16,17 @@ pub(super) struct ActiveScreen {
     pub(super) physical_height: u32,
 }
 
+pub(super) fn screen_identity(name: Option<&str>, x: i32, y: i32) -> u32 {
+    use std::hash::{Hash, Hasher};
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    if let Some(name) = name {
+        name.hash(&mut hash);
+    } else {
+        (x, y).hash(&mut hash);
+    }
+    hash.finish() as u32
+}
+
 pub(super) fn active_screen(app: &AppHandle) -> Result<ActiveScreen, String> {
     let cursor = app.cursor_position().map_err(|error| error.to_string())?;
     let monitor = app
@@ -27,10 +38,7 @@ pub(super) fn active_screen(app: &AppHandle) -> Result<ActiveScreen, String> {
     let size = monitor.size();
     let scale = monitor.scale_factor().max(1.0);
     Ok(ActiveScreen {
-        id: (position.x as u32).wrapping_mul(31)
-            ^ (position.y as u32).wrapping_mul(131)
-            ^ size.width.wrapping_mul(17)
-            ^ size.height,
+        id: screen_identity(monitor.name().map(String::as_str), position.x, position.y),
         bounds: Rect {
             x: position.x as f64 / scale,
             y: position.y as f64 / scale,
@@ -69,6 +77,11 @@ pub(super) fn bmp_from_bgra(width: u32, height: u32, bgra: &[u8]) -> Result<Arc<
     bytes.extend_from_slice(&(expected as u32).to_le_bytes());
     bytes.extend_from_slice(&[0; 16]);
     bytes.extend_from_slice(bgra);
+    // Desktop pixels are opaque. GDI leaves the unused DIB alpha channel at
+    // zero; mixed alpha values otherwise make parts of the BMP transparent in WebView2.
+    for alpha in bytes[54..].iter_mut().skip(3).step_by(4) {
+        *alpha = 255;
+    }
     Ok(Arc::from(bytes.into_boxed_slice()))
 }
 
@@ -95,7 +108,7 @@ fn is_blank_bgra(width: u32, height: u32, pixels: &[u8]) -> bool {
     true
 }
 
-fn capture_gdi(rect: &ActiveScreen) -> Result<(Arc<[u8]>, u32, u32), String> {
+pub(super) fn capture_gdi(rect: &ActiveScreen) -> Result<(Arc<[u8]>, u32, u32), String> {
     unsafe {
         let desktop = GetDC(None);
         if desktop.0.is_null() {
@@ -176,20 +189,27 @@ pub(super) fn capture_with_gdi_fallback<T>(
 pub(super) fn capture_active_screen(
     app: &AppHandle,
     generation: u64,
+    screen: ActiveScreen,
 ) -> Result<CaptureData, String> {
-    let screen = active_screen(app)?;
     let rect = crate::dxgi_capture::MonitorRect {
         x: screen.physical_origin_x,
         y: screen.physical_origin_y,
         width: screen.physical_width,
         height: screen.physical_height,
     };
-    let dxgi = app
-        .state::<AppState>()
-        .dxgi_capture
-        .lock()
-        .map_err(|_| "DXGI capture state is unavailable".to_string())?
-        .capture(rect, 20)
+    let mut not_before = 0;
+    let freshness =
+        unsafe { windows::Win32::System::Performance::QueryPerformanceCounter(&mut not_before) }
+            .map(|_| not_before)
+            .map_err(|error| format!("读取截图帧时钟失败：{error}"));
+    let dxgi = freshness
+        .and_then(|not_before| {
+            app.state::<AppState>()
+                .dxgi_capture
+                .try_lock()
+                .map_err(|_| "DXGI 正忙或正在预热，改用兼容截图".to_string())
+                .and_then(|mut capture| capture.capture(rect, 20, not_before))
+        })
         .and_then(|frame| {
             Ok((
                 bmp_from_bgra(frame.width, frame.height, &frame.bytes)?,
@@ -209,7 +229,13 @@ pub(super) fn capture_active_screen(
         image_height,
         scale_factor,
     );
+    let cursor = cursor_capture::capture(screen.physical_origin_x, screen.physical_origin_y)
+        .unwrap_or_else(|error| {
+            tracing::warn!(%error, "鼠标图像捕获失败");
+            None
+        });
     Ok(CaptureData {
+        cursor,
         bmp,
         generation,
         bounds: screen.bounds,
@@ -225,4 +251,20 @@ pub(super) fn capture_active_screen(
         backend,
         mode: CaptureMode::Screenshot,
     })
+}
+
+#[cfg(test)]
+mod monitor_identity_tests {
+    use super::*;
+    #[test]
+    fn prewarmed_and_captured_monitor_keep_the_same_identity_after_geometry_changes() {
+        let warmed = screen_identity(Some("DISPLAY1"), 0, 0);
+        assert_eq!(warmed, screen_identity(Some("DISPLAY1"), -1920, 200));
+        assert_ne!(warmed, screen_identity(Some("DISPLAY2"), 0, 0));
+        assert_eq!(
+            screen_identity(None, -1920, 0),
+            screen_identity(None, -1920, 0)
+        );
+        assert_ne!(screen_identity(None, 0, 0), screen_identity(None, -1920, 0));
+    }
 }

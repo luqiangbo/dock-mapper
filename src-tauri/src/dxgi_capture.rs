@@ -68,7 +68,12 @@ impl CaptureManager {
         }
     }
 
-    pub fn capture(&mut self, rect: MonitorRect, timeout_ms: u32) -> Result<BgraFrame, String> {
+    pub fn capture(
+        &mut self,
+        rect: MonitorRect,
+        timeout_ms: u32,
+        not_before: i64,
+    ) -> Result<BgraFrame, String> {
         // Release duplications for disconnected or reconfigured outputs before
         // selecting the active monitor. A resolution change produces a new
         // rectangle and must not leave the previous D3D device alive forever.
@@ -78,8 +83,10 @@ impl CaptureManager {
             self.ensure_output(rect)?;
         }
         let capture = self.outputs.get_mut(&rect).expect("DXGI output inserted");
-        match capture.read_frame(timeout_ms) {
-            Ok(frame) => Ok(frame),
+        match capture.read_frame(timeout_ms, not_before) {
+            Ok(Some(frame)) => Ok(frame),
+            // A stale frame is not a broken duplication: retain the warmed device.
+            Ok(None) => Err("DXGI 桌面帧早于窗口隐藏完成时间，改用即时截图".into()),
             Err(error) => {
                 // Access-lost is normal after display changes or driver resets.
                 // Drop this entry so the next capture recreates it once.
@@ -150,7 +157,11 @@ impl CaptureManager {
 }
 
 impl OutputCapture {
-    fn read_frame(&mut self, timeout_ms: u32) -> Result<BgraFrame, String> {
+    fn read_frame(
+        &mut self,
+        timeout_ms: u32,
+        not_before: i64,
+    ) -> Result<Option<BgraFrame>, String> {
         let mut info = Default::default();
         let mut resource = None;
         unsafe {
@@ -159,6 +170,12 @@ impl OutputCapture {
         }
         .map_err(display_error)?;
         let result = (|| {
+            // Prewarming may leave a desktop frame from before our windows hid.
+            // Mouse-only updates have no desktop present time. Reject both so
+            // the caller takes an immediate GDI snapshot of the current desktop.
+            if !frame_is_current(info.LastPresentTime, not_before) {
+                return Ok(None);
+            }
             let texture: ID3D11Texture2D = resource
                 .as_ref()
                 .ok_or_else(|| "DXGI returned an empty desktop frame".to_string())?
@@ -213,11 +230,11 @@ impl OutputCapture {
                 bytes[row * row_bytes..(row + 1) * row_bytes].copy_from_slice(source);
             }
             unsafe { self.context.Unmap(staging, 0) };
-            Ok(BgraFrame {
+            Ok(Some(BgraFrame {
                 width: self.width,
                 height: self.height,
                 bytes,
-            })
+            }))
         })();
         let _ = unsafe { self.duplication.ReleaseFrame() };
         result
@@ -252,13 +269,25 @@ fn rect_from_dxgi(rect: RECT) -> MonitorRect {
     }
 }
 
+fn frame_is_current(last_present_time: i64, not_before: i64) -> bool {
+    last_present_time > 0 && last_present_time >= not_before
+}
+
 fn display_error(error: windows::core::Error) -> String {
     format!("DXGI capture failed: {error}")
 }
 
 #[cfg(test)]
 mod tests {
-    use super::MonitorRect;
+    use super::{frame_is_current, MonitorRect};
+
+    #[test]
+    fn cached_desktop_and_mouse_only_frames_cannot_reintroduce_a_hidden_window() {
+        assert!(!frame_is_current(99, 100));
+        assert!(!frame_is_current(0, 100));
+        assert!(frame_is_current(100, 100));
+        assert!(frame_is_current(101, 100));
+    }
 
     #[test]
     fn monitor_rect_is_hashable_for_per_output_cache() {

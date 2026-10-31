@@ -14,18 +14,19 @@ describe("清晰的圆形序号徽标", () => {
     expect(result.textX + 6 / zoom).toBeCloseTo(result.x + result.diameter / 2);
     expect(result.textY + result.fontSize - 7.5 / zoom).toBeCloseTo(result.y + result.diameter / 2);
   });
-  it("三位及更长数字扩展圆形直径并保留文字内边距", () => {
-    const result = numberBadgeGeometry(
+  it("多位序号缩小文字而不改变徽标大小", () => {
+    const badge = numberBadgeGeometry(
       { x: 100, y: 100 },
       36,
       1,
       { width: 42, ascent: 15, descent: 0 },
       { width: 500, height: 500 },
     );
-    expect(result.diameter).toBe(56);
-    expect(result.textX - result.x).toBe(7);
+    expect(badge.diameter).toBe(36);
+    expect(badge.fontSize).toBeLessThan(20.16);
+    expect(badge.textX).toBeGreaterThan(badge.x);
   });
-  it("靠近边缘放置时，圆形和白边完整留在截图范围内", () => {
+  it("边缘放置保持点击中心，由选区裁切而不偏移", () => {
     for (const point of [
       { x: 0, y: 0 },
       { x: 100, y: 80 },
@@ -37,10 +38,8 @@ describe("清晰的圆形序号徽标", () => {
         { width: 12, ascent: 15, descent: 0 },
         { width: 100, height: 80 },
       );
-      expect(badge.x - badge.border / 2).toBeGreaterThanOrEqual(0);
-      expect(badge.y - badge.border / 2).toBeGreaterThanOrEqual(0);
-      expect(badge.x + badge.diameter + badge.border / 2).toBeLessThanOrEqual(100);
-      expect(badge.y + badge.diameter + badge.border / 2).toBeLessThanOrEqual(80);
+      expect(badge.x + badge.diameter / 2).toBe(point.x);
+      expect(badge.y + badge.diameter / 2).toBe(point.y);
     }
   });
 });

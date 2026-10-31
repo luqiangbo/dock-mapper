@@ -35,11 +35,7 @@
         "fullscreen": false,
         "decorations": false,
         "transparent": true,
-        "backgroundColor": "#00000000",
-        "windowEffects": {
-          "effects": ["mica"],
-          "state": "active"
-        }
+        "backgroundColor": "#202328"
       },
       {
         "label": "taskbar_widget",

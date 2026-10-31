@@ -1,10 +1,10 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { loadView } from "../utils/loadView";
+import { lazy, Suspense, useMemo, useState, type ReactNode } from "react";
 import { Card, Col, Grid, Row, Segmented, Spin, Typography } from "antd";
 import { ArrowDownOutlined, ArrowUpOutlined, DashboardOutlined } from "@ant-design/icons";
 import RuntimeLogPanel from "./RuntimeLogPanel";
 import type { SysStatus } from "../types";
 import { formatSpeed } from "../utils/format";
-import MetricTrendChart from "./MetricTrendChart";
 import type { DashboardSample } from "./dashboardTelemetry";
 import { selectTelemetryArchive, type TrendRange } from "./telemetryArchive";
 import type { TelemetryFreshness } from "../utils/telemetryFreshness";
@@ -12,6 +12,7 @@ import styles from "./components.module.scss";
 import { useTheme } from "../ThemeContext";
 import { accentColors, themePalettes } from "../themePalette";
 
+const MetricTrendChart = lazy(() => loadView(() => import("./MetricTrendChart")));
 const { Text, Title } = Typography;
 
 interface Props {
@@ -141,11 +142,19 @@ export default function Dashboard({ status, freshness, samples, archive }: Props
                 <Text type="secondary">该时间范围暂无足够采样</Text>
               </div>
             ) : (
-              <MetricTrendChart
-                title={`${trendLabel}网络趋势`}
-                samples={trendSamples}
-                series={networkSeries}
-              />
+              <Suspense
+                fallback={
+                  <Spin>
+                    <div style={{ minHeight: 220 }} />
+                  </Spin>
+                }
+              >
+                <MetricTrendChart
+                  title={`${trendLabel}网络趋势`}
+                  samples={trendSamples}
+                  series={networkSeries}
+                />
+              </Suspense>
             )}
           </Card>
         </Col>
@@ -157,12 +166,20 @@ export default function Dashboard({ status, freshness, samples, archive }: Props
                 <Text type="secondary">该时间范围暂无足够采样</Text>
               </div>
             ) : (
-              <MetricTrendChart
-                title={`${trendLabel}资源趋势`}
-                samples={trendSamples}
-                series={resourceSeries}
-                percent
-              />
+              <Suspense
+                fallback={
+                  <Spin>
+                    <div style={{ minHeight: 220 }} />
+                  </Spin>
+                }
+              >
+                <MetricTrendChart
+                  title={`${trendLabel}资源趋势`}
+                  samples={trendSamples}
+                  series={resourceSeries}
+                  percent
+                />
+              </Suspense>
             )}
           </Card>
         </Col>

@@ -1,4 +1,5 @@
 import {
+  memo,
   useLayoutEffect,
   useEffect,
   useMemo,
@@ -13,6 +14,7 @@ import { observeWorkspaceScroll, scrollOffset } from "./workspaceScroll";
 import { createRulerActivity } from "./rulerActivity";
 import { createRulerWaves } from "./rulerWaves";
 import styles from "./WorkspaceScrollRuler.module.scss";
+import { createSettledRenderQueue, windowResizeActivity } from "../windowResizeActivity";
 
 export default function WorkspaceScrollRuler({
   contentRef,
@@ -24,11 +26,18 @@ export default function WorkspaceScrollRuler({
   const [position, setPosition] = useState({ pageKey, percent: 0, overflowing: false });
   const [interaction] = useState(createRulerActivity);
   const scaleRef = useRef<HTMLDivElement>(null);
-  const [waveHeight, setWaveHeight] = useState(0);
+  const [waveGeometry, setWaveGeometry] = useState({ height: 0, percent: 0 });
+  const positionRef = useRef(position.percent);
+  positionRef.current = position.percent;
+  const waveQueue = useRef<ReturnType<typeof createSettledRenderQueue> | null>(null);
   const [waveSeed] = useState(() => Math.floor(Math.random() * 0x100000000));
+  const resizing = useSyncExternalStore(
+    windowResizeActivity.subscribe,
+    windowResizeActivity.getSnapshot,
+  );
   const waves = useMemo(
-    () => createRulerWaves(waveHeight, position.percent, waveSeed),
-    [waveHeight, position.percent, waveSeed],
+    () => createRulerWaves(waveGeometry.height, waveGeometry.percent, waveSeed),
+    [waveGeometry.height, waveGeometry.percent, waveSeed],
   );
   const [motionVisible, setMotionVisible] = useState(false);
   useEffect(() => {
@@ -52,21 +61,25 @@ export default function WorkspaceScrollRuler({
   useLayoutEffect(() => {
     const scale = scaleRef.current;
     if (!scale || !visible) return;
-    let frame: number | undefined;
-    const schedule = () => {
-      frame ??= requestAnimationFrame(() => {
-        frame = undefined;
-        setWaveHeight(scale.clientHeight);
-      });
-    };
-    const observer = new ResizeObserver(schedule);
+    const queue = createSettledRenderQueue(windowResizeActivity, () => {
+      const next = { height: scale.clientHeight, percent: positionRef.current };
+      setWaveGeometry((previous) =>
+        previous.height === next.height && previous.percent === next.percent ? previous : next,
+      );
+    });
+    waveQueue.current = queue;
+    const observer = new ResizeObserver(() => queue.request());
     observer.observe(scale);
-    schedule();
+    queue.request();
     return () => {
       observer.disconnect();
-      if (frame !== undefined) cancelAnimationFrame(frame);
+      queue.dispose();
+      waveQueue.current = null;
     };
   }, [visible]);
+  useLayoutEffect(() => {
+    waveQueue.current?.request();
+  }, [position.percent]);
   useLayoutEffect(() => {
     interaction.reset();
     const content = contentRef.current;
@@ -104,7 +117,7 @@ export default function WorkspaceScrollRuler({
       hidden={!visible}
       data-active={visible && activity.active}
       data-expanded={visible && activity.expanded}
-      data-motion={visible && motionVisible}
+      data-motion={visible && motionVisible && !resizing}
       aria-label="页面滚动位置"
       onPointerEnter={() => interaction.set("hovered", true)}
       onPointerLeave={() => interaction.set("hovered", false)}
@@ -133,28 +146,7 @@ export default function WorkspaceScrollRuler({
       }}
     >
       <div className={styles.scale} ref={scaleRef}>
-        <div className={styles.waves} aria-hidden="true">
-          {waves.map((wave, index) => (
-            <span
-              key={index}
-              className={styles.bar}
-              style={
-                {
-                  opacity: wave.opacity,
-                  animationDuration: `${wave.duration}s`,
-                  animationDelay: `${wave.delay}s`,
-                  "--wave-high": wave.high,
-                  ...Object.fromEntries(
-                    wave.frames.slice(0, 8).flatMap((frame, node) => [
-                      [`--wave-size-${node}`, frame.scale],
-                      [`--wave-offset-${node}`, `${frame.offset}px`],
-                    ]),
-                  ),
-                } as CSSProperties
-              }
-            />
-          ))}
-        </div>
+        <WaveBars waves={waves} />
         <Slider
           orientation="vertical"
           reverse
@@ -177,3 +169,30 @@ export default function WorkspaceScrollRuler({
     </aside>
   );
 }
+
+const WaveBars = memo(function WaveBars({ waves }: { waves: ReturnType<typeof createRulerWaves> }) {
+  return (
+    <div className={styles.waves} aria-hidden="true">
+      {waves.map((wave, index) => (
+        <span
+          key={index}
+          className={styles.bar}
+          style={
+            {
+              opacity: wave.opacity,
+              animationDuration: `${wave.duration}s`,
+              animationDelay: `${wave.delay}s`,
+              "--wave-high": wave.high,
+              ...Object.fromEntries(
+                wave.frames.slice(0, 8).flatMap((frame, node) => [
+                  [`--wave-size-${node}`, frame.scale],
+                  [`--wave-offset-${node}`, `${frame.offset}px`],
+                ]),
+              ),
+            } as CSSProperties
+          }
+        />
+      ))}
+    </div>
+  );
+});

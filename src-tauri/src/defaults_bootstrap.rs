@@ -56,9 +56,11 @@ pub struct BootstrapState {
     setup: SetupLatch,
     state: Mutex<Progress>,
     ready: AtomicBool,
+    tracker: crate::startup_runtime::Tracker,
 }
 impl BootstrapState {
     pub fn finish_setup(&self, result: Result<(), String>) {
+        self.tracker.finish(0, result.clone(), false);
         self.setup.finish(result);
     }
 }
@@ -128,6 +130,9 @@ struct Progress {
     screenshot: bool,
     widget: bool,
     keys: bool,
+    effects: bool,
+    monitor: bool,
+    mapping: bool,
 }
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -142,6 +147,50 @@ pub fn application_ready(state: State<BootstrapState>) -> bool {
     state.ready.load(Ordering::Acquire)
 }
 
+pub(crate) fn require_runtime_ready(app: &AppHandle) -> Result<(), String> {
+    let bootstrap = app
+        .try_state::<BootstrapState>()
+        .ok_or("应用正在初始化，请稍候")?;
+    if bootstrap.ready.load(Ordering::Acquire) {
+        return Ok(());
+    }
+    let status = bootstrap.tracker.snapshot();
+    Err(status
+        .error
+        .unwrap_or_else(|| format!("正在初始化{}，请稍候", status.stage)))
+}
+
+fn publish_status(app: &AppHandle) {
+    let status = app.state::<BootstrapState>().tracker.snapshot();
+    if status.phase == crate::startup_runtime::Phase::Failed {
+        tracing::error!(target: "dock_mapper::startup", generation = status.generation, stage = %status.stage, error = %crate::diagnostics::redact_sensitive_text(status.error.as_deref().unwrap_or_default()), "Startup failed");
+    }
+    if let Err(error) = app.emit("startup-state", status) {
+        tracing::warn!(target: "dock_mapper::startup", %error, "启动状态通知失败");
+    }
+}
+
+#[tauri::command]
+pub fn get_startup_status(state: State<BootstrapState>) -> crate::startup_runtime::Status {
+    state.tracker.snapshot()
+}
+
+fn stage(app: &AppHandle, generation: u64, name: &str) -> Result<(), String> {
+    app.state::<BootstrapState>()
+        .tracker
+        .stage(generation, name)?;
+    tracing::info!(target: "dock_mapper::startup", generation, stage = name, "Startup stage started");
+    publish_status(app);
+    Ok(())
+}
+
+fn timed<T>(name: &str, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    let started = std::time::Instant::now();
+    let result = work();
+    tracing::info!(target: "dock_mapper::startup", stage = name, elapsed_ms = started.elapsed().as_millis(), success = result.is_ok(), "Startup stage completed");
+    result
+}
+
 #[tauri::command]
 pub async fn initialize_defaults(
     app: AppHandle,
@@ -152,22 +201,49 @@ pub async fn initialize_defaults(
     if window.label() != "main" {
         return Err("仅主窗口可初始化应用设置".into());
     }
-    {
-        let bootstrap = app
-            .try_state::<BootstrapState>()
-            .ok_or("应用启动状态尚未注册，请重试")?;
-        // WebViews can invoke IPC while Tauri is still running its setup hook.
-        // Wait asynchronously, without holding the initialization mutex or UI thread.
-        bootstrap
+    let generation = app.state::<BootstrapState>().tracker.begin(if activate {
+        "运行功能"
+    } else {
+        "配置"
+    })?;
+    publish_status(&app);
+    let timeout_app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+        if timeout_app
+            .state::<BootstrapState>()
+            .tracker
+            .timeout(generation)
+        {
+            publish_status(&timeout_app);
+        }
+    });
+    let worker_app = app.clone();
+    let result = async {
+        worker_app
+            .state::<BootstrapState>()
             .setup
             .wait(std::time::Duration::from_secs(15))
             .await?;
+        tauri::async_runtime::spawn_blocking(move || {
+            initialize_defaults_impl(worker_app, window, build_id, activate, generation)
+        })
+        .await
+        .map_err(|error| format!("初始化任务失败：{error}"))?
     }
-    tauri::async_runtime::spawn_blocking(move || {
-        initialize_defaults_impl(app, window, build_id, activate)
-    })
-    .await
-    .map_err(|error| format!("初始化任务失败：{error}"))?
+    .await;
+    let bootstrap = app.state::<BootstrapState>();
+    bootstrap.tracker.finish(
+        generation,
+        result.as_ref().map(|_| ()).map_err(Clone::clone),
+        bootstrap.ready.load(Ordering::Acquire),
+    );
+    publish_status(&app);
+    let status = bootstrap.tracker.snapshot();
+    if status.phase == crate::startup_runtime::Phase::Failed {
+        return Err(status.error.unwrap_or_else(|| "初始化失败，请重试".into()));
+    }
+    result
 }
 
 fn initialize_defaults_impl(
@@ -175,6 +251,7 @@ fn initialize_defaults_impl(
     window: WebviewWindow,
     build_id: String,
     activate: bool,
+    generation: u64,
 ) -> Result<BootstrapResult, String> {
     if window.label() != "main" {
         return Err("仅主窗口可初始化应用设置".into());
@@ -219,11 +296,14 @@ fn initialize_defaults_impl(
         .map_err(|_| "配置事务状态已损坏")?;
     let mut reset = false;
     if progress.identity.as_deref() != Some(&build_id) {
+        stage(&app, generation, "配置")?;
         let previous = crate::config::load(&state.config_path);
         if previous.defaults_build_id.as_deref() != Some(&build_id) {
             crate::autostart_reset::ensure_disabled(&app)?;
         }
-        let (next, did_reset) = crate::config::load_for_build(&state.config_path, &build_id)?;
+        let (next, did_reset) = timed("配置", || {
+            crate::config::load_for_build(&state.config_path, &build_id)
+        })?;
         reset = did_reset;
         *state.config.lock().map_err(|_| "配置状态已损坏")? = next;
         progress.identity = Some(build_id.clone());
@@ -235,15 +315,18 @@ fn initialize_defaults_impl(
     drop(_mutation);
     if activate && !restart_required && progress.active.is_none() {
         if !progress.screenshot {
-            crate::screenshot::initialize(&app)?;
+            stage(&app, generation, "截图快捷键")?;
+            timed("截图快捷键", || crate::screenshot::initialize(&app))?;
             progress.screenshot = true;
         }
         if !progress.widget {
-            crate::widget::setup_window(&app)?;
+            stage(&app, generation, "任务栏挂件")?;
+            timed("任务栏挂件", || crate::widget::setup_window(&app))?;
             progress.widget = true;
         }
         if !progress.keys {
-            crate::key_visualizer::setup_window(&app)?;
+            stage(&app, generation, "按键展示")?;
+            timed("按键展示", || crate::key_visualizer::setup_window(&app))?;
             progress.keys = true;
         }
         let interval = state
@@ -255,15 +338,27 @@ fn initialize_defaults_impl(
         app.try_state::<crate::sys_monitor::SysMonitorControl>()
             .ok_or("系统采集状态尚未注册，请重试")?
             .set_interval(interval);
-        crate::visualizer_effects::initialize(&app);
-        crate::sys_monitor::start_sys_monitor(app.clone());
-        crate::key_mapping::initialize(&app);
+        stage(&app, generation, "后台运行功能")?;
+        if !progress.effects {
+            crate::visualizer_effects::initialize(&app);
+            progress.effects = true;
+        }
+        if !progress.monitor {
+            crate::sys_monitor::start_sys_monitor(app.clone());
+            progress.monitor = true;
+        }
+        if !progress.mapping {
+            crate::key_mapping::initialize(&app);
+            progress.mapping = true;
+        }
+        stage(&app, generation, "运行功能就绪")?;
         progress.active = Some(build_id.clone());
         bootstrap.ready.store(true, Ordering::Release);
     }
     if activate && !restart_required {
         app.emit("defaults-ready", ())
             .map_err(|error| format!("发布应用就绪失败：{error}"))?;
+        crate::screenshot::warmup(&app);
     }
     let installation = state
         .config

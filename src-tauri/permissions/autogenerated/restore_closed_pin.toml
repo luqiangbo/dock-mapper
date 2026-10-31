@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-restore-closed-pin"
+description = "Enables the restore_closed_pin command without any pre-configured scope."
+commands.allow = ["restore_closed_pin"]
+
+[[permission]]
+identifier = "deny-restore-closed-pin"
+description = "Denies the restore_closed_pin command without any pre-configured scope."
+commands.deny = ["restore_closed_pin"]

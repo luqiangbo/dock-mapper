@@ -1,9 +1,10 @@
-import { useSyncExternalStore } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 import { Alert, Button, Progress, Space, Spin, Typography } from "antd";
 import { usePageModal } from "./PageActivity";
 import { ReloadOutlined } from "@ant-design/icons";
 import { updateController } from "./updateRuntime";
 import { updateBusy, updatePercent } from "./updateController";
+import styles from "./components.module.scss";
 
 const STAGES = {
   check: "检查更新失败",
@@ -14,13 +15,15 @@ const STAGES = {
 function bytes(value: number) {
   return `${(value / 1024 / 1024).toFixed(1)} MiB`;
 }
-export default function SoftwareUpdate() {
+export default function SoftwareUpdate({ children }: { children?: ReactNode }) {
   const state = useSyncExternalStore(updateController.subscribe, updateController.getSnapshot);
   const modal = usePageModal();
   const percent = updatePercent(state);
+  const showStatus = ["downloading", "installing", "restarting", "ready"].includes(state.phase);
   return (
     <Space orientation="vertical" style={{ width: "100%" }}>
-      <Space wrap>
+      <div className={styles.updateToolbar}>
+        {children}
         <Button
           icon={<ReloadOutlined />}
           loading={state.phase === "checking"}
@@ -50,33 +53,35 @@ export default function SoftwareUpdate() {
         {state.phase === "latest" && (
           <Typography.Text type="success">当前已是最新版本</Typography.Text>
         )}
-      </Space>
-      <div role="status" aria-live="polite">
-        {state.phase === "downloading" && (
-          <>
-            <Typography.Text>
-              正在下载 v{state.version} · {bytes(state.downloaded)}
-              {state.total ? ` / ${bytes(state.total)}` : " · 总大小未知"}
-            </Typography.Text>
-            {percent === undefined ? (
-              <Spin size="small" />
-            ) : (
-              <Progress percent={percent} status="active" />
-            )}
-          </>
-        )}
-        {state.phase === "installing" && (
-          <Typography.Text>下载及校验完成，正在启动安装程序…应用可能自动退出。</Typography.Text>
-        )}
-        {state.phase === "restarting" && (
-          <Typography.Text>安装步骤已完成，正在重新启动…</Typography.Text>
-        )}
-        {state.phase === "ready" && (
-          <Typography.Text>
-            已发起重新启动；若窗口仍保留，可手动退出后重新打开应用。
-          </Typography.Text>
-        )}
       </div>
+      {showStatus && (
+        <div role="status" aria-live="polite">
+          {state.phase === "downloading" && (
+            <>
+              <Typography.Text>
+                正在下载 v{state.version} · {bytes(state.downloaded)}
+                {state.total ? ` / ${bytes(state.total)}` : " · 总大小未知"}
+              </Typography.Text>
+              {percent === undefined ? (
+                <Spin size="small" />
+              ) : (
+                <Progress percent={percent} status="active" />
+              )}
+            </>
+          )}
+          {state.phase === "installing" && (
+            <Typography.Text>下载及校验完成，正在启动安装程序…应用可能自动退出。</Typography.Text>
+          )}
+          {state.phase === "restarting" && (
+            <Typography.Text>安装步骤已完成，正在重新启动…</Typography.Text>
+          )}
+          {state.phase === "ready" && (
+            <Typography.Text>
+              已发起重新启动；若窗口仍保留，可手动退出后重新打开应用。
+            </Typography.Text>
+          )}
+        </div>
+      )}
       {state.phase === "error" && (
         <Alert
           showIcon

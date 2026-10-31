@@ -1,4 +1,15 @@
 export interface FullScreenshot {
+  screenId?: number;
+  initialSelection?: { x: number; y: number; width: number; height: number } | null;
+  cursor?: {
+    url: string;
+    sampleX?: number;
+    sampleY?: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null;
   url: string;
   generation: number;
   displayWidth: number;

@@ -57,8 +57,8 @@ impl Default for WidgetLayoutSettings {
             task_list_gap: 6,
             tray_gap: 6,
             vertical_offset: 0,
-            font_size: 14,
-            icon_size: 18,
+            font_size: 12,
+            icon_size: 14,
         }
     }
 }
@@ -543,8 +543,8 @@ mod tests {
             .metrics
             .iter()
             .all(|m| m.icon_style != WidgetIconStyle::None));
-        assert_eq!(config.layout.font_size, 14);
-        assert_eq!(config.layout.icon_size, 18);
+        assert_eq!(config.layout.font_size, 12);
+        assert_eq!(config.layout.icon_size, 14);
     }
 
     #[test]

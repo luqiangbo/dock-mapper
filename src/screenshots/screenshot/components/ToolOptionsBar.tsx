@@ -1,4 +1,5 @@
 import { Button, ColorPicker, Select } from "antd";
+import { NumberToolOptions } from "./NumberToolOptions";
 import { PaletteBrowser } from "./PaletteBrowser";
 import {
   forwardRef,
@@ -435,13 +436,14 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
           </Button>
         </span>
       )}
+
       {tool === "highlight" && (
         <>
           {color}
           <Choice
             label="宽度"
             value={settings.highlightWidth}
-            options={[12, 16, 20, 24, 32, 48].map((value) => ({ value, label: `${value} px` }))}
+            options={[12, 16, 20, 24, 32].map((value) => ({ value, label: `${value} px` }))}
             name="highlight-width"
             change={(value) => onChange({ highlightWidth: selectNumber(value) })}
             popup={popup}
@@ -457,44 +459,11 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
         </>
       )}
       {tool === "number" && (
-        <>
-          <Color
-            label="背景色"
-            value={settings.numberStyle.backgroundColor}
-            name="number-background"
-            change={(backgroundColor) =>
-              previewChange({ numberStyle: { ...settings.numberStyle, backgroundColor } })
-            }
-            commit={(backgroundColor) =>
-              onChange({ numberStyle: { ...settings.numberStyle, backgroundColor } })
-            }
-            popup={popup}
-            palette={palette}
-          />
-          <Color
-            label="文字色"
-            value={settings.numberStyle.textColor}
-            name="number-text"
-            change={(textColor) =>
-              previewChange({ numberStyle: { ...settings.numberStyle, textColor } })
-            }
-            commit={(textColor) =>
-              onChange({ numberStyle: { ...settings.numberStyle, textColor } })
-            }
-            popup={popup}
-            palette={palette}
-          />
-          <Choice
-            label="大小"
-            value={settings.numberStyle.size}
-            options={[24, 32, 36, 40, 48, 64].map((value) => ({ value, label: `${value} px` }))}
-            name="number-size"
-            change={(value) =>
-              onChange({ numberStyle: { ...settings.numberStyle, size: selectNumber(value) } })
-            }
-            popup={popup}
-          />
-        </>
+        <NumberToolOptions
+          style={settings.numberStyle}
+          change={(numberStyle) => onChange({ numberStyle })}
+          popup={popup}
+        />
       )}
       {tool === "picker" && (
         <>

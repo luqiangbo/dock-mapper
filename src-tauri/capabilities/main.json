@@ -8,6 +8,7 @@
   "permissions": [
     "allow-initialize-defaults",
     "allow-application-ready",
+    "allow-get-startup-status",
     "allow-get-runtime-logs",
     "allow-get-runtime-log-text",
     "allow-clear-runtime-logs",
@@ -22,6 +23,8 @@
     "core:window:allow-minimize",
     "core:window:allow-set-title",
     "core:window:allow-set-theme",
+    "core:window:allow-set-background-color",
+    "core:webview:allow-set-webview-background-color",
     "core:window:allow-toggle-maximize",
     "core:window:allow-start-dragging",
     "updater:allow-check",
@@ -74,6 +77,9 @@
     "allow-get-key-visualizer-session",
     "allow-get-key-visualizer-effects-status",
     "allow-locate-key-visualizer-mouse",
-    "allow-open-screenshot-history-preview"
+    "allow-open-screenshot-history-preview",
+    "allow-restore-closed-pin",
+    "allow-get-pin-restore-error",
+    "allow-schedule-screenshot"
   ]
 }

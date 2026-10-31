@@ -8,7 +8,7 @@ export const zh: Messages = {
     pen: "画笔",
     highlight: "高亮笔",
     mosaic: "马赛克",
-    picker: "取色笔 · C 复制颜色值",
+    picker: "取色笔",
     text: "文字",
     undo: "撤销",
     save: "保存",
@@ -17,7 +17,7 @@ export const zh: Messages = {
     done: "完成 (复制)",
   },
   hints: {
-    dragToSelect: "拖动选择区域 · Esc 取消",
+    dragToSelect: "拖动选择区域",
     capturing: "正在捕获屏幕…",
     working: "处理中…",
     adjustRegion: "拖动控制点可调整大小 · 拖动内部可移动 · 选择工具开始标注",

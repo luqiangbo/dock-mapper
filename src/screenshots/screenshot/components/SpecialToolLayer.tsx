@@ -8,6 +8,7 @@ interface Props {
   api: ExcalidrawImperativeAPI;
   base: HTMLCanvasElement;
   numberStyle: NumberStyle;
+  origin: { x: number; y: number };
   format: ColorCopyFormat;
   keyboardBlocked?: boolean;
   onCopyColor: (color: string, formatted: string) => Promise<void>;
@@ -18,6 +19,7 @@ export function SpecialToolLayer(props: Props) {
     <PickerLayer
       api={props.api}
       base={props.base}
+      origin={props.origin}
       format={props.format}
       keyboardBlocked={props.keyboardBlocked}
       onCopyColor={props.onCopyColor}
@@ -27,6 +29,7 @@ export function SpecialToolLayer(props: Props) {
       api={props.api}
       base={props.base}
       style={props.numberStyle}
+      origin={props.origin}
       onError={props.onError}
     />
   );

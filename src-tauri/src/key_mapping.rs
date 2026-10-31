@@ -189,6 +189,7 @@ pub fn sync_key_mappings(
     state: State<'_, AppState>,
     mappings: Vec<KeyMapping>,
 ) -> Result<(), String> {
+    crate::defaults_bootstrap::require_runtime_ready(&app)?;
     key_mapping_runtime::rules(&mappings)?;
     change(&app, &state, |config| config.key_mappings = mappings)
 }

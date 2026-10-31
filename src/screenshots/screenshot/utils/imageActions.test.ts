@@ -44,3 +44,23 @@ describe("screenshot image actions", () => {
     expect(committed).not.toHaveBeenCalled();
   });
 });
+
+it("输出成功后历史失败仍返回成功，并单独反馈历史错误", async () => {
+  const outputError = vi.fn(),
+    historyError = vi.fn();
+  const result = await runImageAction({
+    exportPng: async () => new Uint8Array([1]),
+    uploadImage: async () => "image-1",
+    consumeImage: async () => true,
+    onCommitted: async () => {
+      throw new Error("磁盘不可写");
+    },
+    onCommittedError: historyError,
+    setBusy: vi.fn(),
+    onError: outputError,
+    fallbackError: "复制失败",
+  });
+  expect(result).toBe(true);
+  expect(outputError).not.toHaveBeenCalled();
+  expect(historyError).toHaveBeenCalledWith("截图操作已完成，但未保存到历史：磁盘不可写");
+});

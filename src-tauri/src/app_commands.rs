@@ -13,6 +13,31 @@ pub fn get_screenshot_config(
         .map_err(|_| "配置状态已损坏".to_string())
 }
 
+/// A focused mutation for the in-capture settings panel. Other capture updates
+/// still preserve the settings-owned toolbar when they round-trip stale config.
+#[tauri::command]
+pub fn update_capture_preferences(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    experience: Option<config::CaptureExperience>,
+    toolbar_tools: Option<Vec<config::ScreenshotToolbarTool>>,
+) -> Result<config::ScreenshotConfig, String> {
+    let _mutation = state.mutation_lock.lock().map_err(|_| "配置写入锁已损坏")?;
+    let mut next = state.config.lock().map_err(|_| "配置状态已损坏")?.clone();
+    if let Some(experience) = experience {
+        next.screenshot_config.experience = experience;
+    }
+    if let Some(tools) = toolbar_tools {
+        next.screenshot_config.toolbar_tools = tools;
+    }
+    config::normalize_screenshot_config(&mut next.screenshot_config);
+    config::save(&state.config_path, &next)?;
+    let result = next.screenshot_config.clone();
+    *state.config.lock().map_err(|_| "配置状态已损坏")? = next;
+    let _ = app.emit("screenshot-config-changed", &result);
+    Ok(result)
+}
+
 #[tauri::command]
 pub fn update_screenshot_config(
     app: AppHandle,
@@ -32,6 +57,10 @@ fn preserve_overlay_owned_screenshot_fields(
     current: &config::ScreenshotConfig,
     requested: &mut config::ScreenshotConfig,
 ) {
+    requested.experience.regions = current.experience.regions.clone();
+    requested.experience.last_tool = current.experience.last_tool.clone();
+    requested.experience.number_appearance = current.experience.number_appearance.clone();
+    requested.experience.number_palette = current.experience.number_palette.clone();
     requested.annotation_color = current.annotation_color.clone();
     requested.annotation_outline = current.annotation_outline.clone();
     requested.annotation_styles = current.annotation_styles.clone();
@@ -432,7 +461,7 @@ mod tests {
 
     #[test]
     fn stale_settings_form_cannot_replace_overlay_annotation_visuals() {
-        let current = config::ScreenshotConfig {
+        let mut current = config::ScreenshotConfig {
             annotation_color: "#1971c2".into(),
             annotation_outline: config::AnnotationOutlineConfig {
                 enabled: false,
@@ -441,6 +470,8 @@ mod tests {
             },
             ..config::ScreenshotConfig::default()
         };
+        current.experience.number_appearance = "pixel".into();
+        current.experience.number_palette = "mint".into();
         let mut requested = config::ScreenshotConfig {
             annotation_color: "#e03131".into(),
             filename_prefix: "changed".into(),
@@ -453,5 +484,7 @@ mod tests {
         assert_eq!(requested.annotation_outline, current.annotation_outline);
         assert_eq!(requested.annotation_styles, current.annotation_styles);
         assert_eq!(requested.filename_prefix, "changed");
+        assert_eq!(requested.experience.number_appearance, "pixel");
+        assert_eq!(requested.experience.number_palette, "mint");
     }
 }

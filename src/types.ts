@@ -46,6 +46,7 @@ export interface KeyMappingStatus {
 }
 
 export interface ScreenshotConfig {
+  experience?: import("./screenshots/screenshot/components/captureExperience").CaptureExperience;
   toolbar_tools: import("./utils/screenshotTools").ScreenshotToolbarTool[];
   shortcut: string;
   pin_shortcut: string;

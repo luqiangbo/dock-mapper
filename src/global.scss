@@ -33,6 +33,19 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+html[data-main-window],
+html[data-main-window] body,
+html[data-main-window] #root {
+  background-color: var(--main-window-surface);
+}
+
+html[data-window-resizing] *,
+html[data-window-resizing] *::before,
+html[data-window-resizing] *::after {
+  animation-play-state: paused !important;
+  transition: none !important;
+}
+
 button,
 [role="button"],
 input,
