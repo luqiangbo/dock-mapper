@@ -25,7 +25,7 @@ describe("每个二维码中心的简洁结果", () => {
     const html = renderToStaticMarkup(<QrResultOverlay {...props} result={result} />);
     expect(html).toContain("left:120px;top:120px;width:220px");
     expect(html).toContain("left:360px;top:120px;width:220px");
-    expect(html.match(/>复制</g)).toHaveLength(2);
+    expect(html.match(/>复\s*制</g)).toHaveLength(2);
     expect(html).not.toContain("打开链接");
     expect(html).not.toContain("ant-card");
     expect(html).not.toContain("textarea");
@@ -46,6 +46,6 @@ describe("每个二维码中心的简洁结果", () => {
     expect(empty).toContain("未发现二维码");
     const failed = renderToStaticMarkup(<QrResultOverlay {...props} error="识别失败" />);
     expect(failed).toContain("识别失败");
-    expect(failed).toContain("重试");
+    expect(failed).toMatch(/重\s*试/);
   });
 });

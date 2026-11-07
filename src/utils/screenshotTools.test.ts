@@ -16,6 +16,7 @@ describe("常用截图工具", () => {
       "pen",
       "text",
       "mosaic",
+      "translate",
     ]);
     expect(normalizeScreenshotTools()).toHaveLength(defaultScreenshotTools().length);
   });
