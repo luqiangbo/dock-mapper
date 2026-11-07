@@ -3,14 +3,29 @@ import { Button, Spin } from "antd";
 import { invokeCommand } from "../../../api/ipc";
 import type { OcrResult } from "../../../api/screenshotTypes";
 
-function PinOcrText({
+export function ocrBlockPosition(
+  block: OcrResult["blocks"][number],
+  width: number,
+  height: number,
+) {
+  return {
+    left: (block.x / width) * 100 + "%",
+    top: (block.y / height) * 100 + "%",
+    width: (block.width / width) * 100 + "%",
+    height: (block.height / height) * 100 + "%",
+  };
+}
+
+export function PinOcrText({
   block,
   width,
   height,
+  lineBreak = false,
 }: {
   block: OcrResult["blocks"][number];
   width: number;
   height: number;
+  lineBreak?: boolean;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
   useLayoutEffect(() => {
@@ -41,10 +56,7 @@ function PinOcrText({
       data-pin-ocr
       style={{
         position: "absolute",
-        left: (block.x / width) * 100 + "%",
-        top: (block.y / height) * 100 + "%",
-        width: (block.width / width) * 100 + "%",
-        height: (block.height / height) * 100 + "%",
+        ...ocrBlockPosition(block, width, height),
         fontFamily: "Arial",
         color: "transparent",
         whiteSpace: "pre",
@@ -60,6 +72,7 @@ function PinOcrText({
       }}
     >
       {block.text}
+      {lineBreak ? "\n" : ""}
     </span>
   );
 }

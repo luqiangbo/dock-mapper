@@ -75,6 +75,7 @@ function resize(canvas: HTMLCanvasElement, width: number, height: number) {
 
 /** Scratch canvases are reused; the returned patch is copied or encoded immediately. */
 export class MosaicRenderer {
+  private readonly noiseSeed = crypto.getRandomValues(new Uint32Array(1))[0];
   private patch = document.createElement("canvas");
   private sample = document.createElement("canvas");
   private filtered = document.createElement("canvas");
@@ -88,11 +89,23 @@ export class MosaicRenderer {
   ): HTMLCanvasElement {
     resize(this.patch, bounds.width, bounds.height);
     const output = context(this.patch);
-    if (effect === "pixelate") {
+    if (effect === "pixelate" || effect === "random_pixelate") {
       const block = mosaicBlockPixels(strength, zoom);
       const area = mosaicSampleBounds(bounds, base.width, base.height, block);
       const pixels = context(base).getImageData(area.x, area.y, area.width, area.height);
-      const colors = pixelatePixels(pixels.data, area.width, area.height, block);
+      const colors = pixelatePixels(
+        pixels.data,
+        area.width,
+        area.height,
+        block,
+        effect === "random_pixelate"
+          ? {
+              seed: this.noiseSeed,
+              originX: area.x,
+              originY: area.y,
+            }
+          : undefined,
+      );
       resize(this.sample, area.width, area.height);
       context(this.sample).putImageData(new ImageData(colors, area.width, area.height), 0, 0);
       output.drawImage(

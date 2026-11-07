@@ -8,6 +8,7 @@ export const SCREENSHOT_TOOL_IDS = [
   "ellipse",
   "diamond",
   "highlight",
+  "translate",
   "picker",
   "number",
   "eraser",
@@ -27,12 +28,13 @@ export const SCREENSHOT_TOOL_LABELS: Record<ScreenshotToolId, string> = {
   ellipse: "圆形",
   diamond: "菱形",
   highlight: "高亮",
+  translate: "翻译",
   picker: "取色",
   number: "序号",
   eraser: "橡皮擦",
 };
 export function defaultScreenshotTools(): ScreenshotToolbarTool[] {
-  return SCREENSHOT_TOOL_IDS.map((id, index) => ({ id, visible: index < 6 }));
+  return SCREENSHOT_TOOL_IDS.map((id, index) => ({ id, visible: index < 6 || id === "translate" }));
 }
 export function normalizeScreenshotTools(
   value?: readonly ScreenshotToolbarTool[],

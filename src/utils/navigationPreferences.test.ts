@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { isMainNavigation, parseNavigationPreferences } from "./navigationPreferences";
 describe("重新打开配置中心", () => {
+  it("恢复翻译设置标签并接受跳转入口", () => {
+    expect(parseNavigationPreferences('{"page":"screenshot","tab":"translation"}')).toEqual({
+      page: "screenshot",
+      tab: "translation",
+    });
+    expect(isMainNavigation({ page: "screenshot", tab: "translation" })).toBe(true);
+  });
   it("首次使用和损坏偏好进入仪表盘", () => {
     for (const raw of [null, "bad", "null", '{"page":"unknown","tab":"history"}']) {
       expect(parseNavigationPreferences(raw)).toEqual({ page: "dashboard", tab: "history" });

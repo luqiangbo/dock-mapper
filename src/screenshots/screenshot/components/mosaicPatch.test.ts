@@ -2,6 +2,33 @@ import { describe, expect, it } from "vitest";
 import { mosaicBounds, mosaicGrid, mosaicSampleBounds, pixelatePixels } from "./mosaicPatch";
 
 describe("截图马赛克区域", () => {
+  it("随机色块稳定且不透明，同一底图拖动和导出不会重新随机", () => {
+    const pixels = new Uint8ClampedArray(16 * 4 * 4).fill(255);
+    const noise = { seed: 12345, originX: 0, originY: 0 };
+    const first = pixelatePixels(pixels, 16, 4, 2, noise);
+    expect(pixelatePixels(pixels, 16, 4, 2, noise)).toEqual(first);
+    expect(pixelatePixels(pixels, 16, 4, 2, { ...noise, seed: 67890 })).not.toEqual(first);
+    expect(new Set(first.filter((_, index) => index % 4 === 0)).size).toBeGreaterThan(3);
+    expect(first.filter((_, index) => index % 4 === 3).every((alpha) => alpha === 255)).toBe(true);
+  });
+  it("随机马赛克降低原图黑白差异，不直接沿用文字轮廓", () => {
+    const black = new Uint8ClampedArray([0, 0, 0, 255]);
+    const white = new Uint8ClampedArray([255, 255, 255, 255]);
+    const noise = { seed: 12345, originX: 0, originY: 0 };
+    const a = pixelatePixels(black, 1, 1, 2, noise);
+    const b = pixelatePixels(white, 1, 1, 2, noise);
+    expect(Math.abs(a[0] - b[0])).toBeLessThanOrEqual(39);
+  });
+  it("选区改变时同一个全局网格仍使用相同随机色块", () => {
+    const pixels = new Uint8ClampedArray(8 * 4 * 4).fill(255);
+    const whole = pixelatePixels(pixels, 8, 4, 4, { seed: 12345, originX: 0, originY: 0 });
+    const right = pixelatePixels(new Uint8ClampedArray(4 * 4 * 4).fill(255), 4, 4, 4, {
+      seed: 12345,
+      originX: 4,
+      originY: 0,
+    });
+    expect(whole.slice(4 * 4, 5 * 4)).toEqual(right.slice(0, 4));
+  });
   it("正向和反向拖动覆盖相同的物理像素", () => {
     const start = { x: 40.2, y: 20.4 };
     const end = { x: 10.1, y: 4.2 };

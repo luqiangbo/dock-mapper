@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-update-translation-settings"
+description = "Enables the update_translation_settings command without any pre-configured scope."
+commands.allow = ["update_translation_settings"]
+
+[[permission]]
+identifier = "deny-update-translation-settings"
+description = "Denies the update_translation_settings command without any pre-configured scope."
+commands.deny = ["update_translation_settings"]

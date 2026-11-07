@@ -603,6 +603,12 @@
           "markdownDescription": "Enables the get_supported_keys command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_translation_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-translation-settings",
+          "markdownDescription": "Enables the get_translation_settings command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_widget_config command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-widget-config",
@@ -825,6 +831,24 @@
           "markdownDescription": "Enables the sync_widget_dynamic_width command without any pre-configured scope."
         },
         {
+          "description": "Enables the test_translation_service command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-test-translation-service",
+          "markdownDescription": "Enables the test_translation_service command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the translate_ocr_blocks command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-translate-ocr-blocks",
+          "markdownDescription": "Enables the translate_ocr_blocks command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the translate_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-translate-text",
+          "markdownDescription": "Enables the translate_text command without any pre-configured scope."
+        },
+        {
           "description": "Enables the update_capture_preferences command without any pre-configured scope.",
           "type": "string",
           "const": "allow-update-capture-preferences",
@@ -865,6 +889,12 @@
           "type": "string",
           "const": "allow-update-screenshot-config",
           "markdownDescription": "Enables the update_screenshot_config command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_translation_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-update-translation-settings",
+          "markdownDescription": "Enables the update_translation_settings command without any pre-configured scope."
         },
         {
           "description": "Enables the update_widget_config command without any pre-configured scope.",
@@ -1137,6 +1167,12 @@
           "markdownDescription": "Denies the get_supported_keys command without any pre-configured scope."
         },
         {
+          "description": "Denies the get_translation_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-translation-settings",
+          "markdownDescription": "Denies the get_translation_settings command without any pre-configured scope."
+        },
+        {
           "description": "Denies the get_widget_config command without any pre-configured scope.",
           "type": "string",
           "const": "deny-get-widget-config",
@@ -1359,6 +1395,24 @@
           "markdownDescription": "Denies the sync_widget_dynamic_width command without any pre-configured scope."
         },
         {
+          "description": "Denies the test_translation_service command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-test-translation-service",
+          "markdownDescription": "Denies the test_translation_service command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the translate_ocr_blocks command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-translate-ocr-blocks",
+          "markdownDescription": "Denies the translate_ocr_blocks command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the translate_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-translate-text",
+          "markdownDescription": "Denies the translate_text command without any pre-configured scope."
+        },
+        {
           "description": "Denies the update_capture_preferences command without any pre-configured scope.",
           "type": "string",
           "const": "deny-update-capture-preferences",
@@ -1399,6 +1453,12 @@
           "type": "string",
           "const": "deny-update-screenshot-config",
           "markdownDescription": "Denies the update_screenshot_config command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_translation_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-update-translation-settings",
+          "markdownDescription": "Denies the update_translation_settings command without any pre-configured scope."
         },
         {
           "description": "Denies the update_widget_config command without any pre-configured scope.",

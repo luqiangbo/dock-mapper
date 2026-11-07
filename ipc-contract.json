@@ -1,6 +1,11 @@
 {
   "version": 1,
   "commands": [
+    "get_translation_settings",
+    "update_translation_settings",
+    "test_translation_service",
+    "translate_text",
+    "translate_ocr_blocks",
     "initialize_defaults",
     "application_ready",
     "get_startup_status",

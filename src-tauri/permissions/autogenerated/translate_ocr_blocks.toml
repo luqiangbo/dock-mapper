@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-translate-ocr-blocks"
+description = "Enables the translate_ocr_blocks command without any pre-configured scope."
+commands.allow = ["translate_ocr_blocks"]
+
+[[permission]]
+identifier = "deny-translate-ocr-blocks"
+description = "Denies the translate_ocr_blocks command without any pre-configured scope."
+commands.deny = ["translate_ocr_blocks"]

@@ -1,0 +1,411 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  container-type: inline-size;
+}
+
+.card {
+  min-width: 0;
+  background: var(--glass-surface);
+  border-color: var(--glass-border);
+  :global(.ant-card-head) {
+    min-height: 38px;
+    padding-inline: 12px;
+    border-color: var(--glass-border);
+  }
+  :global(.ant-card-head-title) {
+    font-size: 14px;
+    padding-block: 8px;
+  }
+  :global(.ant-card-body) {
+    padding: 12px;
+  }
+  :global(.ant-card-extra) {
+    padding-block: 4px;
+  }
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+
+  h3 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  p {
+    margin: 4px 0 0;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  > :global(.ant-btn) {
+    flex-shrink: 0;
+  }
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.saveStatus {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  white-space: nowrap;
+  &[data-error="true"] {
+    color: var(--danger);
+  }
+}
+
+.form {
+  :global(.ant-form-item) {
+    min-width: 0;
+    margin-bottom: 8px;
+  }
+  :global(.ant-form-item-label) {
+    display: flex;
+    align-items: center;
+    height: 24px;
+    padding: 0;
+  }
+  :global(.ant-form-item-label > label) {
+    height: 24px;
+    line-height: 24px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  :global(.ant-select) {
+    width: 100%;
+  }
+}
+
+.baiduCredentials {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.deeplCredentials {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 12px;
+}
+.keyRow {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  > :global(.ant-input-affix-wrapper) {
+    min-width: 0;
+    flex: 1;
+  }
+}
+.configurationNote {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.trial {
+  min-width: 0;
+}
+.workspace {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface-base);
+}
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.output {
+  border-left: 1px solid var(--glass-border);
+  background: color-mix(in srgb, var(--accent-soft) 25%, var(--surface-base));
+}
+.paneHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-height: 30px;
+  padding: 3px 10px;
+  gap: 8px;
+  border-bottom: 1px solid var(--glass-border);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  small {
+    margin-left: 6px;
+    color: var(--text-tertiary);
+    font-weight: 400;
+    font-size: 12px;
+  }
+}
+.editor:global(.ant-input) {
+  display: block;
+  height: 120px;
+  min-height: 120px;
+  max-height: 120px;
+  padding: 10px;
+  border: 0;
+  border-radius: 0;
+  resize: none;
+  background: transparent;
+  color: var(--text-primary);
+  box-shadow: none;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.75;
+  &:focus-visible {
+    outline-offset: -2px;
+  }
+}
+.outputBody {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.pending {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.resultError {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  left: 12px;
+  max-height: calc(100% - 24px);
+  overflow: auto;
+}
+.paneFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+  margin-top: auto;
+  padding: 3px 10px;
+  gap: 8px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  &[data-error="true"] {
+    color: var(--danger);
+  }
+}
+.privacyNote {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-tertiary);
+}
+
+@container (max-width: 600px) {
+  .sectionHeader {
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .headerActions {
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+  }
+  .configuration {
+    padding: 12px;
+  }
+  .paneHeader {
+    padding-inline: 10px;
+    small {
+      margin-left: 3px;
+    }
+  }
+}
+
+@container (max-width: 430px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+  .output {
+    border-left: 0;
+    border-top: 1px solid var(--glass-border);
+  }
+}
+
+.languageGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.credentialFields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.editActions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 0;
+}
+
+.topGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+.serviceRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.operationStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.switchConfirmation {
+  margin-bottom: 8px;
+}
+.confirmActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+@container (max-width: 679px) {
+  .topGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@container (max-width: 430px) {
+  .baiduCredentials,
+  .deeplCredentials {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+}
+
+.serviceConfig .providerSelect:global(.ant-select) {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+}
+.languageGrid {
+  grid-template-columns: repeat(2, minmax(0, 180px));
+}
+
+.serviceConfig > :global(.ant-card-body) > .form {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.serviceConfig .serviceRow,
+.serviceConfig .summary {
+  margin-bottom: 0;
+  flex: 1 1 calc(50% - 6px);
+  min-width: 0;
+}
+.serviceConfig .credentialFields {
+  flex-basis: 100%;
+}
+.credentialFields :global(.ant-form-item-row) {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+.credentialFields :global(.ant-form-item-label) {
+  flex: 0 0 auto;
+  padding: 0;
+}
+.credentialFields :global(.ant-form-item-control) {
+  flex: 1;
+  min-width: 0;
+}
+.languageConfig > :global(.ant-card-body) {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.languageConfig > .sectionHeader {
+  margin: 0;
+  gap: 12px;
+}
+.languageConfig .form :global(.ant-form-item) {
+  margin-bottom: 0;
+}
+.languageConfig .languageGrid {
+  grid-template-columns: repeat(2, minmax(0, 160px));
+}
+.languageConfig .form :global(.ant-form-item-row) {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+.languageConfig .form :global(.ant-form-item-label) {
+  padding: 0;
+}
+.languageConfig .form :global(.ant-form-item-control) {
+  flex: 1;
+  min-width: 0;
+}
+
+.serviceConfig > .sectionHeader {
+  margin: 0;
+  gap: 12px;
+}
+.serviceConfig > :global(.ant-card-body) > .form {
+  flex: 1;
+  min-width: min(100%, 220px);
+}
+.serviceConfig .configurationNote,
+.serviceConfig :global(.ant-card-body) > :global(.ant-alert) {
+  flex-basis: 100%;
+}
+
+.serviceConfig :global(.ant-card-body) > :global(.ant-alert),
+.languageConfig :global(.ant-card-body) > :global(.ant-alert) {
+  margin-top: 8px;
+}
+.serviceConfig .configurationNote {
+  margin-top: 8px;
+}
+.headerActions .editActions {
+  margin-bottom: 0;
+}

@@ -25,6 +25,8 @@ interface Options {
   save?: () => void;
   pin?: () => void;
   ocr?: () => void;
+  selectedOcrText?: () => string;
+  copyOcrSelection?: (text: string) => void;
   changeTool?: (tool: string) => void;
 }
 
@@ -42,6 +44,7 @@ export function overlayKeyAction(
   | "save"
   | "pin"
   | "ocr"
+  | "copy-ocr-selection"
   | `tool:${string}`
   | null {
   if (event.isComposing || event.key === "Process") return null;
@@ -58,6 +61,7 @@ export function overlayKeyAction(
   if (options.busy) return null;
   const modifier = event.ctrlKey || event.metaKey;
   const key = event.key.toLowerCase();
+  if (modifier && key === "c" && options.selectedOcrText?.()) return "copy-ocr-selection";
   if (modifier && key === "c")
     return options.phase === "editing" && options.shotReady && !options.hasEditorSelection
       ? "confirm"
@@ -128,6 +132,8 @@ export function useOverlayKeyboard(options: Options): void {
       else if (action === "save") options.save?.();
       else if (action === "pin") options.pin?.();
       else if (action === "ocr") options.ocr?.();
+      else if (action === "copy-ocr-selection")
+        options.copyOcrSelection?.(options.selectedOcrText?.() ?? "");
       else if (action.startsWith("tool:")) options.changeTool?.(action.slice(5));
       else options.copyPickerHex();
     };

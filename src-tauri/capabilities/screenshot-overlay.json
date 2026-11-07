@@ -2,10 +2,11 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "screenshot-overlay",
   "description": "冻结截图编辑器仅拥有选区、标注、识别和输出所需权限",
-  "windows": [
-    "overlay-*"
-  ],
+  "windows": ["overlay-*"],
   "permissions": [
+    "allow-get-translation-settings",
+    "allow-translate-text",
+    "allow-translate-ocr-blocks",
     "core:event:allow-listen",
     "core:event:allow-emit-to",
     "core:event:allow-unlisten",

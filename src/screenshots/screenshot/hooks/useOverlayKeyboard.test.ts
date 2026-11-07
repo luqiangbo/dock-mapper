@@ -29,6 +29,14 @@ const event = (key: string, control = false) => ({
   isComposing: false,
 });
 describe("截图宿主快捷键", () => {
+  it("选中截图文字时复制文字，清除文字选区后恢复复制图片", () => {
+    expect(overlayKeyAction(event("c", true), { ...options, selectedOcrText: () => "文字" })).toBe(
+      "copy-ocr-selection",
+    );
+    expect(overlayKeyAction(event("c", true), { ...options, selectedOcrText: () => "" })).toBe(
+      "confirm",
+    );
+  });
   it("保存和贴图仅在图片就绪时响应", () => {
     const output = { ...options, save: vi.fn(), pin: vi.fn() };
     expect(overlayKeyAction(event("s", true), output)).toBe("save");

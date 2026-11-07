@@ -3,6 +3,18 @@ import { cloneAnnotationStyles, DEFAULT_ANNOTATION_STYLES } from "./annotationSt
 import type { ScreenshotAnnotationStyles } from "../../../types";
 
 describe("马赛克样式读取", () => {
+  it("随机像素块可保存恢复，也能切回原来的像素块", () => {
+    const styles = cloneAnnotationStyles(DEFAULT_ANNOTATION_STYLES);
+    styles.mosaic.mosaic_effect = "random_pixelate";
+    styles.mosaic.block_size = 24;
+    const restored = cloneAnnotationStyles(JSON.parse(JSON.stringify(styles)));
+    expect(restored.mosaic.mosaic_effect).toBe("random_pixelate");
+    restored.mosaic.mosaic_effect = "pixelate";
+    expect(cloneAnnotationStyles(restored).mosaic).toMatchObject({
+      mosaic_effect: "pixelate",
+      block_size: 24,
+    });
+  });
   it("旧配置保留颗粒大小并默认使用像素块", () => {
     const old = structuredClone(DEFAULT_ANNOTATION_STYLES) as unknown as Record<
       string,

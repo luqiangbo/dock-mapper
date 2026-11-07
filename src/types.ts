@@ -87,7 +87,7 @@ export type AnnotationArrowhead =
  * One persisted tool preset. Fields that are not meaningful for a given tool
  * are retained so the native config has one forward-compatible wire shape.
  */
-export type MosaicEffect = "pixelate" | "blur";
+export type MosaicEffect = "pixelate" | "random_pixelate" | "blur";
 
 export interface AnnotationToolStyleConfig {
   stroke_color: string;

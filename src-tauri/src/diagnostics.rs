@@ -91,6 +91,29 @@ pub fn initialize(app: &AppHandle) -> Result<DiagnosticsState, String> {
     })
 }
 
+fn sanitized_config(
+    config: &crate::config::AppConfig,
+    transient_image_count: usize,
+    transient_image_bytes: usize,
+    screenshot_history_count: usize,
+) -> SanitizedConfig {
+    SanitizedConfig {
+        mapping_count: config.key_mappings.len(),
+        memory_scheme: config.widget_config.memory_scheme,
+        refresh_interval_secs: config.widget_config.refresh_interval_secs,
+        has_selected_network_interface: config.widget_config.network_interface.is_some(),
+        minimize_to_tray: config.minimize_to_tray,
+        screenshot_shortcut: config.screenshot_config.shortcut.clone(),
+        has_custom_save_directory: config.screenshot_config.save_directory.is_some(),
+        color_copy_format: config.screenshot_config.color_copy_format,
+        has_applied_scancode_snapshot: config.applied_scancode_map.is_some(),
+        backup_available: config.scancode_map_backup.is_some(),
+        transient_image_count,
+        transient_image_bytes,
+        screenshot_history_count,
+    }
+}
+
 pub fn export(
     app: &AppHandle,
     state: State<'_, AppState>,
@@ -107,21 +130,12 @@ pub fn export(
         .state::<crate::sys_monitor::SysMonitorControl>()
         .metrics
         .snapshot()?;
-    let sanitized = SanitizedConfig {
-        mapping_count: config.key_mappings.len(),
-        memory_scheme: config.widget_config.memory_scheme,
-        refresh_interval_secs: config.widget_config.refresh_interval_secs,
-        has_selected_network_interface: config.widget_config.network_interface.is_some(),
-        minimize_to_tray: config.minimize_to_tray,
-        screenshot_shortcut: config.screenshot_config.shortcut,
-        has_custom_save_directory: config.screenshot_config.save_directory.is_some(),
-        color_copy_format: config.screenshot_config.color_copy_format,
-        has_applied_scancode_snapshot: config.applied_scancode_map.is_some(),
-        backup_available: config.scancode_map_backup.is_some(),
+    let sanitized = sanitized_config(
+        &config,
         transient_image_count,
         transient_image_bytes,
         screenshot_history_count,
-    };
+    );
     let Some(path) = rfd::FileDialog::new()
         .set_title("导出 DockMapper 诊断信息")
         .set_file_name("DockMapper-diagnostics.txt")
@@ -220,6 +234,17 @@ fn prune_logs(log_dir: &PathBuf) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn translation_credentials_and_text_are_excluded_from_diagnostic_config() {
+        let mut config = crate::config::AppConfig::default();
+        config.translation_config.deepl_key = Some("plaintext-private-key".into());
+        config.translation_config.baidu_key = Some("private-baidu-key".into());
+        let report = serde_json::to_string(&super::sanitized_config(&config, 0, 0, 0)).unwrap();
+        assert!(!report.contains("plaintext-private-key"));
+        assert!(!report.contains("private-baidu-key"));
+        assert!(!report.contains("translation"));
+    }
+
     use super::*;
 
     #[test]

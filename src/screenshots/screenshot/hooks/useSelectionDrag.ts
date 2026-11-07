@@ -119,7 +119,7 @@ export function useSelectionDrag<Baseline>(options: {
         event.metaKey ||
         (event.target instanceof Element &&
           event.target.closest(
-            'input,textarea,button,select,[role="button"],[contenteditable="true"],.wx-toolbar,.tool-options,.ant-modal,.ant-dropdown,.ant-popover,[data-picker-controls]',
+            'input,textarea,button,select,[role="button"],[role="dialog"],[contenteditable="true"],.wx-toolbar,.tool-options,.ant-modal,.ant-dropdown,.ant-popover,[data-picker-controls]',
           ))
       )
         return;

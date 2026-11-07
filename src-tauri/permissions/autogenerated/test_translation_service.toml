@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-test-translation-service"
+description = "Enables the test_translation_service command without any pre-configured scope."
+commands.allow = ["test_translation_service"]
+
+[[permission]]
+identifier = "deny-test-translation-service"
+description = "Denies the test_translation_service command without any pre-configured scope."
+commands.deny = ["test_translation_service"]

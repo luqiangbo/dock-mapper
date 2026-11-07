@@ -22,15 +22,18 @@ export function useOcr({ enabled, exportPng, engineFailed }: Options) {
   const request = useRef(new RequestGeneration());
   const [panel, setPanel] = useState<OcrPanelState>(EMPTY);
   const [running, setRunning] = useState(false);
+  const inFlight = useRef(false);
 
   const dismiss = useCallback(() => {
     request.current.cancel();
+    inFlight.current = false;
     setRunning(false);
     setPanel(EMPTY);
   }, []);
 
   const recognize = useCallback(() => {
-    if (!enabled || running) return;
+    if (!enabled || inFlight.current) return;
+    inFlight.current = true;
     const generation = request.current.next();
     setPanel({ result: null, error: null, pending: true, elapsedMs: null });
     setRunning(true);
@@ -55,10 +58,13 @@ export function useOcr({ enabled, exportPng, engineFailed }: Options) {
         const message = error instanceof Error ? error.message : engineFailed;
         setPanel({ result: null, error: message, pending: false, elapsedMs: null });
       } finally {
-        if (request.current.isCurrent(generation)) setRunning(false);
+        if (request.current.isCurrent(generation)) {
+          inFlight.current = false;
+          setRunning(false);
+        }
       }
     })();
-  }, [enabled, engineFailed, exportPng, running]);
+  }, [enabled, engineFailed, exportPng]);
 
   return { panel, running, recognize, dismiss };
 }

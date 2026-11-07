@@ -497,6 +497,7 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             value={settings.mosaicEffect}
             options={[
               { value: "pixelate", label: "像素块" },
+              { value: "random_pixelate", label: "随机像素块" },
               {
                 value: "blur",
                 label: (
@@ -509,7 +510,11 @@ const ToolOptionsBar = forwardRef<HTMLDivElement, Props>(function ToolOptionsBar
             ]}
             name="mosaic-effect"
             compactWidth={98}
-            change={(value) => onChange({ mosaicEffect: value === "blur" ? "blur" : "pixelate" })}
+            change={(value) =>
+              onChange({
+                mosaicEffect: value === "blur" || value === "random_pixelate" ? value : "pixelate",
+              })
+            }
             popup={popup}
           />
           <Choice

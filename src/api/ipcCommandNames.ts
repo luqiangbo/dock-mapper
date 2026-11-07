@@ -3,6 +3,12 @@ import type { CommandName } from "./ipc";
 // Kept as a literal tuple so TypeScript can prove every typed command is
 // represented in the Rust build manifest loaded from ipc-contract.json.
 export const IPC_COMMAND_NAMES = [
+  "get_translation_settings",
+  "update_translation_settings",
+  "test_translation_service",
+  "translate_text",
+  "translate_ocr_blocks",
+
   "schedule_screenshot",
   "update_capture_preferences",
   "restore_closed_pin",

@@ -2,10 +2,13 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-window",
   "description": "DockMapper 主配置窗口的最小权限",
-  "windows": [
-    "main"
-  ],
+  "windows": ["main"],
   "permissions": [
+    "allow-get-translation-settings",
+    "allow-update-translation-settings",
+    "allow-test-translation-service",
+    "allow-translate-text",
+    "allow-translate-ocr-blocks",
     "allow-initialize-defaults",
     "allow-application-ready",
     "allow-get-startup-status",
@@ -71,7 +74,9 @@
       "allow": [
         {
           "url": "https://github.com/luqiangbo/dock-mapper*"
-        }
+        },
+        { "url": "https://fanyi-api.baidu.com/manage/developer" },
+        { "url": "https://www.deepl.com/pro-api" }
       ]
     },
     "allow-get-key-visualizer-session",

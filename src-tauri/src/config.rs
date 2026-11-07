@@ -69,6 +69,7 @@ pub struct AppConfig {
     pub widget_config: WidgetConfig,
     pub minimize_to_tray: bool,
     pub screenshot_config: ScreenshotConfig,
+    pub translation_config: crate::translation::settings::TranslationConfig,
     pub color_palette: ColorPaletteConfig,
     pub key_visualizer_config: KeyVisualizerConfig,
     #[serde(default, rename = "presentation_config", skip_serializing)]
@@ -371,6 +372,7 @@ pub fn default_screenshot_toolbar_tools() -> Vec<ScreenshotToolbarTool> {
         "ellipse",
         "diamond",
         "highlight",
+        "translate",
         "picker",
         "number",
         "eraser",
@@ -379,7 +381,7 @@ pub fn default_screenshot_toolbar_tools() -> Vec<ScreenshotToolbarTool> {
     .enumerate()
     .map(|(index, id)| ScreenshotToolbarTool {
         id: id.into(),
-        visible: index < 6,
+        visible: index < 6 || id == "translate",
     })
     .collect()
 }
@@ -442,7 +444,31 @@ mod screenshot_toolbar_tests {
         assert_eq!(reopened.annotation_styles.pen.stroke_width, 7.0);
     }
     #[test]
-    fn old_settings_keep_the_original_six_visible_tools() {
+    fn translation_is_added_to_old_toolbar_but_never_restored_as_a_drawing_tool() {
+        let mut config = ScreenshotConfig::default();
+        config.toolbar_tools.retain(|tool| tool.id != "translate");
+        config.experience.last_tool = "translate".into();
+        normalize_screenshot_config(&mut config);
+        assert!(config
+            .toolbar_tools
+            .iter()
+            .any(|tool| tool.id == "translate" && tool.visible));
+        assert_eq!(config.experience.last_tool, "select");
+        let index = config
+            .toolbar_tools
+            .iter()
+            .position(|tool| tool.id == "translate")
+            .unwrap();
+        config.toolbar_tools.swap(0, index);
+        config.toolbar_tools[0].visible = false;
+        let mut read: ScreenshotConfig =
+            serde_json::from_slice(&serde_json::to_vec(&config).unwrap()).unwrap();
+        normalize_screenshot_config(&mut read);
+        assert_eq!(read.toolbar_tools[0].id, "translate");
+        assert!(!read.toolbar_tools[0].visible);
+    }
+    #[test]
+    fn old_settings_keep_original_tools_and_gain_visible_translation() {
         let config: ScreenshotConfig = serde_json::from_str("{}").unwrap();
         assert_eq!(
             config
@@ -451,7 +477,15 @@ mod screenshot_toolbar_tests {
                 .filter(|tool| tool.visible)
                 .map(|tool| tool.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["select", "rect", "arrow", "pen", "text", "mosaic"]
+            vec![
+                "select",
+                "rect",
+                "arrow",
+                "pen",
+                "text",
+                "mosaic",
+                "translate"
+            ]
         );
     }
     #[test]
@@ -551,6 +585,7 @@ pub enum AnnotationArrowhead {
 #[serde(rename_all = "snake_case")]
 pub enum MosaicEffect {
     Pixelate,
+    RandomPixelate,
     Blur,
     #[serde(other)]
     Unknown,
@@ -676,6 +711,7 @@ impl Default for AppConfig {
             widget_config: WidgetConfig::default(),
             minimize_to_tray: true,
             screenshot_config: ScreenshotConfig::default(),
+            translation_config: Default::default(),
             color_palette: ColorPaletteConfig::default(),
             key_visualizer_config: KeyVisualizerConfig::default(),
             legacy_presentation_config: None,
@@ -954,6 +990,27 @@ mod tests {
             MosaicEffect::Pixelate
         );
         assert_eq!(config.annotation_styles.mosaic.blur_radius, 12);
+    }
+
+    #[test]
+    fn random_pixelate_survives_normalization_and_roundtrip_and_can_return_to_classic() {
+        let mut config: ScreenshotConfig = serde_json::from_str(
+            r#"{"annotation_styles":{"mosaic":{"mosaic_effect":"random_pixelate","block_size":24}}}"#,
+        ).unwrap();
+        normalize_screenshot_config(&mut config);
+        let mut reopened: ScreenshotConfig =
+            serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
+        assert_eq!(
+            reopened.annotation_styles.mosaic.mosaic_effect,
+            MosaicEffect::RandomPixelate
+        );
+        reopened.annotation_styles.mosaic.mosaic_effect = MosaicEffect::Pixelate;
+        normalize_screenshot_config(&mut reopened);
+        assert_eq!(
+            reopened.annotation_styles.mosaic.mosaic_effect,
+            MosaicEffect::Pixelate
+        );
+        assert_eq!(reopened.annotation_styles.mosaic.block_size, 24);
     }
 
     #[test]

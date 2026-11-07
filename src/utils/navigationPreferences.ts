@@ -5,7 +5,7 @@ export type PageKey =
   | "screenshot"
   | "widget"
   | "settings";
-export type ScreenshotTabKey = "history" | "settings";
+export type ScreenshotTabKey = "history" | "settings" | "translation";
 export interface MainNavigation {
   page: PageKey;
   tab?: ScreenshotTabKey;
@@ -28,7 +28,11 @@ export function parseNavigationPreferences(raw: string | null): NavigationPrefer
   try {
     if (!raw) return fallback;
     const value = JSON.parse(raw);
-    if (!value || !PAGES.includes(value.page) || !["history", "settings"].includes(value.tab))
+    if (
+      !value ||
+      !PAGES.includes(value.page) ||
+      !["history", "settings", "translation"].includes(value.tab)
+    )
       return fallback;
     return { page: value.page, tab: value.tab };
   } catch {
@@ -49,6 +53,9 @@ export function isMainNavigation(value: MainNavigation): boolean {
   return (
     !!value &&
     PAGES.includes(value.page) &&
-    (value.tab === undefined || value.tab === "history" || value.tab === "settings")
+    (value.tab === undefined ||
+      value.tab === "history" ||
+      value.tab === "settings" ||
+      value.tab === "translation")
   );
 }

@@ -47,7 +47,10 @@ export function cloneAnnotationStyles(
       {
         ...DEFAULT_TOOL_STYLE,
         ...value,
-        mosaic_effect: value.mosaic_effect === "blur" ? "blur" : "pixelate",
+        mosaic_effect:
+          value.mosaic_effect === "blur" || value.mosaic_effect === "random_pixelate"
+            ? value.mosaic_effect
+            : "pixelate",
         blur_radius: Math.max(
           2,
           Math.min(32, Math.round(Number.isFinite(value.blur_radius) ? value.blur_radius : 12)),

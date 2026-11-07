@@ -30,6 +30,7 @@ mod screenshot;
 mod startup_runtime;
 mod sys_monitor;
 mod taskbar;
+mod translation;
 mod tray;
 mod visualizer_effects;
 mod widget;
@@ -168,6 +169,11 @@ pub fn run() {
             result
         })
         .invoke_handler(tauri::generate_handler![
+            translation::get_translation_settings,
+            translation::update_translation_settings,
+            translation::test_translation_service,
+            translation::translate_text,
+            translation::translate_ocr_blocks,
             defaults_bootstrap::initialize_defaults,
             defaults_bootstrap::application_ready,
             defaults_bootstrap::get_startup_status,

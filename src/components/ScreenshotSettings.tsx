@@ -1,3 +1,4 @@
+import TranslationSettings from "./TranslationSettings";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { captureStartup } from "./captureStartupRuntime";
 import { captureStarting } from "./captureStartup";
@@ -42,8 +43,8 @@ import { takeDetachedAutosaveError, waitForPendingAutosave } from "../hooks/queu
 
 const { Text } = Typography;
 interface ScreenshotSettingsProps {
-  activeTab: "history" | "settings";
-  onActiveTabChange: (tab: "history" | "settings") => void;
+  activeTab: "history" | "settings" | "translation";
+  onActiveTabChange: (tab: "history" | "settings" | "translation") => void;
 }
 const shortcutFields: Array<
   [ScreenshotShortcutField, string, string, ShortcutRuntimeStatus["actionId"]]
@@ -437,7 +438,7 @@ export default function ScreenshotSettings({
       <Tabs
         destroyOnHidden={false}
         activeKey={activeTab}
-        onChange={(key) => onActiveTabChange(key as "history" | "settings")}
+        onChange={(key) => onActiveTabChange(key as "history" | "settings" | "translation")}
         items={[
           {
             key: "history",
@@ -452,6 +453,15 @@ export default function ScreenshotSettings({
             key: "settings",
             label: "截图设置",
             children: <PageScope active={activeTab === "settings"}>{settings}</PageScope>,
+          },
+          {
+            key: "translation",
+            label: "翻译设置",
+            children: (
+              <PageScope active={activeTab === "translation"}>
+                <TranslationSettings />
+              </PageScope>
+            ),
           },
         ]}
       />

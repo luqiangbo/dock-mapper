@@ -60,7 +60,7 @@ import { SYSTEM_FONTS } from "./systemFonts";
 export interface ExcalidrawScreenshotEditorHandle {
   clearSelection: () => void;
   hitTest: (clientX: number, clientY: number) => boolean;
-  exportPng: () => Promise<Uint8Array>;
+  exportPng: (background?: HTMLCanvasElement) => Promise<Uint8Array>;
   setTool: (tool: AnnotTool) => void;
   applyStyle: (changes: ExcalidrawStyleChanges, commit?: boolean) => void;
   undo: () => void;
@@ -763,9 +763,9 @@ const ExcalidrawScreenshotEditor = forwardRef<ExcalidrawScreenshotEditorHandle, 
           }
           return elements.some((element) => annotationHitTest(element, point, margin));
         },
-        exportPng: async () => {
+        exportPng: async (background) => {
           const api = apiRef.current;
-          const base = props.baseCanvas;
+          const base = background ?? props.baseCanvas;
           if (!api || !base || !ready) throw new Error("截图编辑器尚未准备完成");
           const annotationElements = api.getSceneElements().filter((element) => !element.locked);
           if (!annotationElements.length) {

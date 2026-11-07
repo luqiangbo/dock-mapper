@@ -50,12 +50,28 @@ export function mosaicSampleBounds(
   };
 }
 
-/** Average premultiplied color; transparent RGB never bleeds into a cell. */
+export interface MosaicNoise {
+  seed: number;
+  originX: number;
+  originY: number;
+}
+
+function cellNoise(seed: number, x: number, y: number, block: number) {
+  let value =
+    seed ^ Math.imul(x, 0x9e3779b1) ^ Math.imul(y, 0x85ebca6b) ^ Math.imul(block, 0xc2b2ae35);
+  value = Math.imul(value ^ (value >>> 16), 0x7feb352d);
+  value = Math.imul(value ^ (value >>> 15), 0x846ca68b);
+  return ((value ^ (value >>> 16)) >>> 0) / 0x100000000;
+}
+
+/** Optional stable noise suppresses source contrast without per-frame flicker.
+ * This is a visual obfuscation effect, not irreversible redaction. */
 export function pixelatePixels(
   data: Uint8ClampedArray,
   width: number,
   height: number,
   block: number,
+  noise?: MosaicNoise,
 ): Uint8ClampedArray<ArrayBuffer> {
   const output = new Uint8ClampedArray(data.length);
   for (let y = 0; y < height; y += block) {
@@ -82,6 +98,15 @@ export function pixelatePixels(
         alpha ? blue / alpha : 0,
         alpha / ((right - x) * (bottom - y)),
       ];
+      if (noise) {
+        const neutral =
+          48 +
+          cellNoise(noise.seed, (noise.originX + x) / block, (noise.originY + y) / block, block) *
+            160;
+        for (let channel = 0; channel < 3; channel++)
+          color[channel] = color[channel] * 0.15 + neutral * 0.85;
+        color[3] = 255;
+      }
       for (let col = x; col < right; col++) output.set(color, (y * width + col) * 4);
       const firstRow = (y * width + x) * 4;
       for (let row = y + 1; row < bottom; row++) {

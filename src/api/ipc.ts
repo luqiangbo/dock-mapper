@@ -46,6 +46,23 @@ export interface NativeStartupStatus {
 }
 
 interface CommandContract {
+  translate_ocr_blocks: {
+    args: { request: import("./translation").BlockTranslationRequest };
+    result: import("./translation").TranslationBlock[];
+  };
+  get_translation_settings: {
+    args: undefined;
+    result: import("./translation").TranslationSettings;
+  };
+  update_translation_settings: {
+    args: { draft: import("./translation").TranslationSettingsDraft };
+    result: import("./translation").TranslationSettings;
+  };
+  test_translation_service: {
+    args: { draft: import("./translation").TranslationSettingsDraft; text: string };
+    result: string;
+  };
+  translate_text: { args: { request: import("./translation").TranslationRequest }; result: string };
   schedule_screenshot: {
     args: {
       delayMs: number;

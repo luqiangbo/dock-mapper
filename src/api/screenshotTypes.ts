@@ -59,6 +59,9 @@ export interface OcrTextBlock {
 
 export interface QrDecodeResult {
   contents: string[];
+  width: number;
+  height: number;
+  codes: Array<{ content: string; centerX: number; centerY: number }>;
 }
 
 export interface ScreenshotHistorySummary {

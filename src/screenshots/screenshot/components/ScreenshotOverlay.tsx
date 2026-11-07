@@ -1,3 +1,9 @@
+import type { QrDecodeResult } from "../../../api/screenshotTypes";
+import { QrResultOverlay } from "./QrResultOverlay";
+import { translationExportBackground } from "./translationAppearance";
+import { useScreenshotTranslation } from "../hooks/useScreenshotTranslation";
+import { useAutomaticOcr } from "../hooks/useAutomaticOcr";
+import { OcrSelectionLayer, selectedOcrText } from "./OcrSelectionLayer";
 import {
   useCallback,
   useEffect,
@@ -11,7 +17,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCaptureBootstrap } from "../hooks/useCaptureBootstrap";
 import { paintCaptureBackground } from "./captureBackground";
 import { EMPTY_EDITOR_HISTORY } from "./editorHistory";
-import { Button } from "antd";
+import { Button, Spin } from "antd";
 import type { CaptureSelectionTrace, WindowCandidate } from "../../../api/screenshotTypes";
 import type { AnnotationOutlineConfig, MosaicEffect } from "../../../types";
 import { supportsCanvasBlur } from "./mosaicRenderer";
@@ -271,12 +277,15 @@ function ScreenshotOverlay(): React.JSX.Element {
   const overlayLabel = getCurrentWindow().label;
   const bgRef = useRef<HTMLCanvasElement>(null);
   const shotRef = useRef<HTMLCanvasElement>(null);
+  const translationCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const excalidrawEditorRef = useRef<ExcalidrawScreenshotEditorHandle>(null);
   const shotBaseRef = useRef<HTMLCanvasElement | null>(null);
   const shotViewportRef = useRef<HTMLDivElement>(null);
   const fullImageRef = useRef<HTMLImageElement | null>(null);
   const colorSampleCanvas = useRef<HTMLCanvasElement | null>(null);
   const ocrAutoCopy = useRef<number | null>(null);
+  const quickOcrRef = useRef(false);
+  const [ocrPanelOpen, setOcrPanelOpen] = useState(false);
   const [capturedCursor, setCapturedCursor] =
     useState<import("../../../api/screenshotTypes").FullScreenshot["cursor"]>(null);
   const enteredEditAt = useRef(0);
@@ -491,14 +500,11 @@ function ScreenshotOverlay(): React.JSX.Element {
   const [pickerCopied, setPickerCopied] = useState(false);
   const [aspectPreset, setAspectPreset] = useState<AspectPreset>("free");
   const [aspectRatio, setAspectRatio] = useState<AspectRatio | null>(null);
-  const [qrContents, setQrContents] = useState<string[] | null>(null);
-  const [qrCopyState, setQrCopyState] = useState<{
-    content: string;
-    state: "copied" | "failed";
-  } | null>(null);
+  const [qrResult, setQrResult] = useState<QrDecodeResult | null>(null);
+  const [qrPending, setQrPending] = useState(false);
+  const [qrError, setQrError] = useState("");
   const [ocrCopyState, setOcrCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const ocrCopyResetTimer = useRef<number | null>(null);
-  const qrCopyResetTimer = useRef<number | null>(null);
   const [arrowStyle, setArrowStyle] = useState<ArrowStyle>("straight");
   const activeVisual = visuals[visualToolFor(tool) ?? "frame"];
   const lineStyle = "lineStyle" in activeVisual ? activeVisual.lineStyle : DEFAULT_LINE_STYLE;
@@ -610,11 +616,10 @@ function ScreenshotOverlay(): React.JSX.Element {
 
   useEffect(() => {
     qrRequest.current.cancel();
-    setQrContents(null);
-    if (qrCopyResetTimer.current !== null) window.clearTimeout(qrCopyResetTimer.current);
-    qrCopyResetTimer.current = null;
-    setQrCopyState(null);
-  }, [selection?.x, selection?.y, selection?.width, selection?.height]);
+    setQrResult(null);
+    setQrPending(false);
+    setQrError("");
+  }, [phase, selection?.x, selection?.y, selection?.width, selection?.height]);
 
   useEffect(() => {
     if (phase !== "editing") {
@@ -963,51 +968,45 @@ function ScreenshotOverlay(): React.JSX.Element {
     [],
   );
 
-  const exportRawPng = useCallback(async (): Promise<Uint8Array> => {
-    if (editorReady && excalidrawEditorRef.current) return excalidrawEditorRef.current.exportPng();
-    const canvas = shotRef.current;
-    if (!canvas) throw new Error("No canvas");
+  const exportRawPng = useCallback(
+    async (background?: HTMLCanvasElement | null): Promise<Uint8Array> => {
+      if (editorReady && excalidrawEditorRef.current)
+        return excalidrawEditorRef.current.exportPng(background ?? undefined);
+      const canvas = shotRef.current;
+      if (!canvas) throw new Error("No canvas");
 
-    // A failed editor initialization must not make the capture unusable.
-    // The visible canvas is the untouched physical-pixel crop in this state.
-    if (editorStatus === "loading") throw new Error("标注编辑器仍在加载，请稍候");
-    if (editorStatus === "failed") {
+      // A failed editor initialization must not make the capture unusable.
+      // The visible canvas is the untouched physical-pixel crop in this state.
+      if (editorStatus === "loading") throw new Error("标注编辑器仍在加载，请稍候");
+      const exportCanvas = document.createElement("canvas");
+      exportCanvas.width = canvas.width;
+      exportCanvas.height = canvas.height;
+      const ctx = exportCanvas.getContext("2d");
+      if (!ctx) throw new Error("Canvas unavailable");
+      ctx.imageSmoothingEnabled = false;
+      const base = background ?? shotBaseRef.current;
+      if (!base) throw new Error("Screenshot base is unavailable");
+      // Export must regenerate RoughJS drawables from the immutable scene so the
+      // saved PNG cannot reuse a stale preview cache entry.
+      clearArrowRenderCache();
+      renderWhiteboardScene(
+        ctx,
+        base,
+        sceneElements,
+        canvas.width / Math.max(1, selection?.width ?? canvas.width),
+        true,
+      );
+
       const blob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob(
-          (value) => (value ? resolve(value) : reject(new Error("toBlob failed"))),
+        exportCanvas.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error("toBlob failed"))),
           "image/png",
         );
       });
       return new Uint8Array(await blob.arrayBuffer());
-    }
-
-    const exportCanvas = document.createElement("canvas");
-    exportCanvas.width = canvas.width;
-    exportCanvas.height = canvas.height;
-    const ctx = exportCanvas.getContext("2d");
-    if (!ctx) throw new Error("Canvas unavailable");
-    ctx.imageSmoothingEnabled = false;
-    const base = shotBaseRef.current;
-    if (!base) throw new Error("Screenshot base is unavailable");
-    // Export must regenerate RoughJS drawables from the immutable scene so the
-    // saved PNG cannot reuse a stale preview cache entry.
-    clearArrowRenderCache();
-    renderWhiteboardScene(
-      ctx,
-      base,
-      sceneElements,
-      canvas.width / Math.max(1, selection?.width ?? canvas.width),
-      true,
-    );
-
-    const blob = await new Promise<Blob>((resolve, reject) => {
-      exportCanvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error("toBlob failed"))),
-        "image/png",
-      );
-    });
-    return new Uint8Array(await blob.arrayBuffer());
-  }, [editorReady, editorStatus, sceneElements, selection?.width]);
+    },
+    [editorReady, editorStatus, sceneElements, selection?.width],
+  );
 
   const cursorCapture = useCapturedCursor({
     cursor: capturedCursor,
@@ -1019,16 +1018,19 @@ function ScreenshotOverlay(): React.JSX.Element {
     selection,
     onError: setError,
   });
-  const exportPng = async () =>
-    decorateCapturePng(
+  const exportPng = async () => {
+    // Freeze the displayed background before any encoding/annotation awaits.
+    const background = translationCanvasRef.current ?? shotBaseRef.current;
+    return decorateCapturePng(
       await cursorCapture.composite(
-        await exportRawPng(),
+        await exportRawPng(background),
         selection && fullImageRef.current
           ? selectionToImageCrop(selection, fullImageRef.current)
           : null,
       ),
       experience,
     );
+  };
 
   const exportOcrPng = useCallback(async (): Promise<Uint8Array> => {
     const canvas = shotRef.current;
@@ -1089,26 +1091,39 @@ function ScreenshotOverlay(): React.JSX.Element {
     engineFailed: t.ocr.engineFailed,
   });
 
+  const ocrResultRef = useRef(ocrPanel.result);
+  ocrResultRef.current = ocrPanel.result;
+
   const { decode: decodeQr } = useQrDecoder({
     exportPng: exportOcrPng,
     request: qrRequest,
-    onResult: (contents) => {
-      setQrCopyState(null);
-      setQrContents(contents);
+    onStart: () => {
+      setQrResult({ contents: [], codes: [], width: 0, height: 0 });
+      setQrPending(true);
+      setQrError("");
     },
-    onError: setError,
+    onResult: (result) => {
+      setQrResult(result);
+      setQrPending(false);
+    },
+    onError: (message) => {
+      setQrError(message);
+      setQrPending(false);
+    },
   });
 
   const runOcr = useCallback(() => {
     setOcrCopyState("idle");
-    recognizeSelection();
-  }, [recognizeSelection]);
+    setOcrPanelOpen(true);
+    if (!ocrPanel.result && !ocrRunning) recognizeSelection();
+  }, [recognizeSelection, ocrPanel.result, ocrRunning]);
 
   useEffect(() => {
     if (ocrAutoCopy.current !== captureGenerationRef.current || !ocrPanel.result || ocrRunning)
       return;
     ocrAutoCopy.current = null;
     const generation = captureGenerationRef.current;
+    const result = ocrPanel.result;
     const text = ocrPanel.result.text;
     if (!text.trim()) {
       setError("未识别到文字。");
@@ -1117,12 +1132,12 @@ function ScreenshotOverlay(): React.JSX.Element {
     void window.api
       .copyText(text)
       .then((copied) => {
-        if (generation !== captureGenerationRef.current) return;
+        if (generation !== captureGenerationRef.current || result !== ocrResultRef.current) return;
         if (!copied) throw new Error("剪贴板未接受文字");
         setOcrCopyState("copied");
       })
       .catch((error) => {
-        if (generation === captureGenerationRef.current) {
+        if (generation === captureGenerationRef.current && result === ocrResultRef.current) {
           setOcrCopyState("failed");
           setError(`文字复制失败：${String(error)}`);
         }
@@ -1130,53 +1145,44 @@ function ScreenshotOverlay(): React.JSX.Element {
   }, [ocrPanel.result, ocrRunning, setError]);
 
   const closeOcr = useCallback(() => {
-    dismissOcr();
+    setOcrPanelOpen(false);
     setOcrCopyState("idle");
-  }, [dismissOcr]);
+  }, []);
 
   const copyOcrResult = useCallback(async () => {
     const text = ocrPanel.result?.text.trim();
     if (!text) return;
+    const result = ocrPanel.result;
+    const generation = captureGenerationRef.current;
+    const isCurrent = () =>
+      generation === captureGenerationRef.current && result === ocrResultRef.current;
     if (ocrCopyResetTimer.current !== null) window.clearTimeout(ocrCopyResetTimer.current);
     try {
       const copied = await window.api.copyText(ocrPanel.result!.text);
+      if (!isCurrent()) return;
       if (!copied) throw new Error("clipboard rejected OCR text");
       setOcrCopyState("copied");
     } catch {
+      if (!isCurrent()) return;
       setOcrCopyState("failed");
     }
     ocrCopyResetTimer.current = window.setTimeout(() => {
-      setOcrCopyState("idle");
+      if (isCurrent()) setOcrCopyState("idle");
       ocrCopyResetTimer.current = null;
     }, 1400);
   }, [ocrPanel.result]);
 
-  const copyQrContent = useCallback(async (content: string) => {
-    if (qrCopyResetTimer.current !== null) window.clearTimeout(qrCopyResetTimer.current);
-    try {
-      const copied = await window.api.copyText(content);
-      if (!copied) throw new Error("clipboard rejected QR text");
-      setQrCopyState({ content, state: "copied" });
-    } catch {
-      setQrCopyState({ content, state: "failed" });
-    }
-    qrCopyResetTimer.current = window.setTimeout(() => {
-      setQrCopyState(null);
-      qrCopyResetTimer.current = null;
-    }, 1400);
-  }, []);
-
   useEffect(
     () => () => {
       if (ocrCopyResetTimer.current !== null) window.clearTimeout(ocrCopyResetTimer.current);
-      if (qrCopyResetTimer.current !== null) window.clearTimeout(qrCopyResetTimer.current);
     },
     [],
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     dismissOcr();
     setOcrCopyState("idle");
+    setOcrPanelOpen(false);
   }, [dismissOcr, selection?.x, selection?.y, selection?.width, selection?.height]);
 
   const cancelOverlay = useCallback(() => {
@@ -1327,7 +1333,11 @@ function ScreenshotOverlay(): React.JSX.Element {
     label: overlayLabel,
     onCapture: async (shot, isCurrent) => {
       pendingAction.current += 1;
+      beginCapture();
       historyImageRef.current = false;
+      dismissOcr();
+      setOcrPanelOpen(false);
+      quickOcrRef.current = shot.mode === "quick_ocr";
       captureGenerationRef.current = shot.generation;
       setCapturedCursor(shot.cursor ?? null);
       captureScreenRef.current = String(shot.screenId ?? shot.overlayLabel);
@@ -1341,7 +1351,6 @@ function ScreenshotOverlay(): React.JSX.Element {
       const img = await loadImageFromUrl(shot.url);
       if (!isCurrent()) return;
       void loadPalette();
-      beginCapture();
       draggingRef.current = false;
       selectionPointerIdRef.current = null;
       windowSelectionDragModeRef.current = "manual";
@@ -1486,40 +1495,6 @@ function ScreenshotOverlay(): React.JSX.Element {
     ],
   );
 
-  useLayoutEffect(() => {
-    // The legacy canvas input path is retained only as a degraded fallback.
-    // A healthy Excalidraw session owns all pointer interaction and must not
-    // pay for the duplicate window-level listener set.
-    if (phase !== "editing" || editorStatus !== "failed") return;
-    const canvas = shotRef.current;
-    const base = shotBaseRef.current;
-    const context = canvas?.getContext("2d");
-    if (!canvas || !base || !context) return;
-    const scale = canvas.width / Math.max(1, selection?.width ?? canvas.width);
-    try {
-      const visible = textEditor?.id
-        ? sceneElements.filter((element) => element.id !== textEditor.id)
-        : sceneElements;
-      renderWhiteboardScene(
-        context,
-        base,
-        rasterPreview ? [...visible, sceneElement(rasterPreview)] : visible,
-        scale,
-        false,
-      );
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "标注效果渲染失败，请重试");
-    }
-  }, [
-    editorStatus,
-    phase,
-    rasterPreview,
-    sceneElements,
-    selection?.width,
-    setError,
-    textEditor?.id,
-  ]);
-
   const createRecropBaseline = useCallback((): SelectionRecropBaseline | null => {
     const image = fullImageRef.current;
     const canvas = shotRef.current;
@@ -1649,6 +1624,36 @@ function ScreenshotOverlay(): React.JSX.Element {
     clickBlank: () => excalidrawEditorRef.current?.clearSelection(),
   });
   const adjustingRegion = Boolean(selectionDrag.preview);
+  const automaticOcrKey =
+    (phase === "editing" || phase === "committing") && shotReady && selection && !adjustingRegion
+      ? `${captureGenerationRef.current}:${selection.x}:${selection.y}:${selection.width}:${selection.height}`
+      : null;
+  useAutomaticOcr(
+    automaticOcrKey,
+    () => {
+      if (quickOcrRef.current) ocrAutoCopy.current = captureGenerationRef.current;
+      if (!ocrPanel.result) recognizeSelection();
+    },
+    dismissOcr,
+  );
+  const translation = useScreenshotTranslation(
+    automaticOcrKey,
+    ocrPanel,
+    shotBaseRef.current,
+    recognizeSelection,
+  );
+  translationCanvasRef.current = translationExportBackground(
+    null,
+    translation.appearance,
+    translation.visible,
+  );
+  const canSelectOcr =
+    !busy &&
+    shotReady &&
+    editorStatus !== "loading" &&
+    !adjustingRegion &&
+    (!tool || tool === "select") &&
+    editorSelection.count === 0;
   const viewSelection = selectionDrag.preview ?? selection;
   useLayoutEffect(() => {
     const next = selectionDrag.preview ?? selection,
@@ -1677,8 +1682,45 @@ function ScreenshotOverlay(): React.JSX.Element {
       crop.outputWidth,
       crop.outputHeight,
     );
+    if (!selectionDrag.preview && translation.appearance)
+      ctx.drawImage(translation.appearance.canvas, 0, 0);
     paintBackground(next, next.height, 0, true);
-  }, [selectionDrag.preview, selection, phase, shotReady, paintBackground]);
+  }, [selectionDrag.preview, selection, phase, shotReady, paintBackground, translation.appearance]);
+
+  useLayoutEffect(() => {
+    // The legacy canvas input path is retained only as a degraded fallback.
+    // A healthy Excalidraw session owns all pointer interaction and must not
+    // pay for the duplicate window-level listener set.
+    if (phase !== "editing" || editorStatus !== "failed") return;
+    const canvas = shotRef.current;
+    const base = translation.appearance?.canvas ?? shotBaseRef.current;
+    const context = canvas?.getContext("2d");
+    if (!canvas || !base || !context) return;
+    const scale = canvas.width / Math.max(1, selection?.width ?? canvas.width);
+    try {
+      const visible = textEditor?.id
+        ? sceneElements.filter((element) => element.id !== textEditor.id)
+        : sceneElements;
+      renderWhiteboardScene(
+        context,
+        base,
+        rasterPreview ? [...visible, sceneElement(rasterPreview)] : visible,
+        scale,
+        false,
+      );
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "标注效果渲染失败，请重试");
+    }
+  }, [
+    editorStatus,
+    phase,
+    rasterPreview,
+    sceneElements,
+    selection?.width,
+    setError,
+    textEditor?.id,
+    translation.appearance,
+  ]);
 
   const applySelectionOutputSize = useCallback(
     (requested: Partial<OutputSize>) => {
@@ -1807,11 +1849,41 @@ function ScreenshotOverlay(): React.JSX.Element {
     hasEditorSelection: editorSelection.count > 0,
     isEditingText: () => excalidrawEditorRef.current?.isEditingText() ?? false,
     dismissTransientPanel: () => {
+      if (qrResult !== null) {
+        qrRequest.current.cancel();
+        setQrResult(null);
+        setQrPending(false);
+        setQrError("");
+        return true;
+      }
       if (ocrRunning || ocrPanel.result || ocrPanel.error) {
         closeOcr();
         return true;
       }
       return false;
+    },
+    selectedOcrText: () => (canSelectOcr ? selectedOcrText() : ""),
+    copyOcrSelection: (text) => {
+      const key = automaticOcrKey;
+      const generation = captureGenerationRef.current;
+      const result = ocrPanel.result;
+      void window.api
+        .copyText(text)
+        .then((copied) => {
+          if (generation !== captureGenerationRef.current || result !== ocrResultRef.current)
+            return;
+          if (!copied) throw new Error("剪贴板未接受文字");
+          setOcrCopyState("copied");
+          if (ocrCopyResetTimer.current !== null) window.clearTimeout(ocrCopyResetTimer.current);
+          ocrCopyResetTimer.current = window.setTimeout(() => {
+            if (generation === captureGenerationRef.current && result === ocrResultRef.current)
+              setOcrCopyState("idle");
+          }, 1400);
+        })
+        .catch((error) => {
+          if (key && generation === captureGenerationRef.current && result === ocrResultRef.current)
+            setError(`复制文字失败：${String(error)}`);
+        });
     },
     copyPickerHex: () => void copyPickerHex(),
     exitPicker: () => {
@@ -1842,6 +1914,11 @@ function ScreenshotOverlay(): React.JSX.Element {
       void runCommittedImageAction(window.api.pinImage, "贴图失败");
     },
     ocr: () => {
+      if (ocrPanel.result) {
+        setOcrPanelOpen(true);
+        void copyOcrResult();
+        return;
+      }
       ocrAutoCopy.current = captureGenerationRef.current;
       runOcr();
     },
@@ -3601,6 +3678,10 @@ function ScreenshotOverlay(): React.JSX.Element {
     scaleY: imageScaleRef.current.scaleY,
     enter: enterEditMode,
     loadImage: (image) => {
+      dismissOcr();
+      quickOcrRef.current = false;
+      ocrAutoCopy.current = null;
+      setOcrPanelOpen(false);
       historyImageRef.current = true;
       setCapturedCursor(null);
       fullImageRef.current = image;
@@ -3719,7 +3800,9 @@ function ScreenshotOverlay(): React.JSX.Element {
           phase !== "editing" ||
           busy ||
           (event.target instanceof Element &&
-            event.target.closest(".wx-toolbar,.tool-options,input,textarea,[contenteditable=true]"))
+            event.target.closest(
+              ".wx-toolbar,.tool-options,.special-tool-feedback,[data-translation-panel],input,textarea,[contenteditable=true],[data-ocr-selection]",
+            ))
         )
           return;
         if (performance.now() - enteredEditAt.current < 650) {
@@ -3802,6 +3885,10 @@ function ScreenshotOverlay(): React.JSX.Element {
               : undefined
           }
           onPointerMoveCapture={(event) => {
+            if (event.target instanceof Element && event.target.closest("[data-ocr-selection]")) {
+              selectionDrag.hoverMove(false);
+              return;
+            }
             if (event.buttons) return;
             selectionDrag.hoverMove(
               !actionsLocked &&
@@ -3813,9 +3900,12 @@ function ScreenshotOverlay(): React.JSX.Element {
           onPointerDownCapture={(event) => {
             if (
               event.target instanceof Element &&
-              event.target.closest('input,textarea,[contenteditable="true"],button,.ant-popover')
+              event.target.closest(
+                'input,textarea,[contenteditable="true"],button,.ant-popover,[data-ocr-selection]',
+              )
             )
               return;
+            if (selectedOcrText()) window.getSelection()?.removeAllRanges();
             if (
               selectionDrag.spaceHeld() ||
               ((tool === "select" || !tool) &&
@@ -3922,6 +4012,20 @@ function ScreenshotOverlay(): React.JSX.Element {
               )}
             </Suspense>
           </div>
+          {canSelectOcr &&
+            ocrPanel.result &&
+            fullImageRef.current &&
+            (() => {
+              const crop = selectionToImageCrop(selection, fullImageRef.current);
+              return (
+                <OcrSelectionLayer
+                  result={translation.appearance?.result ?? ocrPanel.result}
+                  layouts={translation.appearance?.layouts}
+                  width={crop.outputWidth}
+                  height={crop.outputHeight}
+                />
+              );
+            })()}
           {marquee && shotRef.current && (
             <div
               className="scene-marquee"
@@ -4624,7 +4728,9 @@ function ScreenshotOverlay(): React.JSX.Element {
         })}
 
       {canAdjustRegion && selection && !adjustingRegion && (
-        <div className="overlay-hint-bar">选择工具拖动空白处移动取景框</div>
+        <div className="overlay-hint-bar">
+          拖选文字后按 Ctrl+C 复制；拖动空白处移动取景框，边框控制点调整大小
+        </div>
       )}
 
       {selectionSizePanel && (phase === "selecting" || phase === "editing") && (
@@ -4670,7 +4776,48 @@ function ScreenshotOverlay(): React.JSX.Element {
 
       {error && <div className="overlay-hint-bar overlay-hint-bar--error">{error}</div>}
 
-      {phase === "editing" && (ocrRunning || ocrPanel.result || ocrPanel.error) && (
+      {phase === "editing" &&
+        !adjustingRegion &&
+        !ocrPanelOpen &&
+        !translation.feedback &&
+        (ocrRunning || ocrPanel.error || ocrPanel.result) && (
+          <div
+            className="special-tool-feedback"
+            style={{ pointerEvents: "auto", zIndex: 90 }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            {ocrRunning
+              ? "正在识别文字…"
+              : ocrPanel.error
+                ? `文字识别失败：${ocrPanel.error}`
+                : ocrCopyState === "copied"
+                  ? "文字已复制"
+                  : ocrPanel.result?.text.trim()
+                    ? "拖选文字后按 Ctrl+C 复制"
+                    : "未发现文字"}
+            {ocrPanel.error && (
+              <Button size="small" onClick={recognizeSelection}>
+                重试识别
+              </Button>
+            )}
+          </div>
+        )}
+      {phase === "editing" && translation.feedback && (
+        <div
+          className="special-tool-feedback"
+          style={{ pointerEvents: "auto", zIndex: 90 }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          {translation.running && <Spin size="small" />}
+          {translation.feedback}
+          {translation.failed && (
+            <Button size="small" onClick={translation.toggle}>
+              重试翻译
+            </Button>
+          )}
+        </div>
+      )}
+      {phase === "editing" && ocrPanelOpen && (ocrRunning || ocrPanel.result || ocrPanel.error) && (
         <div
           className="ocr-result-panel ocr-result-panel--text"
           onMouseDown={(event) => event.stopPropagation()}
@@ -4726,44 +4873,26 @@ function ScreenshotOverlay(): React.JSX.Element {
         </div>
       )}
 
-      {phase === "editing" && qrContents && (
-        <div className="ocr-result-panel" onMouseDown={(event) => event.stopPropagation()}>
-          <div className="ocr-result-panel__header">
-            <strong>二维码识别</strong>
-            <Button
-              type="text"
-              onClick={() => {
-                setQrCopyState(null);
-                setQrContents(null);
-              }}
-            >
-              {t.ocr.close}
-            </Button>
-          </div>
-          {qrContents.length === 0 ? (
-            <p className="ocr-result-panel__hint">未在选区中发现二维码。</p>
-          ) : (
-            qrContents.map((content) => (
-              <div key={content} className="ocr-result-panel__actions">
-                <code>{content}</code>
-                {qrCopyState?.content === content && qrCopyState.state === "failed" && (
-                  <span className="ocr-result-panel__copy-error">复制失败，请重试。</span>
-                )}
-                <Button
-                  disabled={qrCopyState?.content === content && qrCopyState.state === "copied"}
-                  onClick={() => void copyQrContent(content)}
-                >
-                  {qrCopyState?.content === content && qrCopyState.state === "copied"
-                    ? "已复制"
-                    : "复制"}
-                </Button>
-                {/^https?:\/\//i.test(content) && (
-                  <Button onClick={() => void window.api.openUrl(content)}>打开链接</Button>
-                )}
-              </div>
-            ))
-          )}
-        </div>
+      {phase === "editing" && selection && !adjustingRegion && qrResult !== null && (
+        <QrResultOverlay
+          bounds={{
+            x: viewSelection?.x ?? selection.x,
+            y: viewSelection?.y ?? selection.y,
+            width: viewSelection?.width ?? selection.width,
+            height: viewSelection?.height ?? shotViewportHeight,
+          }}
+          result={qrResult}
+          pending={qrPending}
+          error={qrError}
+          onClose={() => {
+            qrRequest.current.cancel();
+            setQrResult(null);
+            setQrPending(false);
+            setQrError("");
+          }}
+          onRetry={decodeQr}
+          copy={window.api.copyText}
+        />
       )}
 
       {phase === "editing" && tool === "picker" && pickerSample && fullImageRef.current && (
@@ -4795,8 +4924,10 @@ function ScreenshotOverlay(): React.JSX.Element {
             actionsDisabled={actionsLocked}
             busy={busy}
             confirmDisabled={actionsLocked}
-            ocrDisabled={!selection || !shotReady || ocrRunning}
-            ocrRunning={ocrRunning}
+            qrDisabled={!selection || !shotReady || qrPending}
+            onTranslate={translation.toggle}
+            translationVisible={translation.visible}
+            translationRunning={translation.running}
 
             onPopupOpenChange={reportPrimaryPopup}
             style={{
@@ -4836,9 +4967,15 @@ function ScreenshotOverlay(): React.JSX.Element {
             onPin={() => {
               void runCommittedImageAction(window.api.pinImage, "贴图失败");
             }}
-            onOcr={runOcr}
             onQr={() => {
               if (!selection || !shotReady || ocrRunning) return;
+              if (qrResult !== null) {
+                qrRequest.current.cancel();
+                setQrResult(null);
+                setQrPending(false);
+                setQrError("");
+                return;
+              }
               decodeQr();
             }}
             onCancel={cancelOverlay}

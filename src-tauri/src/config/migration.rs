@@ -4,7 +4,7 @@ pub fn normalize_screenshot_config(config: &mut ScreenshotConfig) {
     let experience = &mut config.experience;
     if !default_screenshot_toolbar_tools()
         .iter()
-        .any(|tool| tool.id == experience.last_tool)
+        .any(|tool| tool.id != "translate" && tool.id == experience.last_tool)
     {
         experience.last_tool = "select".into();
     }
@@ -245,6 +245,7 @@ fn normalize_hex_color(value: &str) -> Option<String> {
 }
 
 pub(crate) fn normalize_loaded_config(config: &mut AppConfig) {
+    config.translation_config.migrate_legacy_key();
     if let Some(legacy) = config.legacy_presentation_config.take() {
         config.key_visualizer_config.clicks = legacy.clicks;
         config.key_visualizer_config.highlight = legacy.highlight;

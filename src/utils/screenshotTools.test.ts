@@ -49,7 +49,7 @@ describe("常用截图工具", () => {
     const hidden = defaultScreenshotTools().map((tool) => ({ ...tool, visible: false }));
     expect(screenshotToolbarGroups(hidden).main).toHaveLength(0);
     expect(screenshotToolbarGroups(hidden).more).toHaveLength(defaultScreenshotTools().length);
-    expect(screenshotToolbarGroups(defaultScreenshotTools()).main).toHaveLength(6);
+    expect(screenshotToolbarGroups(defaultScreenshotTools()).main).toHaveLength(7);
   });
 });
 
@@ -77,4 +77,19 @@ it("线段不再出现在默认工具或旧工具配置中，标签不显示快�
   expect(
     Object.values(SCREENSHOT_TOOL_LABELS).some((label) => /Shift|Ctrl|Esc|Enter/.test(label)),
   ).toBe(false);
+});
+
+it("旧工具列表自动补入可见翻译，翻译支持排序和隐藏", () => {
+  const upgraded = normalizeScreenshotTools([
+    { id: "highlight", visible: true },
+    { id: "eraser", visible: false },
+  ]);
+  expect(upgraded.find((item) => item.id === "translate")?.visible).toBe(true);
+  const moved = moveScreenshotTool(upgraded, "translate", 0);
+  expect(screenshotToolbarGroups(moved).main[0]).toBe("translate");
+  expect(
+    screenshotToolbarGroups(
+      moved.map((item) => (item.id === "translate" ? { ...item, visible: false } : item)),
+    ).more,
+  ).toContain("translate");
 });

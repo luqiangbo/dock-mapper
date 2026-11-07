@@ -1,5 +1,5 @@
 import { Divider, Dropdown, type MenuProps } from "antd";
-import { Check, MoreHorizontal, Pin, QrCode, Save, ScanText, Undo2, Redo2, X } from "lucide-react";
+import { Check, MoreHorizontal, Pin, QrCode, Save, Undo2, Redo2, X } from "lucide-react";
 import { forwardRef, useEffect, useState } from "react";
 import TooltipButton from "./TooltipButton";
 import { screenshotToolIcons } from "../../../utils/screenshotToolIcons";
@@ -47,14 +47,15 @@ interface AnnotationToolbarProps {
   actionsDisabled?: boolean;
   busy?: boolean;
   confirmDisabled?: boolean;
-  ocrDisabled?: boolean;
-  ocrRunning?: boolean;
+  qrDisabled?: boolean;
   onToolChange: (tool: AnnotTool) => void;
   onUndo: () => void;
   onRedo?: () => void;
   onSave: () => void;
   onPin: () => void;
-  onOcr: () => void;
+  onTranslate: () => void;
+  translationVisible?: boolean;
+  translationRunning?: boolean;
   onQr: () => void;
   onCancel: () => void;
   onConfirm: () => void;
@@ -73,14 +74,15 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
       actionsDisabled,
       busy,
       confirmDisabled,
-      ocrDisabled,
-      ocrRunning,
+      qrDisabled,
       onToolChange,
       onUndo,
       onRedo,
       onSave,
       onPin,
-      onOcr,
+      onTranslate,
+      translationVisible,
+      translationRunning,
       onQr,
       onCancel,
       onConfirm,
@@ -101,23 +103,27 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
     const { main, more } = screenshotToolbarGroups(toolbarTools);
     const selectedMore = more.find((item) => item === tool);
     const iconProps = { size: 20, strokeWidth: 1.8, "aria-hidden": true };
+    const translationLabel = translationRunning
+      ? "正在翻译…"
+      : translationVisible
+        ? "切回原文"
+        : "显示译文";
     const items: MenuProps["items"] = [
       ...more.map((key) => {
         const Icon = icons[key];
-        return { key, label: labels[key], icon: <Icon size={16} />, disabled: toolsDisabled };
+        return {
+          key,
+          label: key === "translate" ? `翻译 · ${translationLabel}` : labels[key],
+          icon: <Icon size={16} />,
+          disabled: toolsDisabled || (key === "translate" && translationRunning),
+        };
       }),
       ...(more.length ? [{ type: "divider" as const }] : []),
-      {
-        key: "ocr",
-        label: ocrRunning ? "正在识别文字…" : "识别文字",
-        icon: <ScanText size={16} />,
-        disabled: actionsDisabled || ocrDisabled || ocrRunning,
-      },
       {
         key: "qr",
         label: "识别二维码",
         icon: <QrCode size={16} />,
-        disabled: actionsDisabled || ocrDisabled,
+        disabled: actionsDisabled || qrDisabled,
       },
     ];
     return (
@@ -135,10 +141,11 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
                 return (
                   <TooltipButton
                     key={key}
-                    label={labels[key]}
-                    active={tool === key}
-                    disabled={toolsDisabled}
-                    onClick={() => onToolChange(key)}
+                    label={key === "translate" ? `翻译 · ${translationLabel}` : labels[key]}
+                    active={key === "translate" ? translationVisible : tool === key}
+                    loading={key === "translate" && translationRunning}
+                    disabled={toolsDisabled || (key === "translate" && translationRunning)}
+                    onClick={() => (key === "translate" ? onTranslate() : onToolChange(key))}
                   >
                     <Icon {...iconProps} />
                   </TooltipButton>
@@ -152,11 +159,14 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
                 menu={{
                   items,
                   selectable: true,
-                  selectedKeys: tool ? [tool] : [],
+                  selectedKeys: [
+                    ...(tool ? [tool] : []),
+                    ...(translationVisible ? ["translate"] : []),
+                  ],
                   onClick: ({ key }) => {
                     changeOpen(false);
-                    if (key === "ocr") onOcr();
-                    else if (key === "qr") onQr();
+                    if (key === "qr") onQr();
+                    else if (key === "translate") onTranslate();
                     else {
                       onToolChange(key as AnnotTool);
                     }
@@ -164,10 +174,7 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
                 }}
               >
                 <span>
-                  <TooltipButton
-                    label={ocrRunning ? "更多工具 · 正在识别文字" : "更多工具"}
-                    active={!!selectedMore || moreOpen}
-                  >
+                  <TooltipButton label="更多工具" active={!!selectedMore || moreOpen}>
                     <MoreHorizontal {...iconProps} />
                   </TooltipButton>
                 </span>

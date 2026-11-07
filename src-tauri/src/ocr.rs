@@ -58,6 +58,24 @@ fn scaled_text_block(
 #[derive(Debug, Clone, Serialize)]
 pub struct QrDecodeResult {
     pub contents: Vec<String>,
+    pub width: u32,
+    pub height: u32,
+    pub codes: Vec<QrCodeResult>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QrCodeResult {
+    pub content: String,
+    pub center_x: f64,
+    pub center_y: f64,
+}
+
+fn qr_center(corners: &[quircs::Point; 4]) -> (f64, f64) {
+    (
+        corners.iter().map(|point| f64::from(point.x)).sum::<f64>() / 4.0,
+        corners.iter().map(|point| f64::from(point.y)).sum::<f64>() / 4.0,
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -409,21 +427,66 @@ pub fn decode_qr(png: Vec<u8>) -> Result<QrDecodeResult, String> {
         image.as_raw(),
     );
     let mut contents = Vec::new();
+    let mut positioned = Vec::new();
     for code in codes.flatten() {
         let decoded = code
             .decode()
             .map_err(|error| format!("二维码解码失败：{error}"))?;
         let value = String::from_utf8_lossy(&decoded.payload).trim().to_owned();
-        if !value.is_empty() && !contents.contains(&value) {
-            contents.push(value);
+        if !value.is_empty() {
+            let (center_x, center_y) = qr_center(&code.corners);
+            positioned.push(QrCodeResult {
+                content: value.clone(),
+                center_x,
+                center_y,
+            });
+            if !contents.contains(&value) {
+                contents.push(value);
+            }
         }
     }
-    Ok(QrDecodeResult { contents })
+    Ok(QrDecodeResult {
+        contents,
+        width: image.width(),
+        height: image.height(),
+        codes: positioned,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn qr_center_uses_all_four_corners_in_physical_pixels() {
+        let corners = [
+            quircs::Point { x: 100, y: 0 },
+            quircs::Point { x: 200, y: 100 },
+            quircs::Point { x: 100, y: 200 },
+            quircs::Point { x: 0, y: 100 },
+        ];
+        assert_eq!(qr_center(&corners), (100.0, 100.0));
+        let result = QrDecodeResult {
+            contents: vec!["same".into()],
+            width: 400,
+            height: 200,
+            codes: vec![
+                QrCodeResult {
+                    content: "same".into(),
+                    center_x: 100.0,
+                    center_y: 100.0,
+                },
+                QrCodeResult {
+                    content: "same".into(),
+                    center_x: 300.0,
+                    center_y: 100.0,
+                },
+            ],
+        };
+        let json = serde_json::to_value(result).unwrap();
+        assert_eq!(json["codes"].as_array().unwrap().len(), 2);
+        assert_eq!(json["codes"][1]["centerX"], 300.0);
+    }
 
     #[test]
     fn normalizes_text_without_losing_line_breaks() {
