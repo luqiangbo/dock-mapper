@@ -244,8 +244,7 @@ export default function KeyMapper() {
       title: "写入系统注册表？",
       content:
         "将当前规则写入 Windows 注册表 Scancode Map，重启 Windows 后由键盘驱动读取，即使不打开本软件也生效。需要管理员授权。写入后需重启 Windows 才能完全生效。",
-      okText: "请求授权并写入", Map，重启 Windows 后由键盘驱动读取，即使不打开本软件也生效。需要管理员授权。修改后需重启 Windows 才能完全生效。",
-      okText: "请求授权并写入",
+      okText: "请求授权并写入 - Map，重启 Windows 后由键盘驱动读取，即使不打开本软件也生效。需要管理员授权。修改后需重启 Windows 才能完全生效。",
       okButtonProps: { danger: true },
       cancelText: "取消",
       onOk: async () => {
