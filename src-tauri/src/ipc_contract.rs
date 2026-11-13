@@ -2,7 +2,7 @@
 mod tests {
     use std::collections::BTreeSet;
     #[test]
-    fn only_main_can_manage_runtime_or_clear_legacy_mappings_and_system_apply_is_removed() {
+    fn only_main_can_manage_runtime_or_clear_legacy_mappings_and_apply_scancode_map() {
         for (source, allowed) in [
             (include_str!("../capabilities/main.json"), true),
             (include_str!("../capabilities/widget.json"), false),
@@ -20,10 +20,11 @@ mod tests {
                 "allow-get-key-mapping-status",
                 "allow-get-legacy-key-mappings",
                 "allow-clear-legacy-key-mappings",
+                "allow-apply-scancode-map",
             ] {
                 assert_eq!(permissions.iter().any(|p| p == command), allowed);
             }
-            for removed in ["allow-apply-scancode-map", "allow-restore-scancode-map"] {
+            for removed in ["allow-restore-scancode-map"] {
                 assert!(!permissions.iter().any(|p| p == removed));
             }
         }

@@ -24,6 +24,7 @@ import {
   MoreOutlined,
   PlusOutlined,
   ReloadOutlined,
+  SaveOutlined,
 } from "@ant-design/icons";
 import type { KeyCode, KeyMapping, KeyMappingStatus, SupportedKey } from "../types";
 import { errorMessage, keyMappingApi } from "../api/commands";
@@ -237,6 +238,32 @@ export default function KeyMapper() {
       },
     });
   };
+  const applyToRegistry = () => {
+    if (mappings.length === 0 || busy.current) return;
+    modal.confirm({
+      title: "写入系统注册表？",
+      content:
+        "将当前规则写入 Windows 注册表 Scancode Map，重启 Windows 后由键盘驱动读取，即使不打开本软件也生效。需要管理员授权。写入后需重启 Windows 才能完全生效。",
+      okText: "请求授权并写入", Map，重启 Windows 后由键盘驱动读取，即使不打开本软件也生效。需要管理员授权。修改后需重启 Windows 才能完全生效。",
+      okText: "请求授权并写入",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        if (!beginWrite("apply")) return;
+        try {
+          await keyMappingApi.applyScancodeMap(mappings);
+          notification.success({ message: "已写入注册表，重启 Windows 后完全生效" });
+          await loader.load();
+        } catch (error) {
+          notification.error({ message: "写入注册表失败", description: errorMessage(error) });
+          await loader.load();
+          throw error;
+        } finally {
+          endWrite();
+        }
+      },
+    });
+  };
   const editingRule = mappings.find((rule) => rule.id === editingId);
   const sourceKeyOptions = useMemo(
     () => mappingKeyOptions(supportedKeys, "source", editingRule?.source_key),
@@ -375,7 +402,9 @@ export default function KeyMapper() {
               onChange={(value) => void setEnabled(value)}
             />
           </div>
-          <Text type="secondary">隐藏到托盘后继续，退出软件即停止</Text>
+          <Text type="secondary">
+            软件运行时通过低级键盘钩子即时生效；写入注册表后重启仍保持；卸载不清理。
+          </Text>
         </div>
         <Space size={8}>
           <Button
@@ -463,9 +492,15 @@ export default function KeyMapper() {
           message={
             mapStatus.state === "legacy_blocked"
               ? "遗留系统映射尚未清理，运行时映射已暂停"
-              : "系统映射已清空，重启 Windows 后生效"
+              : mapStatus?.pending_restart
+                ? "已写入注册表，重启 Windows 后完全生效"
+                : "系统映射已清空，重启 Windows 后生效"
           }
-          description="新规则仍可编辑和保存，重启并确认系统映射为空后启用。"
+          description={
+            mapStatus?.pending_restart
+              ? "重启前运行时映射继续提供即时效果。重启后由键盘驱动接管，不打开本软件也生效。"
+              : "新规则仍可编辑和保存，重启并确认系统映射为空后启用。"
+          }
         />
       )}
       <section className={ui.rules} aria-label="映射规则">
@@ -489,9 +524,29 @@ export default function KeyMapper() {
             ),
           }}
         />
-        <Text type="secondary" className={ui.hint}>
-          修改即时保存；管理员窗口中的输入可能无法映射。
-        </Text>
+        <div className={ui.hintRow}>
+          <Text type="secondary" className={ui.hint}>
+            修改即时保存到运行时；点击「写入系统注册表」可持久化到重启后。
+          </Text>
+          <Button
+            icon={<SaveOutlined />}
+            disabled={
+              unavailable ||
+              saving ||
+              mappings.length === 0 ||
+              !!mapStatus?.pending_restart
+            }
+            loading={pendingOperation === "apply"}
+            onClick={applyToRegistry}
+          >
+            写入系统注册表
+          </Button>
+        </div>
+        {mapStatus?.registry_applied && !mapStatus?.pending_restart && (
+          <Text type="success" className={ui.hint}>
+            当前规则已写入注册表，重启后持久生效。
+          </Text>
+        )}
       </section>
       <Collapse
         ghost

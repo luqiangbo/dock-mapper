@@ -97,6 +97,8 @@ describe("简洁的按键选择", () => {
       rule_count: 0,
       error: null,
       legacy: { present: false, value: null, rules: [], parse_error: null, waiting_restart: false },
+      registry_applied: false,
+      pending_restart: false,
     };
     expect(legacyNeedsAttention(clean, null)).toBe(false);
     for (const change of [

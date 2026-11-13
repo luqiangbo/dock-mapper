@@ -83,6 +83,15 @@
   border-top: 1px solid var(--glass-border);
   font-size: 12px;
 }
+.hintRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--glass-border);
+}
 .legacy {
   border-top: 1px solid var(--glass-border);
   border-radius: 0;

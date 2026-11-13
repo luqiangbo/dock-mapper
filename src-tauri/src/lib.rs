@@ -186,6 +186,7 @@ pub fn run() {
             key_mapping::sync_key_mappings,
             key_mapping::get_key_mapping_status,
             key_mapping::set_key_mapping_enabled,
+            key_mapping::apply_scancode_map,
             key_mapping::get_legacy_key_mappings,
             key_mapping::clear_legacy_key_mappings,
             image_commands::upload_image,

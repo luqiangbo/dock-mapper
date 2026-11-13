@@ -27,6 +27,7 @@ export const IPC_COMMAND_NAMES = [
   "sync_key_mappings",
   "get_key_mapping_status",
   "set_key_mapping_enabled",
+  "apply_scancode_map",
   "get_legacy_key_mappings",
   "clear_legacy_key_mappings",
   "upload_image",

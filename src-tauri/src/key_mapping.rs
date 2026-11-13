@@ -26,6 +26,8 @@ pub struct MappingStatus {
     pub rule_count: usize,
     pub error: Option<String>,
     pub legacy: Option<Preview>,
+    pub registry_applied: bool,
+    pub pending_restart: bool,
 }
 #[tauri::command]
 pub fn get_supported_keys() -> Vec<SupportedKey> {
@@ -43,16 +45,25 @@ pub fn get_key_mappings(state: State<'_, AppState>) -> Result<Vec<KeyMapping>, S
         .key_mappings
         .clone())
 }
+fn owns_scancode_map(config: &config::AppConfig, legacy: &Preview) -> bool {
+    match (&config.applied_scancode_map, &legacy.value) {
+        (Some(applied), Some(current)) => applied == current,
+        (None, None) => true,
+        _ => false,
+    }
+}
 fn effective(config: &config::AppConfig, legacy: &Preview) -> Result<Rules, String> {
     let rules = key_mapping_runtime::rules(&config.key_mappings)?;
     if config.key_mapping_runtime_version < 1 {
         return Err("旧映射尚未完成备份迁移，请重试初始化".into());
     }
-    if !config.key_mapping_enabled || legacy.present || legacy.waiting_restart {
-        Ok(Rules::new())
-    } else {
-        Ok(rules)
+    if !config.key_mapping_enabled || legacy.waiting_restart {
+        return Ok(Rules::new());
     }
+    if legacy.present && !owns_scancode_map(config, legacy) {
+        return Ok(Rules::new());
+    }
+    Ok(rules)
 }
 pub fn notify(app: &AppHandle) {
     if let Some(state) = app.try_state::<AppState>() {
@@ -77,21 +88,27 @@ pub fn get_key_mapping_status(
         Ok(value) => (Some(value), None),
         Err(error) => (None, Some(error)),
     };
-    if legacy
-        .as_ref()
-        .is_none_or(|value| value.present || value.waiting_restart)
-        && runtime.count() > 0
-    {
+    let should_pause_runtime = legacy.as_ref().is_some_and(|value| {
+        value.waiting_restart || (value.present && !owns_scancode_map(&config, value))
+    });
+    if should_pause_runtime && runtime.count() > 0 {
         if let Err(stop_error) = runtime.configure(&app, Rules::new()) {
             error = Some(stop_error);
         }
     }
     let runtime_error = runtime.error();
+    let registry_applied = legacy
+        .as_ref()
+        .is_some_and(|value| value.present && owns_scancode_map(&config, value));
+    let pending_restart = legacy.as_ref().is_some_and(|value| value.waiting_restart);
     let mode = if error.is_some() {
         "error"
-    } else if legacy.as_ref().is_some_and(|value| value.present) {
+    } else if legacy
+        .as_ref()
+        .is_some_and(|value| value.present && !owns_scancode_map(&config, value))
+    {
         "legacy_blocked"
-    } else if legacy.as_ref().is_some_and(|value| value.waiting_restart) {
+    } else if pending_restart {
         "restart_required"
     } else if runtime_error.is_some() {
         error = runtime_error;
@@ -116,6 +133,8 @@ pub fn get_key_mapping_status(
             .count(),
         error,
         legacy,
+        registry_applied,
+        pending_restart,
     })
 }
 #[tauri::command]
@@ -279,6 +298,80 @@ pub async fn clear_legacy_key_mappings(
     initialize(&app);
     result.map(|_| ())
 }
+#[tauri::command]
+pub async fn apply_scancode_map(
+    app: AppHandle,
+    mappings: Vec<KeyMapping>,
+) -> Result<(), String> {
+    crate::defaults_bootstrap::require_runtime_ready(&app)?;
+    let rules = key_mapping_runtime::rules(&mappings)?;
+    let encoded = scancode_mapper::encode(&mappings)?;
+    let encoded_b64 = scancode_mapper::backup_encode(Some(&encoded));
+    {
+        let state = app.state::<AppState>();
+        let _mutation = state.mutation_lock.lock().map_err(|_| "配置写入锁已损坏")?;
+        if state.admin_operation_in_progress.load(Ordering::Acquire) {
+            return Err("管理员操作进行中，请稍候".into());
+        }
+        // Save rules + apply runtime hooks first so the user gets instant effect
+        // even if UAC is cancelled.
+        let mut next = state.config.lock().map_err(|_| "配置状态已损坏")?.clone();
+        next.key_mappings = mappings.clone();
+        config::save(&state.config_path, &next)?;
+        *state.config.lock().map_err(|_| "配置状态已损坏")? = next.clone();
+        // Apply runtime hooks for immediate effect.
+        if let Err(error) = app.state::<Runtime>().configure(&app, rules) {
+            return Err(error);
+        }
+        // Prepare recovery record before UAC.
+        let preview = legacy_key_mapping::preview(&state.config_path)?;
+        legacy_key_mapping::prepare_apply(
+            &state.config_path,
+            scancode_mapper::backup_decode(preview.value.as_deref())?.as_deref(),
+        )?;
+        if state
+            .admin_operation_in_progress
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Err("管理员操作进行中，请稍候".into());
+        }
+    }
+    let expected_value = {
+        let state = app.state::<AppState>();
+        legacy_key_mapping::preview(&state.config_path)
+            .ok()
+            .and_then(|p| p.value)
+    };
+    let action = admin::AdminAction::ApplyScancodeMap {
+        encoded: encoded_b64.unwrap_or_default(),
+        expected_value,
+    };
+    let result = tokio::task::spawn_blocking(move || admin::invoke_helper(action))
+        .await
+        .map_err(|error| format!("管理员助手后台任务失败：{error}"))
+        .and_then(|result| result);
+    {
+        let state = app.state::<AppState>();
+        let _mutation = state.mutation_lock.lock().map_err(|_| "配置写入锁已损坏")?;
+        state
+            .admin_operation_in_progress
+            .store(false, Ordering::Release);
+        match config::load_for_mutation(&state.config_path) {
+            Ok(config) => *state.config.lock().map_err(|_| "配置状态已损坏")? = config,
+            Err(error) => {
+                app.state::<Runtime>().report(error.clone());
+                notify(&app);
+                return Err(format!("写入后重新读取配置失败：{error}"));
+            }
+        }
+    }
+    initialize(&app);
+    if result.is_ok() {
+        let _ = app.emit("scancode-map-applied", ());
+    }
+    result.map(|_| ())
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,18 +421,63 @@ mod tests {
             target_key: crate::KeyCode::KeyB,
             enabled: true,
         });
+        // External scancode map (present but not ours) blocks runtime.
         let mut legacy = Preview {
             present: true,
-            value: None,
+            value: Some("external".into()),
             rules: vec![],
             parse_error: None,
             waiting_restart: false,
         };
         assert!(effective(&config, &legacy).unwrap().is_empty());
+        // Waiting restart blocks regardless of ownership.
         legacy.present = false;
+        legacy.value = None;
         legacy.waiting_restart = true;
         assert!(effective(&config, &legacy).unwrap().is_empty());
+        // Clean state allows runtime.
         legacy.waiting_restart = false;
         assert_eq!(effective(&config, &legacy).unwrap().len(), 1);
+    }
+    #[test]
+    fn owns_scancode_map_distinguishes_self_from_foreign() {
+        let mut config = config::AppConfig::default();
+        // Both empty = clean state = ours.
+        let clean = Preview {
+            present: false,
+            value: None,
+            rules: vec![],
+            parse_error: None,
+            waiting_restart: false,
+        };
+        assert!(owns_scancode_map(&config, &clean));
+        // Registry has value but config doesn't = foreign.
+        let foreign = Preview {
+            present: true,
+            value: Some("foreign-value".into()),
+            rules: vec![],
+            parse_error: None,
+            waiting_restart: false,
+        };
+        assert!(!owns_scancode_map(&config, &foreign));
+        // Config matches registry = ours.
+        config.applied_scancode_map = Some("our-value".into());
+        let ours = Preview {
+            present: true,
+            value: Some("our-value".into()),
+            rules: vec![],
+            parse_error: None,
+            waiting_restart: false,
+        };
+        assert!(owns_scancode_map(&config, &ours));
+        // Config doesn't match registry = foreign.
+        let mismatched = Preview {
+            present: true,
+            value: Some("changed-value".into()),
+            rules: vec![],
+            parse_error: None,
+            waiting_restart: false,
+        };
+        assert!(!owns_scancode_map(&config, &mismatched));
     }
 }

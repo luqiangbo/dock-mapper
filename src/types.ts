@@ -43,6 +43,8 @@ export interface KeyMappingStatus {
   rule_count: number;
   error: string | null;
   legacy: LegacyMappingPreview | null;
+  registry_applied: boolean;
+  pending_restart: boolean;
 }
 
 export interface ScreenshotConfig {

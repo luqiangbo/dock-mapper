@@ -31,6 +31,10 @@ static REQUEST_GENERATION: AtomicU64 = AtomicU64::new(0);
 #[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
 pub enum AdminAction {
     ClearLegacy { expected_value: Option<String> },
+    ApplyScancodeMap {
+        encoded: String,
+        expected_value: Option<String>,
+    },
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -145,6 +149,19 @@ fn execute_action(
         AdminAction::ClearLegacy { expected_value } => {
             let expected = crate::scancode_mapper::backup_decode(expected_value.as_deref())?;
             crate::legacy_key_mapping::clear(config_path, expected.as_deref())?;
+            Ok(crate::ScancodeMapStatus {
+                state: crate::ScancodeMapState::NotApplied,
+                backup_available: true,
+            })
+        }
+        AdminAction::ApplyScancodeMap {
+            encoded,
+            expected_value,
+        } => {
+            let encoded_bytes = crate::scancode_mapper::backup_decode(Some(&encoded))?
+                .ok_or("写入映射的编码数据为空")?;
+            let expected = crate::scancode_mapper::backup_decode(expected_value.as_deref())?;
+            crate::legacy_key_mapping::apply(config_path, &encoded_bytes, expected.as_deref())?;
             Ok(crate::ScancodeMapStatus {
                 state: crate::ScancodeMapState::NotApplied,
                 backup_available: true,

@@ -83,6 +83,11 @@ pub fn migrate(path: &Path, config: &mut config::AppConfig) -> Result<(), String
     if config.key_mapping_runtime_version >= 1 {
         return Ok(());
     }
+    // If we already wrote a scancode map (new architecture), skip legacy migration.
+    if config.applied_scancode_map.is_some() {
+        config.key_mapping_runtime_version = 1;
+        return Ok(());
+    }
     match scancode_mapper::read() {
         Ok(raw) => migrate_with(path, config, raw.as_deref(), sysinfo::System::boot_time()),
         Err(error) => {
@@ -130,7 +135,7 @@ fn waiting_restart(path: &Path, boot: u64) -> Result<bool, String> {
     for entry in entries {
         let entry = entry.map_err(|e| e.to_string())?;
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with("clear-") && name.ends_with(".json") {
+        if (name.starts_with("clear-") || name.starts_with("apply-")) && name.ends_with(".json") {
             let record: Recovery =
                 serde_json::from_slice(&fs::read(entry.path()).map_err(|e| e.to_string())?)
                     .map_err(|e| format!("键盘重启标记无法读取，已暂停映射：{e}"))?;
@@ -200,6 +205,20 @@ pub fn prepare_clear(path: &Path, expected: Option<&[u8]>) -> Result<(), String>
         sysinfo::System::boot_time(),
     )
 }
+pub fn prepare_apply(path: &Path, expected: Option<&[u8]>) -> Result<(), String> {
+    let current = scancode_mapper::read()?;
+    if current.as_deref() != expected {
+        return Err("系统映射已变化，请刷新预览后重新确认".into());
+    }
+    let config = config::load_for_mutation(path)?;
+    backup(
+        path,
+        "prepare-apply",
+        &config,
+        current.as_deref(),
+        sysinfo::System::boot_time(),
+    )
+}
 pub fn clear(path: &Path, expected: Option<&[u8]>) -> Result<(), String> {
     let mut config = config::load_for_mutation(path)?;
     clear_with(
@@ -240,6 +259,55 @@ fn clear_with(
     )?;
     if read()?.is_some() {
         return Err("清理后系统映射再次出现，请关闭其他映射工具并重试".into());
+    }
+    *config = next;
+    Ok(())
+}
+pub fn apply(
+    path: &Path,
+    encoded: &[u8],
+    expected: Option<&[u8]>,
+) -> Result<(), String> {
+    let mut config = config::load_for_mutation(path)?;
+    apply_with(
+        path,
+        &mut config,
+        encoded,
+        expected,
+        sysinfo::System::boot_time(),
+        scancode_mapper::read,
+        scancode_mapper::write,
+    )
+}
+
+fn apply_with(
+    path: &Path,
+    config: &mut config::AppConfig,
+    encoded: &[u8],
+    expected: Option<&[u8]>,
+    boot: u64,
+    mut read: impl FnMut() -> Result<Option<Vec<u8>>, String>,
+    mut write: impl FnMut(Option<&[u8]>) -> Result<(), String>,
+) -> Result<(), String> {
+    let current = read()?;
+    if current.as_deref() != expected {
+        return Err("系统映射已变化，请刷新后重试".into());
+    }
+    backup(path, "apply", config, current.as_deref(), boot)?;
+    if read()?.as_deref() != expected {
+        return Err("备份期间系统映射已变化，请刷新后重试".into());
+    }
+    let mut next = config.clone();
+    next.applied_scancode_map = scancode_mapper::backup_encode(Some(encoded));
+    crate::config_transaction::commit_scancode_change_with(
+        current.as_deref(),
+        Some(encoded),
+        &next,
+        &mut write,
+        |config| config::save(path, config),
+    )?;
+    if read()?.as_deref() != Some(encoded) {
+        return Err("写入后系统映射不一致，请关闭其他映射工具并重试".into());
     }
     *config = next;
     Ok(())

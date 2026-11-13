@@ -47,6 +47,10 @@ export const keyMappingApi = {
     logOperation("key_mapping", "备份并清理遗留系统映射", () =>
       invokeCommand("clear_legacy_key_mappings", { expectedValue }),
     ),
+  applyScancodeMap: (mappings: KeyMapping[]) =>
+    logOperation("key_mapping", "写入注册表映射", () =>
+      invokeCommand("apply_scancode_map", { mappings }),
+    ),
 };
 
 export const historyApi = {

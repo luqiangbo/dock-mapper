@@ -107,6 +107,7 @@ interface CommandContract {
   get_key_mapping_status: { args: undefined; result: KeyMappingStatus };
   sync_key_mappings: { args: { mappings: KeyMapping[] }; result: void };
   set_key_mapping_enabled: { args: { enabled: boolean }; result: void };
+  apply_scancode_map: { args: { mappings: KeyMapping[] }; result: void };
   get_legacy_key_mappings: { args: undefined; result: LegacyMappingPreview };
   clear_legacy_key_mappings: { args: { expectedValue: string | null }; result: void };
   list_screenshot_history: { args: undefined; result: ScreenshotHistorySummary[] };

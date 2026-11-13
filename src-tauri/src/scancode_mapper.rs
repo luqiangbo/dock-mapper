@@ -1,7 +1,6 @@
 //! Windows Keyboard Layout\Scancode Map support.  Unlike a low-level hook this
 //! is consumed by the keyboard driver after the next sign-in and remains active
 //! when DockMapper is not running.
-#[cfg(test)]
 use crate::KeyMapping;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use windows::{
@@ -20,7 +19,6 @@ const VALUE_NAME: windows::core::PCWSTR = w!("Scancode Map");
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ScanCode(pub u16);
 
-#[cfg(test)]
 impl ScanCode {
     pub fn bytes(self) -> [u8; 2] {
         self.0.to_le_bytes()
@@ -119,7 +117,6 @@ pub fn scan_code(code: crate::KeyCode) -> Option<ScanCode> {
     }))
 }
 
-#[cfg(test)]
 pub fn encode(mappings: &[KeyMapping]) -> Result<Vec<u8>, String> {
     let enabled: Vec<_> = mappings.iter().filter(|item| item.enabled).collect();
     let mut seen = std::collections::HashSet::new();

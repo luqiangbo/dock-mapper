@@ -42,6 +42,7 @@
     "allow-sync-key-mappings",
     "allow-get-key-mapping-status",
     "allow-set-key-mapping-enabled",
+    "allow-apply-scancode-map",
     "allow-get-legacy-key-mappings",
     "allow-clear-legacy-key-mappings",
     "allow-list-screenshot-history",
