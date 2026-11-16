@@ -22,6 +22,7 @@ static RESTORING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool:
 struct RestoreGuard;
 impl RestoreGuard {
     fn acquire() -> Result<Self, String> {
+        pin_lifecycle::require_writable(None)?;
         RESTORING
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .map_err(|_| "正在恢复贴图，请稍候".to_string())?;
@@ -104,12 +105,25 @@ pub(super) fn is_restoring() -> bool {
     RESTORING.load(Ordering::SeqCst)
 }
 
-pub(super) fn save(app: &AppHandle, closing: Option<&str>) -> Result<(), String> {
+static SAVE_QUEUE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+struct SaveSnapshot {
+    order: u64,
+    snapshots: Vec<(
+        String,
+        PinWindowGeometry,
+        PinOptions,
+        PinGeometryRuntime,
+        Arc<[u8]>,
+    )>,
+    root: PathBuf,
+    limit: usize,
+    closing: Option<String>,
+}
+
+fn snapshot(app: &AppHandle, closing: Option<String>) -> Result<SaveSnapshot, String> {
     if RESTORING.load(Ordering::SeqCst) {
-        if closing.is_some() {
-            return Err("正在恢复贴图，请稍后关闭".into());
-        }
-        return Ok(());
+        return Err("正在恢复贴图，请稍后保存或退出".into());
     }
     let order = SAVE_ORDER.fetch_add(1, Ordering::SeqCst) + 1;
     let ids = app
@@ -124,7 +138,7 @@ pub(super) fn save(app: &AppHandle, closing: Option<&str>) -> Result<(), String>
     for id in ids {
         let geometry = match get_pin_window_geometry(app.clone(), id.clone()) {
             Ok(value) => value,
-            Err(_) => continue,
+            Err(error) => return Err(format!("无法保存贴图 {id} 的位置：{error}")),
         };
         let state = app.state::<AppState>();
         let runtime = state.pin_runtime.lock_or_recover();
@@ -136,18 +150,93 @@ pub(super) fn save(app: &AppHandle, closing: Option<&str>) -> Result<(), String>
             snapshots.push((id, geometry, *options, *base, Arc::clone(data)));
         }
     }
-    let _disk = DISK_LOCK.lock_or_recover();
-    let outdated = order < APPLIED_ORDER.load(Ordering::SeqCst);
-    if outdated && closing.is_none() {
-        return Ok(());
-    }
-    if RESTORING.load(Ordering::SeqCst) {
-        if closing.is_some() {
-            return Err("正在恢复贴图，请稍后关闭".into());
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("pins");
+    let limit = app
+        .state::<crate::AppState>()
+        .config
+        .lock_or_recover()
+        .screenshot_config
+        .experience
+        .pin_history_limit
+        .min(100);
+    Ok(SaveSnapshot {
+        order,
+        snapshots,
+        root,
+        limit,
+        closing,
+    })
+}
+
+/// Queue acquisition is async; neither the UI thread nor the disk worker waits
+/// for the other while holding a configuration/runtime/disk lock.
+pub(super) async fn save(app: AppHandle, closing: Option<String>) -> Result<(), String> {
+    let _queued = SAVE_QUEUE.lock().await;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let ui = app.clone();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(snapshot(&ui, closing));
+    })
+    .map_err(|e| format!("采集贴图保存状态失败：{e}"))?;
+    let snapshot = rx.await.map_err(|_| "贴图保存已取消")??;
+    tauri::async_runtime::spawn_blocking(move || commit(&app, snapshot))
+        .await
+        .map_err(|e| format!("贴图保存任务失败：{e}"))?
+}
+
+#[derive(Default)]
+struct Committed {
+    options: Vec<(String, PinOptions)>,
+    removed: Vec<String>,
+}
+
+fn commit(app: &AppHandle, snapshot: SaveSnapshot) -> Result<(), String> {
+    let root = snapshot.root.clone();
+    let committed = {
+        let _disk = DISK_LOCK.lock_or_recover();
+        let outdated = snapshot.order < APPLIED_ORDER.load(Ordering::SeqCst);
+        if outdated && snapshot.closing.is_none() {
+            return Ok(());
         }
-        return Ok(());
+        if RESTORING.load(Ordering::SeqCst) {
+            return Err("正在恢复贴图，请稍后保存".into());
+        }
+        let order = snapshot.order;
+        let result = persist(snapshot, outdated)?;
+        APPLIED_ORDER.fetch_max(order, Ordering::SeqCst);
+        result
+    };
+    // Publish only after the atomic commit, outside the disk lock.
+    for (id, options) in committed.options {
+        if let Err(error) = app.emit_to(
+            &id,
+            "pin-options-saved",
+            serde_json::json!({ "id": id, "options": options }),
+        ) {
+            tracing::warn!(%error, "贴图保存状态通知失败");
+        }
     }
-    let root = root(app)?;
+    for id in committed.removed {
+        remove_asset(app, &root, &id);
+    }
+    Ok(())
+}
+
+/// Disk-only commit, also used by regression tests without constructing WebViews.
+fn persist(snapshot: SaveSnapshot, outdated: bool) -> Result<Committed, String> {
+    let SaveSnapshot {
+        snapshots,
+        root,
+        limit,
+        closing,
+        ..
+    } = snapshot;
+    let closing = closing.as_deref();
+    fs::create_dir_all(&root).map_err(|e| e.to_string())?;
     let mut entries = read(&root)?;
     let saved_options: Vec<_> = snapshots
         .iter()
@@ -194,33 +283,17 @@ pub(super) fn save(app: &AppHandle, closing: Option<&str>) -> Result<(), String>
             entries.push(closed);
         }
     }
-    let limit = app
-        .state::<crate::AppState>()
-        .config
-        .lock_or_recover()
-        .screenshot_config
-        .experience
-        .pin_history_limit
-        .min(100);
     retain_recent_closed(&mut entries, limit);
     write(&root, &entries)?;
-    APPLIED_ORDER.fetch_max(order, Ordering::SeqCst);
-    for (id, options) in saved_options {
-        if let Err(error) = app.emit_to(
-            &id,
-            "pin-options-saved",
-            serde_json::json!({ "id": id, "options": options }),
-        ) {
-            tracing::warn!(%error, "贴图保存状态通知失败");
-        }
-    }
-    for id in before.into_iter().chain(closing.map(str::to_owned)) {
-        if entries.iter().any(|entry| entry.id == id) {
-            continue;
-        }
-        remove_asset(app, &root, &id);
-    }
-    Ok(())
+    let removed = before
+        .into_iter()
+        .chain(closing.map(str::to_owned))
+        .filter(|id| !entries.iter().any(|entry| &entry.id == id))
+        .collect();
+    Ok(Committed {
+        options: if outdated { vec![] } else { saved_options },
+        removed,
+    })
 }
 
 fn remove_asset(app: &AppHandle, root: &std::path::Path, id: &str) {
@@ -264,7 +337,11 @@ pub(super) fn schedule(app: AppHandle) {
         if revision != REVISION.load(Ordering::SeqCst) {
             continue;
         }
-        if let Err(error) = save(&app, None) {
+        if let Err(error) = tauri::async_runtime::block_on(async {
+            // Do not snapshot a setting that an explicit save may still roll back.
+            let _options = pin_lifecycle::OPTION_QUEUE.lock().await;
+            save(app.clone(), None).await
+        }) {
             let _ = app.emit(
                 "pin-persistence-error",
                 format!("贴图位置或设置未保存：{error}"),
@@ -371,19 +448,26 @@ fn restore_entry(app: &AppHandle, entry: Entry) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn restore_closed_pin(app: AppHandle) -> Result<String, String> {
-    let guard = RestoreGuard::acquire()?;
-    let result = (|| {
-        let entries = read(&root(&app)?)?;
-        let entry = entries
-            .into_iter()
-            .rev()
-            .find(|e| e.closed)
-            .ok_or("没有可恢复的已关闭贴图")?;
-        restore_entry(&app, entry)
-    })();
-    drop(guard);
-    schedule(app.clone());
-    result
+    let _options = pin_lifecycle::OPTION_QUEUE.lock().await;
+    let _saves = SAVE_QUEUE.lock().await;
+    pin_lifecycle::require_writable(None)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let guard = RestoreGuard::acquire()?;
+        let result = (|| {
+            let entries = read(&root(&app)?)?;
+            let entry = entries
+                .into_iter()
+                .rev()
+                .find(|e| e.closed)
+                .ok_or("没有可恢复的已关闭贴图")?;
+            restore_entry(&app, entry)
+        })();
+        drop(guard);
+        schedule(app.clone());
+        result
+    })
+    .await
+    .map_err(|e| format!("恢复贴图任务失败：{e}"))?
 }
 
 fn restore_each<T>(
@@ -397,6 +481,15 @@ fn restore_each<T>(
 }
 
 pub(super) fn restore_open(app: &AppHandle) -> Result<(), String> {
+    // warmup invokes this entry on its dedicated OS thread.
+    tauri::async_runtime::block_on(async {
+        let _options = pin_lifecycle::OPTION_QUEUE.lock().await;
+        let _saves = SAVE_QUEUE.lock().await;
+        restore_open_impl(app)
+    })
+}
+
+fn restore_open_impl(app: &AppHandle) -> Result<(), String> {
     if !app
         .state::<crate::AppState>()
         .config
@@ -443,6 +536,51 @@ pub(super) fn restore_open(app: &AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn failed_close_commit_keeps_previous_manifest_and_retry_records_the_closed_pin() {
+        let root = std::env::temp_dir().join(format!(
+            "dockmapper-save-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let make_snapshot = |closing: bool| {
+            let pin = entry("pin-1", false);
+            SaveSnapshot {
+                order: 1,
+                root: root.clone(),
+                limit: 10,
+                closing: closing.then(|| "pin-1".to_owned()),
+                snapshots: vec![(
+                    pin.id,
+                    pin.geometry,
+                    pin.options,
+                    PinGeometryRuntime {
+                        base_width: 200,
+                        base_height: 100,
+                        sequence: 4,
+                    },
+                    Arc::from(&b"png-data"[..]),
+                )],
+            }
+        };
+        persist(make_snapshot(false), false).unwrap();
+        assert!(!read(&root).unwrap()[0].closed);
+        fs::create_dir(root.join("manifest.pending")).unwrap();
+        assert!(persist(make_snapshot(true), false).is_err());
+        assert!(!read(&root).unwrap()[0].closed);
+        fs::rename(root.join("manifest.pending"), root.join("blocked-save")).unwrap();
+        persist(make_snapshot(true), false).unwrap();
+        let reopened = read(&root).unwrap();
+        assert!(reopened[0].closed);
+        assert_eq!(reopened[0].geometry.scale, 2.0);
+        assert!(reopened[0].options.locked);
+        assert_eq!(fs::read(root.join("pin-1.png")).unwrap(), b"png-data");
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn a_damaged_pin_does_not_prevent_later_pins_from_restoring() {
         let mut attempted = Vec::new();

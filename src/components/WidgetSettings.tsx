@@ -348,8 +348,10 @@ export default function WidgetSettings() {
               <Col xs={24} md={12}>
                 <div className={styles.widgetOptionCard}>
                   <div className={styles.settingCopy}>
-                    <Text strong>刷新间隔</Text>
-                    <span className={styles.description}>控制网速和资源数据的采样频率</span>
+                    <Text strong>资源刷新间隔</Text>
+                    <span className={styles.description}>
+                      控制 CPU、内存等资源数据；网速可见时每 0.5 秒更新
+                    </span>
                   </div>
                   <Form.Item noStyle name="refresh_interval_secs">
                     <Select

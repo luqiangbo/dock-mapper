@@ -23,9 +23,14 @@ function KeyVisualizerEffectsWindow() {
   useEffect(() => {
     let disposed = false;
     const offs: (() => void)[] = [];
+    let pointerFrame: number | null = null;
+    let pendingPointer: KeyVisualizerMouse | null = null;
     const receive = (next: KeyVisualizerEffectsStatus) => {
       if (disposed || (current.current && next.generation < current.current.generation)) return;
       if (next.generation !== current.current?.generation || !next.enabled || next.suspended) {
+        pendingPointer = null;
+        if (pointerFrame !== null) cancelAnimationFrame(pointerFrame);
+        pointerFrame = null;
         setPointer(null);
         setEffects([]);
       }
@@ -46,8 +51,19 @@ function KeyVisualizerEffectsWindow() {
         MAIN_EVENTS.keyVisualizerMouse,
         ({ payload }) => {
           if (!acceptsKeyVisualizerEffect(current.current, payload.generation)) return;
-          if (payload.kind === "move") setPointer(payload);
-          else
+          if (payload.kind === "leave") {
+            pendingPointer = null;
+            if (pointerFrame !== null) cancelAnimationFrame(pointerFrame);
+            pointerFrame = null;
+            setPointer(null);
+          } else if (payload.kind === "move") {
+            pendingPointer = payload;
+            if (pointerFrame === null)
+              pointerFrame = requestAnimationFrame(() => {
+                pointerFrame = null;
+                if (!disposed) setPointer(pendingPointer);
+              });
+          } else
             setEffects((values) => activeMouseEffects([...values, payload], Date.now()).slice(-32));
         },
       );
@@ -61,16 +77,22 @@ function KeyVisualizerEffectsWindow() {
     void start().catch((reason) => {
       if (!disposed) setError(errorMessage(reason));
     });
+    return () => {
+      disposed = true;
+      offs.forEach((off) => off());
+      if (pointerFrame !== null) cancelAnimationFrame(pointerFrame);
+    };
+  }, []);
+
+  const hasEffects = effects.length > 0;
+  useEffect(() => {
+    if (!hasEffects || !status?.enabled || status.suspended) return;
     const timer = window.setInterval(
       () => setEffects((values) => activeMouseEffects(values, Date.now())),
       100,
     );
-    return () => {
-      disposed = true;
-      offs.forEach((off) => off());
-      window.clearInterval(timer);
-    };
-  }, []);
+    return () => window.clearInterval(timer);
+  }, [hasEffects, status?.enabled, status?.suspended]);
 
   const screen = status?.screens.find((value) => value.label === label);
   if (error) return <div className="key-visualizer-effects-error">按键展示效果不可用：{error}</div>;

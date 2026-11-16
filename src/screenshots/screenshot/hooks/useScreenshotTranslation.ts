@@ -31,7 +31,7 @@ export function useScreenshotTranslation(
   }, [scope, ocr.result, controller]);
   useLayoutEffect(() => {
     if (!scope || state.phase !== "waiting-ocr") return;
-    if (ocr.error) controller.fail(`文字识别失败：${ocr.error}`);
+    if (ocr.error) controller.fail(`识别失败：${ocr.error}`);
     else if (ocr.result)
       controller.start(ocr.result, translationApi.settings, translationApi.translateBlocks);
   }, [scope, state.phase, ocr.result, ocr.error, controller]);
@@ -84,9 +84,9 @@ export function useScreenshotTranslation(
   const running = state.phase === "waiting-ocr" || state.phase === "pending";
   const feedback =
     state.phase === "waiting-ocr"
-      ? "正在识别文字…"
+      ? "识别中…"
       : state.phase === "pending"
-        ? "正在翻译文字…"
+        ? "翻译中…"
         : state.phase === "error"
           ? state.error
           : state.phase === "empty"

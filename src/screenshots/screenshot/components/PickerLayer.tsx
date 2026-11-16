@@ -1,3 +1,4 @@
+import CaptureNotice from "./CaptureNotice";
 import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 import { Alert, Button, Spin } from "antd";
 import { sceneCoordsToViewportCoords, viewportCoordsToSceneCoords } from "@excalidraw/excalidraw";
@@ -219,29 +220,30 @@ export function PickerLayer({
       }}
     >
       {prepareError || sampleError ? (
-        <Alert
-          className="special-tool-feedback"
-          data-picker-controls
-          type="error"
-          title="取色准备失败"
-          description={prepareError ?? sampleError}
-          action={
-            <Button
-              size="small"
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={() => setAttempt((value) => value + 1)}
-            >
-              重试
-            </Button>
-          }
-        />
+        <CaptureNotice error>
+          <Alert
+            data-picker-controls
+            type="error"
+            title="取色准备失败"
+            description={prepareError ?? sampleError}
+            action={
+              <Button
+                size="small"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={() => setAttempt((value) => value + 1)}
+              >
+                重试
+              </Button>
+            }
+          />
+        </CaptureNotice>
       ) : !image ? (
-        <div className="special-tool-feedback">
+        <CaptureNotice progress>
           <Spin size="small" />
-          正在准备取色…
-        </div>
+          准备取色…
+        </CaptureNotice>
       ) : !sample ? (
-        <div className="special-tool-feedback">移动鼠标预览，单击锁定像素</div>
+        <CaptureNotice hint>移动预览 · 单击锁定</CaptureNotice>
       ) : null}
       {sample && image && (
         <>

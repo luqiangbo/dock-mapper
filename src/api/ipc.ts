@@ -104,7 +104,7 @@ interface CommandContract {
   get_screenshot_history_preview_session: { args: undefined; result: HistoryPreviewSession | null };
   get_supported_keys: { args: undefined; result: SupportedKey[] };
   get_key_mappings: { args: undefined; result: KeyMapping[] };
-  get_key_mapping_status: { args: undefined; result: KeyMappingStatus };
+  get_key_mapping_status: { args: { forceRefresh?: boolean }; result: KeyMappingStatus };
   sync_key_mappings: { args: { mappings: KeyMapping[] }; result: void };
   set_key_mapping_enabled: { args: { enabled: boolean }; result: void };
   apply_scancode_map: { args: { mappings: KeyMapping[] }; result: void };

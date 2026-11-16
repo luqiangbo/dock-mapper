@@ -17,8 +17,8 @@ export const zh: Messages = {
     done: "完成 (复制)",
   },
   hints: {
-    dragToSelect: "拖动选择区域",
-    capturing: "正在捕获屏幕…",
+    dragToSelect: "拖选区域",
+    capturing: "截图中…",
     working: "处理中…",
     adjustRegion: "拖动控制点可调整大小 · 拖动内部可移动 · 选择工具开始标注",
   },
@@ -35,6 +35,6 @@ export const zh: Messages = {
     engineFailed: "该 OCR 引擎识别失败。",
   },
   textEditor: {
-    moveHint: "拖动文字可移动 · 双击可再编辑",
+    moveHint: "拖动移动 · 双击编辑",
   },
 };

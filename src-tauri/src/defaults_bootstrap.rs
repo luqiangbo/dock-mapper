@@ -314,6 +314,8 @@ fn initialize_defaults_impl(
         .is_some_and(|active| active != &build_id);
     drop(_mutation);
     if activate && !restart_required && progress.active.is_none() {
+        stage(&app, generation, "截图历史")?;
+        state.history.initialize()?;
         if !progress.screenshot {
             stage(&app, generation, "截图快捷键")?;
             timed("截图快捷键", || crate::screenshot::initialize(&app))?;
@@ -344,7 +346,7 @@ fn initialize_defaults_impl(
             progress.effects = true;
         }
         if !progress.monitor {
-            crate::sys_monitor::start_sys_monitor(app.clone());
+            crate::sys_monitor::start_sys_monitor(app.clone())?;
             progress.monitor = true;
         }
         if !progress.mapping {

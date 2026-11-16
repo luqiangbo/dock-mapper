@@ -1,3 +1,4 @@
+import CaptureNotice from "./CaptureNotice";
 import { useEffect, useRef, useState } from "react";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import type { NumberStyle } from "./annotationTypes";
@@ -180,11 +181,7 @@ export function NumberPlacementLayer({
           });
       }}
     >
-      {preparationError && (
-        <div className="special-tool-feedback" role="status">
-          {preparationError}
-        </div>
-      )}
+      {preparationError && <CaptureNotice error>{preparationError}</CaptureNotice>}
       {hover && (
         <div className="number-placement-preview" style={{ left: hover.left, top: hover.top }}>
           <NumberBadgePreview style={style} value={next + pending} size={style.size} />

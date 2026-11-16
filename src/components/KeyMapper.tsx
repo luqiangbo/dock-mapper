@@ -1,3 +1,4 @@
+import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -27,7 +28,7 @@ import {
   SaveOutlined,
 } from "@ant-design/icons";
 import type { KeyCode, KeyMapping, KeyMappingStatus, SupportedKey } from "../types";
-import { errorMessage, keyMappingApi } from "../api/commands";
+import { MAIN_EVENTS, errorMessage, keyMappingApi } from "../api/commands";
 import styles from "./components.module.scss";
 import ui from "./KeyMapper.module.scss";
 import {
@@ -36,7 +37,7 @@ import {
   mappingKeyOptions,
   matchesMappingKey,
 } from "./keyMappingPresentation";
-import { createMappingLoader, saveRuntimeMappings } from "./keyMapperLoading";
+import { createMappingLoader, saveRuntimeMappings, createStatusReader } from "./keyMapperLoading";
 import { usePageActive, usePageModal, usePageRefresh } from "./PageActivity";
 const { Text } = Typography;
 const stateLabels = {
@@ -50,6 +51,8 @@ const stateLabels = {
 
 export default function KeyMapper() {
   const active = usePageActive();
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const loaded = useRef(false);
 
   const [mappings, setMappings] = useState<KeyMapping[]>([]);
@@ -69,23 +72,32 @@ export default function KeyMapper() {
   const [refreshingStatus, setRefreshingStatus] = useState(false);
   const mounted = useRef(false);
   const statusRevision = useRef(0);
+  const loaderStatusRevision = useRef(0);
   const busy = useRef(false);
   const { notification } = AntApp.useApp();
   const modal = usePageModal();
+  const readStatus = useMemo(() => createStatusReader(keyMappingApi.status), []);
+  const pageApi = useMemo(
+    () => ({ ...keyMappingApi, status: () => readStatus(true) }),
+    [readStatus],
+  );
   const loader = useMemo(
     () =>
-      createMappingLoader(keyMappingApi, (state) => {
+      createMappingLoader(pageApi, (state) => {
+        if (state.phase === "loading") loaderStatusRevision.current = ++statusRevision.current;
         setLoading(state.phase === "loading" && !loaded.current);
         setLoadError(state.phase === "error" ? state.error : null);
         if (state.phase === "ready") {
           loaded.current = true;
           setMappings(state.data.rules);
           setSupportedKeys(state.data.keys);
-          setMapStatus(state.data.status);
-          setStatusError(null);
+          if (loaderStatusRevision.current === statusRevision.current) {
+            setMapStatus(state.data.status);
+            setStatusError(null);
+          }
         }
       }),
-    [],
+    [pageApi],
   );
   useEffect(() => {
     mounted.current = true;
@@ -105,34 +117,60 @@ export default function KeyMapper() {
       setMoreOpen(false);
     }
   }, [active, loader]);
-  const refreshStatus = useCallback(async (background = false) => {
-    const revision = ++statusRevision.current;
-    if (!background) {
-      manualRefresh.current = true;
-      setRefreshingStatus(true);
-    }
-    try {
-      const status = await keyMappingApi.status();
-      if (mounted.current && revision === statusRevision.current) {
-        setMapStatus(status);
-        setStatusError(null);
+  const refreshStatus = useCallback(
+    async (background = false) => {
+      if (!activeRef.current) return;
+      const revision = ++statusRevision.current;
+      if (!background) {
+        manualRefresh.current = true;
+        setRefreshingStatus(true);
       }
-    } catch (error) {
-      if (mounted.current && revision === statusRevision.current)
-        setStatusError(errorMessage(error));
-    } finally {
-      if (mounted.current && revision === statusRevision.current && !background) {
-        manualRefresh.current = false;
-        setRefreshingStatus(false);
+      try {
+        const status = await readStatus(!background);
+        if (mounted.current && revision === statusRevision.current) {
+          setMapStatus(status);
+          setStatusError(null);
+        }
+      } catch (error) {
+        if (mounted.current && revision === statusRevision.current)
+          setStatusError(errorMessage(error));
+      } finally {
+        if (mounted.current && revision === statusRevision.current) {
+          manualRefresh.current = false;
+          setRefreshingStatus(false);
+        }
       }
-    }
-  }, []);
+    },
+    [readStatus],
+  );
   useEffect(() => {
     if (!active) return;
     const timer = window.setInterval(() => {
       if (!document.hidden && !busy.current && !manualRefresh.current) void refreshStatus(true);
-    }, 2000);
-    return () => window.clearInterval(timer);
+    }, 10000);
+    const onVisible = () => {
+      if (!document.hidden && !busy.current) void refreshStatus();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    let disposed = false;
+    let off: (() => void) | undefined;
+    void listen(MAIN_EVENTS.keyMappingChanged, () => {
+      if (!document.hidden && !busy.current) void refreshStatus(true);
+    }).then(
+      (stop) => {
+        if (disposed) stop();
+        else off = stop;
+      },
+      (error) => {
+        if (!disposed) setStatusError(errorMessage(error));
+      },
+    );
+    return () => {
+      disposed = true;
+      off?.();
+      document.removeEventListener("visibilitychange", onVisible);
+      window.clearInterval(timer);
+    };
   }, [active, refreshStatus]);
   const unavailable = loading || (!loaded.current && loadError !== null);
   const keyLabel = (code: string) => mappingKeyLabel(code, supportedKeys);
@@ -157,7 +195,7 @@ export default function KeyMapper() {
   const syncMappings = async (updated: KeyMapping[], operation = "rules") => {
     if (!beginWrite(operation)) return false;
     try {
-      const result = await saveRuntimeMappings(keyMappingApi, updated, () => {
+      const result = await saveRuntimeMappings(pageApi, updated, () => {
         if (mounted.current) setMappings(updated);
       });
       if (mounted.current) {
@@ -244,7 +282,8 @@ export default function KeyMapper() {
       title: "写入系统注册表？",
       content:
         "将当前规则写入 Windows 注册表 Scancode Map，重启 Windows 后由键盘驱动读取，即使不打开本软件也生效。需要管理员授权。写入后需重启 Windows 才能完全生效。",
-      okText: "请求授权并写入 - Map，重启 Windows 后由键盘驱动读取，即使不打开本软件也生效。需要管理员授权。修改后需重启 Windows 才能完全生效。",
+      okText:
+        "请求授权并写入 - Map，重启 Windows 后由键盘驱动读取，即使不打开本软件也生效。需要管理员授权。修改后需重启 Windows 才能完全生效。",
       okButtonProps: { danger: true },
       cancelText: "取消",
       onOk: async () => {
@@ -530,10 +569,7 @@ export default function KeyMapper() {
           <Button
             icon={<SaveOutlined />}
             disabled={
-              unavailable ||
-              saving ||
-              mappings.length === 0 ||
-              !!mapStatus?.pending_restart
+              unavailable || saving || mappings.length === 0 || !!mapStatus?.pending_restart
             }
             loading={pendingOperation === "apply"}
             onClick={applyToRegistry}

@@ -2,7 +2,9 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "history-preview-window",
   "description": "截图原图预览只读取图片和会话，并控制自身窗口",
-  "windows": ["history_preview"],
+  "windows": [
+    "history_preview"
+  ],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",

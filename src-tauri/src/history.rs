@@ -34,6 +34,8 @@ pub struct ScreenshotHistorySummary {
 
 pub struct HistoryStore {
     root: PathBuf,
+    initialized: std::sync::atomic::AtomicBool,
+    initialization: std::sync::Mutex<()>,
     generation: AtomicU64,
     count: AtomicUsize,
     max_unfavorited: usize,
@@ -41,25 +43,55 @@ pub struct HistoryStore {
 }
 
 impl HistoryStore {
+    #[cfg(test)]
     pub fn new(root: PathBuf) -> Result<Self, String> {
-        let store = Self {
+        let store = Self::deferred(root);
+        store.initialize()?;
+        Ok(store)
+    }
+
+    pub fn deferred(root: PathBuf) -> Self {
+        Self {
             root,
+            initialized: std::sync::atomic::AtomicBool::new(false),
+            initialization: std::sync::Mutex::new(()),
             generation: AtomicU64::new(0),
             count: AtomicUsize::new(0),
             max_unfavorited: DEFAULT_MAX_UNFAVORITED,
             max_age: DEFAULT_MAX_AGE,
-        };
-        fs::create_dir_all(&store.root)
-            .map_err(|error| format!("创建截图历史目录失败：{error}"))?;
-        store.remove_abandoned_temporary_entries();
-        store
-            .count
-            .store(store.read_manifests()?.len(), Ordering::Release);
-        store.cleanup()?;
-        Ok(store)
+        }
+    }
+
+    /// Only called by bootstrap/history blocking workers, never by the UI loop.
+    pub fn initialize(&self) -> Result<(), String> {
+        let _initializing = self
+            .initialization
+            .lock()
+            .map_err(|_| "截图历史初始化状态损坏")?;
+        if self.initialized.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let started = std::time::Instant::now();
+        fs::create_dir_all(&self.root).map_err(|error| format!("创建截图历史目录失败：{error}"))?;
+        self.remove_abandoned_temporary_entries();
+        let entries = self.read_manifests()?;
+        self.count.store(entries.len(), Ordering::Release);
+        self.cleanup_entries(entries)?;
+        self.initialized.store(true, Ordering::Release);
+        tracing::info!(target: "dock_mapper::startup", stage = "历史初始化", elapsed_ms = started.elapsed().as_millis(), "Startup stage completed");
+        Ok(())
+    }
+
+    fn require_ready(&self) -> Result<(), String> {
+        if self.initialized.load(Ordering::Acquire) {
+            Ok(())
+        } else {
+            Err("截图历史尚未初始化，请等待启动完成或重试读取".into())
+        }
     }
 
     pub fn create(&self, result: &[u8]) -> Result<ScreenshotHistorySummary, String> {
+        self.require_ready()?;
         let (width, height) = png_dimensions(result)?;
         let thumbnail = match create_thumbnail(result) {
             Ok(thumbnail) => Some(thumbnail),
@@ -107,6 +139,7 @@ impl HistoryStore {
     }
 
     pub fn list(&self) -> Result<Vec<ScreenshotHistorySummary>, String> {
+        self.require_ready()?;
         let mut entries = self.read_manifests()?;
         self.count.store(entries.len(), Ordering::Release);
         entries.sort_by(|left, right| right.created_at_ms.cmp(&left.created_at_ms));
@@ -118,11 +151,13 @@ impl HistoryStore {
     }
 
     pub fn image(&self, id: &str) -> Result<Vec<u8>, String> {
+        self.require_ready()?;
         fs::read(self.entry_path(id)?.join(RESULT_FILE))
             .map_err(|error| format!("读取截图历史图片失败：{error}"))
     }
 
     pub fn summary(&self, id: &str) -> Result<ScreenshotHistorySummary, String> {
+        self.require_ready()?;
         let path = self.entry_path(id)?;
         let summary = read_manifest(&path.join(MANIFEST_FILE))?;
         if summary.id != id {
@@ -133,6 +168,7 @@ impl HistoryStore {
     }
 
     pub fn thumbnail(&self, id: &str) -> Result<Vec<u8>, String> {
+        self.require_ready()?;
         let entry_path = self.entry_path(id)?;
         let thumbnail_path = entry_path.join(THUMBNAIL_FILE);
         if let Ok(thumbnail) = fs::read(&thumbnail_path) {
@@ -155,6 +191,7 @@ impl HistoryStore {
         id: &str,
         favorite: bool,
     ) -> Result<ScreenshotHistorySummary, String> {
+        self.require_ready()?;
         let path = self.entry_path(id)?;
         let manifest_path = path.join(MANIFEST_FILE);
         let mut summary = read_manifest(&manifest_path)?;
@@ -185,9 +222,12 @@ impl HistoryStore {
     }
 
     pub fn cleanup(&self) -> Result<(), String> {
+        self.cleanup_entries(self.read_manifests()?)
+    }
+
+    fn cleanup_entries(&self, entries: Vec<ScreenshotHistorySummary>) -> Result<(), String> {
         let cutoff = now_ms().saturating_sub(self.max_age.as_millis() as u64);
-        let mut unfavorited = self
-            .read_manifests()?
+        let mut unfavorited = entries
             .into_iter()
             .filter(|entry| !entry.favorite)
             .collect::<Vec<_>>();
@@ -434,6 +474,28 @@ mod tests {
 
     fn png() -> Vec<u8> {
         png_with_size(2, 3)
+    }
+
+    #[test]
+    fn deferred_history_stays_unready_on_failure_and_can_retry_without_reopening() {
+        let root = temporary_root("deferred");
+        let store = HistoryStore::deferred(root.clone());
+        assert!(!root.exists());
+        assert!(store.list().unwrap_err().contains("尚未初始化"));
+        fs::create_dir_all(&root).unwrap();
+        let blocked = root.join("blocked");
+        fs::write(&blocked, b"not a directory").unwrap();
+        let retry = HistoryStore::deferred(blocked.join("history"));
+        assert!(retry.initialize().is_err());
+        assert!(!retry.initialized.load(Ordering::Acquire));
+        fs::rename(&blocked, root.join("moved")).unwrap();
+        retry.initialize().unwrap();
+        assert!(retry.list().unwrap().is_empty());
+        store.initialize().unwrap();
+        let created = store.create(&png()).unwrap();
+        store.initialize().unwrap();
+        assert_eq!(store.list().unwrap()[0].id, created.id);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

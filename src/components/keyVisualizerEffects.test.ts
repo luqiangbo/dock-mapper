@@ -46,3 +46,13 @@ describe("key visualizer effects", () => {
     expect(acceptsKeyVisualizerEffect({ ...state, suspended: true }, 2)).toBe(false);
   });
 });
+
+it("空闲和未过期的效果保留同一状态引用，避免无效渲染", () => {
+  const empty: KeyVisualizerMouse[] = [];
+  expect(activeMouseEffects(empty, 100)).toBe(empty);
+  const clicks: KeyVisualizerMouse[] = [
+    { generation: 1, x: 0, y: 0, kind: "left", timestamp_ms: 100 },
+  ];
+  expect(activeMouseEffects(clicks, 200)).toBe(clicks);
+  expect(activeMouseEffects(clicks, 700)).not.toBe(clicks);
+});

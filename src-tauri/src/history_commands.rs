@@ -17,7 +17,11 @@ pub async fn list_screenshot_history(
     state: State<'_, AppState>,
 ) -> Result<Vec<history::ScreenshotHistorySummary>, String> {
     let history = Arc::clone(&state.history);
-    run_history_task(move || history.list()).await
+    run_history_task(move || {
+        history.initialize()?;
+        history.list()
+    })
+    .await
 }
 
 #[tauri::command]

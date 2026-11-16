@@ -15,7 +15,8 @@ export function activeMouseEffects(
   effects: KeyVisualizerMouse[],
   now: number,
 ): KeyVisualizerMouse[] {
-  return effects.filter(
+  const active = effects.filter(
     (effect) => now - effect.timestamp_ms < (effect.kind === "locate" ? 1000 : 600),
   );
+  return active.length === effects.length ? effects : active;
 }

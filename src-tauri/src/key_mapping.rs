@@ -65,10 +65,27 @@ fn effective(config: &config::AppConfig, legacy: &Preview) -> Result<Rules, Stri
     }
     Ok(rules)
 }
+fn sync_mapping_toggle_with(
+    config: &std::sync::Mutex<config::AppConfig>,
+    sync: impl FnOnce(bool),
+) -> Result<(), String> {
+    let enabled = config
+        .lock()
+        .map_err(|_| "配置状态已损坏")?
+        .key_mapping_enabled;
+    // Tauri menu updates synchronously wait for the main thread, whose widget
+    // refresh also reads config. Release the guard before crossing that boundary.
+    sync(enabled);
+    Ok(())
+}
+
 pub fn notify(app: &AppHandle) {
+    legacy_key_mapping::invalidate_preview();
     if let Some(state) = app.try_state::<AppState>() {
-        if let Ok(config) = state.config.lock() {
-            crate::tray::sync_mapping_toggle(app, config.key_mapping_enabled);
+        if let Err(error) = sync_mapping_toggle_with(&state.config, |enabled| {
+            crate::tray::sync_mapping_toggle(app, enabled);
+        }) {
+            tracing::warn!(%error, "Failed to read key mapping tray state");
         }
     }
     if let Err(error) = app.emit("key-mapping-changed", ()) {
@@ -76,14 +93,23 @@ pub fn notify(app: &AppHandle) {
     }
 }
 #[tauri::command]
-pub fn get_key_mapping_status(
+pub async fn get_key_mapping_status(
     app: AppHandle,
-    state: State<'_, AppState>,
+    force_refresh: Option<bool>,
 ) -> Result<MappingStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        mapping_status(&app, force_refresh.unwrap_or(false))
+    })
+    .await
+    .map_err(|error| format!("查询映射状态失败：{error}"))?
+}
+
+fn mapping_status(app: &AppHandle, force: bool) -> Result<MappingStatus, String> {
+    let state = app.state::<AppState>();
     let _mutation = state.mutation_lock.lock().map_err(|_| "配置写入锁已损坏")?;
     let config = state.config.lock().map_err(|_| "配置状态已损坏")?.clone();
     let runtime = app.state::<Runtime>();
-    let preview = legacy_key_mapping::preview(&state.config_path);
+    let preview = legacy_key_mapping::preview_cached(&state.config_path, force);
     let (legacy, mut error) = match preview {
         Ok(value) => (Some(value), None),
         Err(error) => (None, Some(error)),
@@ -92,7 +118,7 @@ pub fn get_key_mapping_status(
         value.waiting_restart || (value.present && !owns_scancode_map(&config, value))
     });
     if should_pause_runtime && runtime.count() > 0 {
-        if let Err(stop_error) = runtime.configure(&app, Rules::new()) {
+        if let Err(stop_error) = runtime.configure(app, Rules::new()) {
             error = Some(stop_error);
         }
     }
@@ -299,10 +325,7 @@ pub async fn clear_legacy_key_mappings(
     result.map(|_| ())
 }
 #[tauri::command]
-pub async fn apply_scancode_map(
-    app: AppHandle,
-    mappings: Vec<KeyMapping>,
-) -> Result<(), String> {
+pub async fn apply_scancode_map(app: AppHandle, mappings: Vec<KeyMapping>) -> Result<(), String> {
     crate::defaults_bootstrap::require_runtime_ready(&app)?;
     let rules = key_mapping_runtime::rules(&mappings)?;
     let encoded = scancode_mapper::encode(&mappings)?;
@@ -375,6 +398,24 @@ pub async fn apply_scancode_map(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn startup_and_mapping_toggles_leave_config_readable_while_updating_the_tray() {
+        let config = std::sync::Mutex::new(config::AppConfig::default());
+        for enabled in [true, false, true] {
+            config.lock().unwrap().key_mapping_enabled = enabled;
+            sync_mapping_toggle_with(&config, |actual| {
+                assert_eq!(actual, enabled);
+                // Native menu updates wait for the main thread. Its pending widget
+                // refresh must be able to read config before processing that update.
+                assert!(
+                    config.try_lock().is_ok(),
+                    "任务栏刷新不能等待托盘更新持有的配置锁"
+                );
+            })
+            .unwrap();
+        }
+    }
+
     #[test]
     fn selectable_keys_include_both_alt_sides_without_enabling_legacy_altgr() {
         let keys = get_supported_keys();

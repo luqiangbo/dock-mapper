@@ -1,3 +1,4 @@
+import CaptureNotice from "../components/CaptureNotice";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button, Spin } from "antd";
 import { invokeCommand } from "../../../api/ipc";
@@ -151,18 +152,18 @@ export function usePinOcr(pinId: string, imageUrl: string) {
       event.preventDefault();
       const state = current.current;
       if (state.pending) {
-        setFeedback("正在识别文字…");
+        setFeedback("识别中…");
         return;
       }
       const text = state.result?.text;
       if (!text?.trim()) {
-        setFeedback(state.error ? "文字识别失败，请重试" : "未发现文字");
+        setFeedback(state.error ? "识别失败，请重试" : "未识别到文字");
         return;
       }
       void invokeCommand("copy_text", { value: text })
         .then((copied) => {
           if (!copied) throw new Error("剪贴板未接受文字");
-          if (!disposed && current.current === state) setFeedback("文字已复制");
+          if (!disposed && current.current === state) setFeedback("已复制");
         })
         .catch((error) => {
           if (!disposed && current.current === state) setFeedback(`复制失败：${String(error)}`);
@@ -188,25 +189,21 @@ export function usePinOcr(pinId: string, imageUrl: string) {
         state.error ||
         feedback ||
         (state.result && !state.result.text.trim())) && (
-        <div
-          className="special-tool-feedback"
-          style={{ pointerEvents: "auto" }}
-          onPointerDown={(e) => e.stopPropagation()}
-        >
+        <CaptureNotice progress={state.pending} error={!!state.error}>
           {state.pending ? (
             <>
               <Spin size="small" />
-              正在识别文字…
+              识别中…
             </>
           ) : (
-            feedback || (state.error ? `文字识别失败：${state.error}` : "未发现文字")
+            feedback || (state.error ? `识别失败：${state.error}` : "未识别到文字")
           )}
           {state.error && (
             <Button size="small" onClick={() => setAttempt((n) => n + 1)}>
-              重试识别
+              重试
             </Button>
           )}
-        </div>
+        </CaptureNotice>
       )}
     </>
   );

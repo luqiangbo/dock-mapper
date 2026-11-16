@@ -55,3 +55,39 @@ export async function saveRuntimeMappings(
     return { status: null, refreshError: String(error) };
   }
 }
+
+/** One active request; concurrent callers share one trailing, up-to-date read. */
+export function createStatusReader<T>(read: (force: boolean) => Promise<T>) {
+  let active: Promise<T> | null = null;
+  let trailing: Promise<T> | null = null;
+  let forceNext = false;
+  const start = (force: boolean): Promise<T> => {
+    const result = read(force);
+    active = result;
+    const clear = () => {
+      if (active === result) active = null;
+    };
+    void result.then(clear, clear);
+    return result;
+  };
+  return (force = false): Promise<T> => {
+    if (trailing) {
+      forceNext ||= force;
+      return trailing;
+    }
+    if (!active) return start(force);
+    forceNext ||= force;
+    if (!trailing) {
+      const previous = active;
+      // The original caller receives its own error; the trailing read still runs.
+      const next = () => {
+        const requestedForce = forceNext;
+        forceNext = false;
+        trailing = null;
+        return start(requestedForce);
+      };
+      trailing = previous.then(next, next);
+    }
+    return trailing;
+  };
+}

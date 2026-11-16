@@ -878,10 +878,10 @@ pub async fn key_visualizer_ready(app: AppHandle, generation: u64) -> Result<(),
         .map_err(|_| "按键状态已损坏")?
         .enabled
     {
-        app.get_webview_window(WINDOW_LABEL)
-            .ok_or("按键窗口不存在")?
-            .show()
-            .map_err(|e| e.to_string())?;
+        let window = app
+            .get_webview_window(WINDOW_LABEL)
+            .ok_or("按键窗口不存在")?;
+        window.show().map_err(|e| e.to_string())?;
     }
     crate::visualizer_effects::renderer_ready(&app)
 }

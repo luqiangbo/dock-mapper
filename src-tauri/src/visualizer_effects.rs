@@ -53,6 +53,7 @@ pub struct VisualizerEffectsRuntime {
     ready: Mutex<std::collections::HashSet<String>>,
     started: Mutex<Option<Instant>>,
     capture_token: Mutex<u64>,
+    pointer_screen: Mutex<Option<(u64, String)>>,
 }
 
 pub fn snapshot(app: &AppHandle) -> VisualizerEffectsStatus {
@@ -347,11 +348,49 @@ pub fn mouse(app: &AppHandle, generation: u64, x: i32, y: i32, kind: &'static st
         kind,
         timestamp_ms: now_ms(),
     };
-    for screen in &status.screens {
+    let target = status
+        .screens
+        .iter()
+        .find(|screen| contains_point(screen, x, y));
+    if kind == "move" {
+        let runtime = app.state::<VisualizerEffectsRuntime>();
+        let previous = {
+            let mut pointer = runtime
+                .pointer_screen
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            let previous = pointer.take();
+            *pointer = target.map(|screen| (generation, screen.label.clone()));
+            previous
+        };
+        if let Some((old_generation, label)) = previous {
+            if old_generation == generation && target.is_none_or(|screen| screen.label != label) {
+                if let Err(error) = app.emit_to(
+                    &label,
+                    "key-visualizer-mouse",
+                    MouseEffect {
+                        kind: "leave",
+                        ..effect.clone()
+                    },
+                ) {
+                    report_input_error(app, generation, format!("清除鼠标效果失败：{error}"));
+                }
+            }
+        }
+    }
+    if let Some(screen) = target {
         if let Err(error) = app.emit_to(&screen.label, "key-visualizer-mouse", &effect) {
             report_input_error(app, generation, format!("发送鼠标效果失败：{error}"));
         }
     }
+}
+
+fn contains_point(screen: &Screen, x: i32, y: i32) -> bool {
+    let (x, y) = (i64::from(x), i64::from(y));
+    x >= i64::from(screen.x)
+        && x < i64::from(screen.x) + i64::from(screen.width)
+        && y >= i64::from(screen.y)
+        && y < i64::from(screen.y) + i64::from(screen.height)
 }
 
 fn accepts_event(status: &VisualizerEffectsStatus, generation: u64) -> bool {
@@ -654,6 +693,21 @@ pub fn initialize(app: &AppHandle) {
 mod tests {
     use super::*;
 
+    #[test]
+    fn pointer_routes_in_physical_pixels_with_exclusive_screen_edges() {
+        let screen = Screen {
+            label: "left".into(),
+            x: -1920,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            scale: 1.5,
+        };
+        assert!(contains_point(&screen, -1920, 0));
+        assert!(contains_point(&screen, -1, 1079));
+        assert!(!contains_point(&screen, 0, 500));
+        assert!(!contains_point(&screen, -10, 1080));
+    }
     #[test]
     fn default_preferences_start_disabled_with_visible_key_categories() {
         let config: config::AppConfig = serde_json::from_str("{}").unwrap();

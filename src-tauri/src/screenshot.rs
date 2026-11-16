@@ -27,6 +27,8 @@ pub(crate) mod output;
 mod overlay;
 pub(crate) mod pin_archive;
 mod pin_geometry;
+mod pin_lifecycle;
+pub(crate) use pin_lifecycle::defer_exit;
 mod pin_runtime;
 mod runtime;
 mod shortcut;
@@ -150,13 +152,6 @@ pub fn create_state() -> AppState {
         dxgi_fallback_count: AtomicU64::new(0),
         dxgi_capture: Mutex::new(crate::dxgi_capture::CaptureManager::default()),
     }
-}
-
-pub(crate) fn flush_pins_before_exit(app: &AppHandle) -> Result<(), String> {
-    if pin_archive::is_restoring() {
-        return Err("正在恢复贴图，请稍后退出".into());
-    }
-    pin_archive::save(app, None)
 }
 
 pub fn initialize(app: &AppHandle) -> Result<(), String> {
@@ -683,6 +678,7 @@ fn pin_image_impl(
     data: Arc<[u8]>,
     close_source_overlay: bool,
 ) -> Result<String, String> {
+    pin_lifecycle::require_writable(None)?;
     // Reading the PNG header is enough to size the native window. Fully
     // decoding a large/long screenshot on Tauri's IPC thread can starve the
     // Windows event loop, which also prevents Cancel and the global shortcut
@@ -769,10 +765,16 @@ fn pin_image_impl(
                 pin_archive::schedule(destroyed_app.clone());
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if let Err(error) = pin_archive::save(&destroyed_app, Some(&destroyed_id)) {
-                    api.prevent_close();
-                    let _ = destroyed_app.emit("pin-persistence-error", error);
-                }
+                api.prevent_close();
+                let app = destroyed_app.clone();
+                let id = destroyed_id.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = pin_lifecycle::close(app.clone(), id).await {
+                        if let Err(notify) = app.emit("pin-persistence-error", error) {
+                            tracing::warn!(%notify);
+                        }
+                    }
+                });
             }
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 destroyed_app
@@ -922,26 +924,29 @@ pub fn get_pin_options(state: State<AppState>, id: String) -> Result<PinOptions,
 }
 
 #[tauri::command]
-pub fn update_pin_options(
+pub async fn update_pin_options(
     app: AppHandle,
     id: String,
     opacity: f64,
     locked: bool,
     defer_save: Option<bool>,
 ) -> Result<PinOptions, String> {
+    let _queued = pin_lifecycle::OPTION_QUEUE.lock().await;
+    pin_lifecycle::require_writable(Some(&id))?;
     let options = normalized_pin_options(opacity, locked);
     let state = app.state::<AppState>();
-    let mut runtime = state.pin_runtime.lock_or_recover();
-    if !runtime.options.contains_key(&id) {
-        return Err("贴图窗口不存在".into());
-    }
-    let previous = runtime.options.insert(id.clone(), options);
-    drop(runtime);
+    let previous = {
+        let mut runtime = state.pin_runtime.lock_or_recover();
+        if !runtime.options.contains_key(&id) {
+            return Err("贴图窗口不存在".into());
+        }
+        runtime.options.insert(id.clone(), options)
+    };
     app.get_webview_window(&id)
         .ok_or_else(|| "贴图窗口不存在".to_string())?;
     if defer_save.unwrap_or(false) {
         pin_archive::schedule(app.clone());
-    } else if let Err(error) = pin_archive::save(&app, None) {
+    } else if let Err(error) = pin_archive::save(app.clone(), None).await {
         if let Some(previous) = previous {
             app.state::<AppState>()
                 .pin_runtime
@@ -962,10 +967,8 @@ pub fn update_pin_options(
 }
 
 #[tauri::command]
-pub fn close_pin_window(app: AppHandle, id: String) -> Result<(), String> {
-    pin_archive::save(&app, Some(&id))?;
-    release_pin_runtime(&app, &id, true);
-    Ok(())
+pub async fn close_pin_window(app: AppHandle, id: String) -> Result<(), String> {
+    pin_lifecycle::close(app, id).await
 }
 
 #[tauri::command]
@@ -1001,6 +1004,7 @@ pub fn set_pin_window_geometry(
     id: String,
     request: PinWindowGeometryRequest,
 ) -> Result<PinWindowGeometry, String> {
+    pin_lifecycle::require_writable(Some(&id))?;
     let window = app
         .get_webview_window(&id)
         .ok_or_else(|| "贴图窗口不存在".to_string())?;

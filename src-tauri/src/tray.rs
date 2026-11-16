@@ -72,6 +72,7 @@ pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .icon(icon)
         .tooltip("DockMapper — 任务栏工具")
         .menu(&menu)
+        .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match tray_action(event.id().as_ref()) {
             Some(TrayAction::ShowMain) => screenshot::show_main_window(app),
             Some(TrayAction::Capture) => screenshot::start_capture(app),

@@ -1,3 +1,4 @@
+import CaptureNotice from "./CaptureNotice";
 import { Button, Spin } from "antd";
 import { useEffect, useRef, useState } from "react";
 import type { QrDecodeResult } from "../../../api/screenshotTypes";
@@ -46,7 +47,7 @@ export function QrResultOverlay({
       if (token === revision.current) setAction({ index, state: "failed" });
     }
   };
-  const stateText = pending ? "正在识别二维码…" : error || "未发现二维码";
+  const stateText = pending ? "识别二维码…" : error || "未发现二维码";
   return (
     <div
       className={styles.region}
@@ -67,14 +68,7 @@ export function QrResultOverlay({
         }}
       >
         {pending || error || result.codes.length === 0 ? (
-          <div
-            className={styles.bubble}
-            style={{
-              left: "50%",
-              top: "50%",
-              width: Math.min(220, Math.max(1, bounds.width - 12)),
-            }}
-          >
+          <CaptureNotice progress={pending} error={!!error}>
             <span className={styles.caption} title={stateText} role="status">
               {pending && <Spin size="small" />}
               {stateText}
@@ -84,7 +78,7 @@ export function QrResultOverlay({
                 重试
               </Button>
             )}
-          </div>
+          </CaptureNotice>
         ) : (
           result.codes.map((code, index) => {
             const current = action?.index === index ? action.state : null;

@@ -32,6 +32,7 @@ struct NativeProcessor {
     locks: bool,
     lock_tracker: LockTracker,
     last_lock_sample: std::time::Instant,
+    pointer: PointerTracker,
 }
 
 #[derive(Default)]
@@ -47,12 +48,24 @@ impl LockTracker {
     }
 }
 
+#[derive(Default)]
+struct PointerTracker(Option<(i32, i32)>);
+impl PointerTracker {
+    fn changed(&mut self, x: i32, y: i32) -> bool {
+        if self.0 == Some((x, y)) {
+            return false;
+        }
+        self.0 = Some((x, y));
+        true
+    }
+}
+
 impl NativeProcessor {
     fn tick(&mut self) {
         if self.mouse {
             let mut point = POINT::default();
             match unsafe { GetCursorPos(&mut point) } {
-                Ok(()) => {
+                Ok(()) if self.pointer.changed(point.x, point.y) => {
                     crate::visualizer_effects::mouse(
                         &self.app,
                         self.generation,
@@ -61,6 +74,7 @@ impl NativeProcessor {
                         "move",
                     );
                 }
+                Ok(()) => {}
                 Err(error) => crate::visualizer_effects::report_input_error(
                     &self.app,
                     self.generation,
@@ -166,6 +180,7 @@ pub(crate) fn raw_input_thread(
             locks,
             lock_tracker: LockTracker::default(),
             last_lock_sample: std::time::Instant::now(),
+            pointer: PointerTracker::default(),
         });
         let hwnd = match CreateWindowExW(
             WINDOW_EX_STYLE::default(),
@@ -244,6 +259,14 @@ pub(crate) fn raw_input_thread(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn stationary_pointer_is_silent_and_a_new_session_emits_its_first_position() {
+        let mut pointer = PointerTracker::default();
+        assert!(pointer.changed(-10, 20));
+        assert!(!pointer.changed(-10, 20));
+        assert!(pointer.changed(10, 20));
+        assert!(PointerTracker::default().changed(10, 20));
+    }
     #[test]
     fn lock_prompt_uses_initial_and_changed_system_values_without_toggling_on_repeats() {
         let mut tracker = LockTracker::default();

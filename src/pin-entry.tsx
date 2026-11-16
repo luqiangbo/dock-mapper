@@ -1,3 +1,4 @@
+import { CaptureNoticeProvider } from "./screenshots/screenshot/components/CaptureNotice";
 import "./utils/disableBrowserContextMenu";
 import React from "react";
 import ReactDOM from "react-dom/client";
@@ -16,7 +17,9 @@ function PinWindow() {
         token: { colorPrimary: accentColors(accentColor, "dark").solid },
       }}
     >
-      <PinImage />
+      <CaptureNoticeProvider>
+        <PinImage />
+      </CaptureNoticeProvider>
     </ConfigProvider>
   );
 }

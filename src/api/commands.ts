@@ -31,8 +31,10 @@ export const keyMappingApi = {
     logRead("key_mapping", "读取支持按键", () => invokeCommand("get_supported_keys")),
   mappings: () =>
     logRead("key_mapping", "读取运行时映射规则", () => invokeCommand("get_key_mappings")),
-  status: () =>
-    logRead("key_mapping", "读取映射运行状态", () => invokeCommand("get_key_mapping_status")),
+  status: (forceRefresh = false) =>
+    logRead("key_mapping", "读取映射运行状态", () =>
+      invokeCommand("get_key_mapping_status", { forceRefresh }),
+    ),
   sync: (mappings: KeyMapping[]) =>
     logOperation("key_mapping", "保存并切换映射规则", () =>
       invokeCommand("sync_key_mappings", { mappings }),

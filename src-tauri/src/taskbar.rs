@@ -223,6 +223,7 @@ pub fn refresh_on_main_thread(
         _ => LayoutProbe::ProbeFailed,
     };
     let target = controller.resolve(context.clone(), probe, Instant::now());
+    let was_visible = hwnd.is_some_and(|hwnd| unsafe { IsWindowVisible(hwnd).as_bool() });
     let operation = match (window.as_ref(), hwnd) {
         (Some(_), Some(hwnd)) => unsafe {
             if let Some(ctx) = context.as_ref() {
@@ -238,6 +239,11 @@ pub fn refresh_on_main_thread(
         },
         _ => Err("任务栏挂件窗口不可用".into()),
     };
+    if !was_visible && operation.as_ref().is_ok_and(|visible| *visible) {
+        if let Some(control) = app.try_state::<crate::sys_monitor::SysMonitorControl>() {
+            control.wake();
+        }
+    }
     if let Err(error) = &operation {
         tracing::warn!(%error, "挂件布局操作失败");
         if let Some(hwnd) = hwnd {

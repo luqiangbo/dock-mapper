@@ -20,6 +20,56 @@ pub struct Preview {
     pub parse_error: Option<String>,
     pub waiting_restart: bool,
 }
+#[derive(Default)]
+struct PreviewCache {
+    revision: u64,
+    value: Option<(PathBuf, std::time::Instant, Preview)>,
+}
+impl PreviewCache {
+    fn get(&self, path: &Path, force: bool, now: std::time::Instant) -> Option<Preview> {
+        self.value
+            .as_ref()
+            .filter(|(stored, at, _)| {
+                !force
+                    && stored == path
+                    && now.duration_since(*at) < std::time::Duration::from_secs(5)
+            })
+            .map(|(_, _, value)| value.clone())
+    }
+    fn invalidate(&mut self) {
+        self.revision += 1;
+        self.value = None;
+    }
+}
+static PREVIEW_CACHE: std::sync::Mutex<PreviewCache> = std::sync::Mutex::new(PreviewCache {
+    revision: 0,
+    value: None,
+});
+pub fn invalidate_preview() {
+    PREVIEW_CACHE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .invalidate();
+}
+pub fn preview_cached(path: &Path, force: bool) -> Result<Preview, String> {
+    let revision = {
+        let cache = PREVIEW_CACHE.lock().map_err(|_| "映射探测缓存不可用")?;
+        if let Some(value) = cache.get(path, force, std::time::Instant::now()) {
+            return Ok(value);
+        }
+        cache.revision
+    };
+    let result = preview(path);
+    let mut cache = PREVIEW_CACHE.lock().map_err(|_| "映射探测缓存不可用")?;
+    if cache.revision == revision {
+        cache.value = result
+            .as_ref()
+            .ok()
+            .map(|value| (path.to_owned(), std::time::Instant::now(), value.clone()));
+    }
+    result
+}
+
 #[derive(Serialize, Deserialize)]
 struct Recovery {
     boot_time: u64,
@@ -263,11 +313,7 @@ fn clear_with(
     *config = next;
     Ok(())
 }
-pub fn apply(
-    path: &Path,
-    encoded: &[u8],
-    expected: Option<&[u8]>,
-) -> Result<(), String> {
+pub fn apply(path: &Path, encoded: &[u8], expected: Option<&[u8]>) -> Result<(), String> {
     let mut config = config::load_for_mutation(path)?;
     apply_with(
         path,
@@ -316,6 +362,36 @@ fn apply_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn status_cache_expires_and_manual_refresh_or_mutation_forces_a_probe() {
+        let now = std::time::Instant::now();
+        let path = Path::new("test-config.json");
+        let mut cache = PreviewCache::default();
+        assert!(cache.get(path, false, now).is_none());
+        cache.value = Some((
+            path.into(),
+            now,
+            Preview {
+                present: false,
+                value: None,
+                rules: vec![],
+                parse_error: None,
+                waiting_restart: false,
+            },
+        ));
+        assert!(cache
+            .get(path, false, now + std::time::Duration::from_secs(4))
+            .is_some());
+        assert!(cache
+            .get(path, false, now + std::time::Duration::from_secs(5))
+            .is_none());
+        assert!(cache.get(path, true, now).is_none());
+        assert!(cache.get(Path::new("other.json"), false, now).is_none());
+        cache.invalidate();
+        assert!(cache.get(path, false, now).is_none());
+        assert_eq!(cache.revision, 1);
+    }
+
     #[test]
     fn missing_runtime_version_is_legacy_but_new_preferences_use_current_version() {
         let old: config::AppConfig = serde_json::from_str("{}").unwrap();

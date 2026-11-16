@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createMappingLoader,
+  createStatusReader,
   saveRuntimeMappings,
   type MappingLoadState,
 } from "./keyMapperLoading";
@@ -108,4 +109,41 @@ describe("按键映射读取和保存反馈", () => {
     ).rejects.toThrow("写入失败");
     expect(onSaved).not.toHaveBeenCalled();
   });
+});
+
+it("慢状态请求不重叠，多个刷新合并一次后续强制读取", async () => {
+  const replies: Array<(value: number) => void> = [];
+  const read = vi.fn((_force: boolean) => new Promise<number>((resolve) => replies.push(resolve)));
+  const status = createStatusReader(read);
+  const first = status();
+  const second = status();
+  expect(status(true)).toBe(second);
+  expect(read).toHaveBeenCalledTimes(1);
+  replies[0](1);
+  await first;
+  await Promise.resolve();
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(read).toHaveBeenLastCalledWith(true);
+  replies[1](2);
+  await expect(second).resolves.toBe(2);
+});
+
+it("前一次读取失败仍能执行合并的后续读取", async () => {
+  let reject!: (reason: Error) => void;
+  const read = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise<number>((_, fail) => {
+          reject = fail;
+        }),
+    )
+    .mockResolvedValue(2);
+  const status = createStatusReader<number>(read);
+  const first = status();
+  const second = status(true);
+  const failed = expect(first).rejects.toThrow("暂时失败");
+  reject(new Error("暂时失败"));
+  await failed;
+  await expect(second).resolves.toBe(2);
 });

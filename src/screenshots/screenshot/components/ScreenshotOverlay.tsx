@@ -1,3 +1,4 @@
+import CaptureNotice, { CaptureNoticeScope } from "./CaptureNotice";
 import type { QrDecodeResult } from "../../../api/screenshotTypes";
 import { QrResultOverlay } from "./QrResultOverlay";
 import { translationExportBackground } from "./translationAppearance";
@@ -3788,7 +3789,9 @@ function ScreenshotOverlay(): React.JSX.Element {
   });
 
   return (
-    <div
+    <CaptureNoticeScope
+      bounds={viewSelection}
+      moving={adjustingRegion}
       className="screenshot-overlay"
       data-region-drag={selectionDrag.cursor ? "true" : undefined}
       style={{ cursor: selectionDrag.cursor ?? undefined }}
@@ -3801,7 +3804,7 @@ function ScreenshotOverlay(): React.JSX.Element {
           busy ||
           (event.target instanceof Element &&
             event.target.closest(
-              ".wx-toolbar,.tool-options,.special-tool-feedback,[data-translation-panel],input,textarea,[contenteditable=true],[data-ocr-selection]",
+              ".wx-toolbar,.tool-options,.special-tool-feedback,.capture-notice,[data-translation-panel],input,textarea,[contenteditable=true],[data-ocr-selection]",
             ))
         )
           return;
@@ -4727,11 +4730,7 @@ function ScreenshotOverlay(): React.JSX.Element {
           );
         })}
 
-      {canAdjustRegion && selection && !adjustingRegion && (
-        <div className="overlay-hint-bar">
-          拖选文字后按 Ctrl+C 复制；拖动空白处移动取景框，边框控制点调整大小
-        </div>
-      )}
+      {canAdjustRegion && selection && <CaptureNotice hint>拖动移框 · 拉边缩放</CaptureNotice>}
 
       {selectionSizePanel && (phase === "selecting" || phase === "editing") && (
         <SelectionSizePanel
@@ -4753,13 +4752,13 @@ function ScreenshotOverlay(): React.JSX.Element {
       )}
 
       {phase === "editing" && tool === "text" && !textEditor && textObjects.length > 0 && (
-        <div className="overlay-interaction-hint">{t.textEditor.moveHint}</div>
+        <CaptureNotice hint>{t.textEditor.moveHint}</CaptureNotice>
       )}
 
-      {phase === "capturing" && <div className="overlay-status">{t.hints.capturing}</div>}
+      {phase === "capturing" && <CaptureNotice progress>{t.hints.capturing}</CaptureNotice>}
 
       {phase === "selecting" && !selection && !error && (
-        <div className="overlay-hint-bar">{t.hints.dragToSelect}</div>
+        <CaptureNotice hint>{t.hints.dragToSelect}</CaptureNotice>
       )}
 
       {phase === "selecting" && !dragging && hoveredWindow && (
@@ -4774,48 +4773,46 @@ function ScreenshotOverlay(): React.JSX.Element {
         />
       )}
 
-      {error && <div className="overlay-hint-bar overlay-hint-bar--error">{error}</div>}
+      {error && <CaptureNotice error>{error}</CaptureNotice>}
 
       {phase === "editing" &&
         !adjustingRegion &&
         !ocrPanelOpen &&
         !translation.feedback &&
         (ocrRunning || ocrPanel.error || ocrPanel.result) && (
-          <div
-            className="special-tool-feedback"
-            style={{ pointerEvents: "auto", zIndex: 90 }}
-            onPointerDown={(event) => event.stopPropagation()}
-          >
+          <CaptureNotice progress={ocrRunning} error={!!ocrPanel.error}>
             {ocrRunning
-              ? "正在识别文字…"
+              ? "识别中…"
               : ocrPanel.error
-                ? `文字识别失败：${ocrPanel.error}`
+                ? `识别失败：${ocrPanel.error}`
                 : ocrCopyState === "copied"
-                  ? "文字已复制"
+                  ? "已复制"
                   : ocrPanel.result?.text.trim()
-                    ? "拖选文字后按 Ctrl+C 复制"
-                    : "未发现文字"}
+                    ? "选字后 Ctrl+C 复制"
+                    : "未识别到文字"}
             {ocrPanel.error && (
               <Button size="small" onClick={recognizeSelection}>
-                重试识别
+                重试
               </Button>
             )}
-          </div>
+          </CaptureNotice>
         )}
       {phase === "editing" && translation.feedback && (
-        <div
-          className="special-tool-feedback"
-          style={{ pointerEvents: "auto", zIndex: 90 }}
-          onPointerDown={(event) => event.stopPropagation()}
-        >
+        <CaptureNotice progress={translation.running} error={translation.failed}>
           {translation.running && <Spin size="small" />}
           {translation.feedback}
           {translation.failed && (
             <Button size="small" onClick={translation.toggle}>
-              重试翻译
+              重试
             </Button>
           )}
-        </div>
+        </CaptureNotice>
+      )}
+      {phase === "editing" && ocrPanelOpen && ocrRunning && (
+        <CaptureNotice progress>
+          <Spin size="small" />
+          {t.ocr.recognizing}
+        </CaptureNotice>
       )}
       {phase === "editing" && ocrPanelOpen && (ocrRunning || ocrPanel.result || ocrPanel.error) && (
         <div
@@ -4841,7 +4838,9 @@ function ScreenshotOverlay(): React.JSX.Element {
           </div>
           <section className="ocr-result-panel__body">
             {ocrPanel.pending ? (
-              <p className="ocr-result-panel__state">{t.ocr.recognizing}</p>
+              <p className="ocr-result-panel__state">
+                <Spin size="small" aria-label={t.ocr.recognizing} />
+              </p>
             ) : ocrPanel.error ? (
               <div className="ocr-result-panel__state ocr-result-panel__state--error">
                 <p>{ocrPanel.error}</p>
@@ -5034,9 +5033,9 @@ function ScreenshotOverlay(): React.JSX.Element {
       )}
 
       {(busy || (editorStatus === "loading" && phase === "editing")) && (
-        <div className="overlay-status">{busy ? t.hints.working : "标注工具加载中…"}</div>
+        <CaptureNotice progress>{busy ? t.hints.working : "加载中…"}</CaptureNotice>
       )}
-    </div>
+    </CaptureNoticeScope>
   );
 }
 

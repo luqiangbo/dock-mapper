@@ -224,7 +224,7 @@ export interface KeyVisualizerMouse {
   generation: number;
   x: number;
   y: number;
-  kind: "move" | "left" | "right" | "middle" | "locate";
+  kind: "move" | "left" | "right" | "middle" | "locate" | "leave";
   timestamp_ms: number;
 }
 

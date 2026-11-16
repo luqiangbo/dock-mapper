@@ -1,7 +1,7 @@
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
-use sysinfo::{Networks, System};
+use sysinfo::System;
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::sync::watch;
 
 #[derive(Clone, serde::Serialize)]
 pub struct SysStatusPayload {
@@ -23,19 +23,24 @@ pub struct BatteryStatus {
 struct MonitorSettings {
     interval_secs: u8,
     shutdown: bool,
+    revision: u64,
 }
 
 pub struct SysMonitorControl {
-    settings: watch::Sender<MonitorSettings>,
+    settings: Arc<(Mutex<MonitorSettings>, Condvar)>,
     pub metrics: crate::sampling_metrics::SamplingMetrics,
 }
 
 impl SysMonitorControl {
     pub fn new(interval_secs: u8) -> Self {
-        let (settings, _) = watch::channel(MonitorSettings {
-            interval_secs: interval_secs.clamp(1, 5),
-            shutdown: false,
-        });
+        let settings = Arc::new((
+            Mutex::new(MonitorSettings {
+                interval_secs: interval_secs.clamp(1, 5),
+                shutdown: false,
+                revision: 0,
+            }),
+            Condvar::new(),
+        ));
         Self {
             settings,
             metrics: crate::sampling_metrics::SamplingMetrics::default(),
@@ -43,98 +48,92 @@ impl SysMonitorControl {
     }
 
     pub fn set_interval(&self, interval_secs: u8) {
-        self.settings.send_modify(|settings| {
-            settings.interval_secs = interval_secs.clamp(1, 5);
-        });
+        self.update(|settings| settings.interval_secs = interval_secs.clamp(1, 5));
+    }
+
+    fn update(&self, update: impl FnOnce(&mut MonitorSettings)) {
+        let (settings, wake) = &*self.settings;
+        let mut settings = settings.lock().unwrap_or_else(|e| e.into_inner());
+        update(&mut settings);
+        settings.revision += 1;
+        wake.notify_all();
+    }
+
+    pub fn wake(&self) {
+        self.update(|_| {});
     }
 
     pub fn shutdown(&self) {
-        self.settings
-            .send_modify(|settings| settings.shutdown = true);
+        self.update(|settings| settings.shutdown = true);
     }
 }
 
-pub fn start_sys_monitor(app: AppHandle) {
+pub fn start_sys_monitor(app: AppHandle) -> Result<(), String> {
     tracing::info!(target: "dock_mapper::monitor", "system sampling started");
-    let mut settings = app.state::<SysMonitorControl>().settings.subscribe();
+    let settings = app.state::<SysMonitorControl>().settings.clone();
     let metrics = app.state::<SysMonitorControl>().metrics.clone();
-    tauri::async_runtime::spawn(async move {
-        let mut sys = System::new_all();
-        let mut networks = Networks::new_with_refreshed_list();
-        let mut baseline = NetworkBaseline::default();
-        let mut previous_tick = Instant::now();
-        let mut last_list_refresh = Instant::now();
+    std::thread::Builder::new().name("dockmapper-sampling".into()).spawn(move || {
+        let mut sys = System::new();
+        let mut cpu_baseline = false;
+        let mut networks = crate::network_monitor::NetworkMonitor::default();
+        let mut last_resources: Option<Instant> = None;
+        let mut memory_usage = 0.0;
+        let mut cpu_usage = None;
+        let mut battery = None;
         let mut last_hidden_main_emit: Option<Instant> = None;
-        let mut last_network_available = None;
+        let mut last_network_error = None;
+        let mut previously_visible = false;
 
         loop {
-            let current = settings.borrow().clone();
+            let current = settings.0.lock().unwrap_or_else(|e| e.into_inner()).clone();
             if current.shutdown {
                 break;
             }
             let sample_started = Instant::now();
-            if last_list_refresh.elapsed() >= Duration::from_secs(30) {
-                networks.refresh_list();
-                last_list_refresh = Instant::now();
-            }
-            networks.refresh();
-            sys.refresh_memory();
-            sys.refresh_cpu_usage();
-            let network_available = networks.iter().any(|(name, _)| !is_virtual_adapter(name));
-            if last_network_available != Some(network_available) {
-                if network_available {
-                    tracing::info!(target: "dock_mapper::monitor", "network sampling available");
-                } else {
-                    tracing::warn!(target: "dock_mapper::monitor", "no usable network adapter");
-                }
-                last_network_available = Some(network_available);
-            }
-            let total_rx = networks
-                .iter()
-                .filter(|(name, _)| !is_virtual_adapter(name))
-                .map(|(_, data)| data.total_received())
-                .sum::<u64>();
-            let total_tx = networks
-                .iter()
-                .filter(|(name, _)| !is_virtual_adapter(name))
-                .map(|(_, data)| data.total_transmitted())
-                .sum::<u64>();
+            let visible = ["main", "taskbar_widget"].iter().any(|label| {
+                app.get_webview_window(label).is_some_and(|window| window.is_visible().unwrap_or(false))
+            });
+            if visible && !previously_visible { networks.reset(); }
+            previously_visible = visible;
             let now = Instant::now();
-            let elapsed = now.duration_since(previous_tick).as_secs_f64().max(0.001);
-            let (upload_speed, download_speed) =
-                baseline.sample(None, network_available, total_rx, total_tx, elapsed);
-            previous_tick = now;
-            let total_memory = sys.total_memory() as f32;
-            let payload = SysStatusPayload {
-                upload_speed,
-                download_speed,
-                memory_usage: if total_memory > 0.0 {
-                    sys.used_memory() as f32 / total_memory * 100.0
-                } else {
-                    0.0
-                },
-                network_available,
-                cpu_usage: Some(sys.global_cpu_info().cpu_usage()),
-                battery: battery_status(),
+            let (upload_speed, download_speed, network_available) = match networks.sample(now) {
+                Ok(value) => { last_network_error = None; value }
+                Err(error) => {
+                    if last_network_error.as_ref() != Some(&error) {
+                        tracing::warn!(target: "dock_mapper::monitor", %error, "网络采样不可用");
+                    }
+                    last_network_error = Some(error);
+                    (0.0, 0.0, false)
+                }
             };
-
+            if last_resources.is_none_or(|at| now.duration_since(at) >= Duration::from_secs(current.interval_secs.into())) {
+                sys.refresh_memory();
+                sys.refresh_cpu_usage();
+                let total = sys.total_memory() as f32;
+                memory_usage = if total > 0.0 { sys.used_memory() as f32 / total * 100.0 } else { 0.0 };
+                cpu_usage = cpu_baseline.then(|| sys.global_cpu_info().cpu_usage());
+                cpu_baseline = true;
+                battery = battery_status();
+                last_resources = Some(now);
+            }
+            let payload = SysStatusPayload { upload_speed, download_speed, network_available, memory_usage, cpu_usage, battery: battery.clone() };
             let widget_visible = emit_if_visible(&app, "taskbar_widget", payload.clone());
             let main_visible = emit_to_main(&app, payload, now, &mut last_hidden_main_emit);
             metrics.record(sample_started.elapsed());
             let interval = if widget_visible || main_visible {
-                current.interval_secs.into()
+                Duration::from_millis(500)
             } else {
-                10
+                Duration::from_secs(10)
             };
-            tokio::select! {
-                _ = tokio::time::sleep(Duration::from_secs(interval)) => {}
-                changed = settings.changed() => {
-                    if changed.is_err() { break; }
-                }
-            }
+            let (lock, wake) = &*settings;
+            let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+            drop(wake.wait_timeout_while(guard, interval, |value| {
+                !value.shutdown && value.revision == current.revision
+            }));
         }
         tracing::info!(target: "dock_mapper::monitor", "system monitor stopped");
-    });
+    }).map_err(|error| format!("创建系统采样线程失败：{error}"))?;
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
@@ -154,65 +153,6 @@ fn battery_status() -> Option<BatteryStatus> {
 #[cfg(not(target_os = "windows"))]
 fn battery_status() -> Option<BatteryStatus> {
     None
-}
-
-#[derive(Default)]
-struct NetworkBaseline {
-    interface: Option<String>,
-    received: u64,
-    transmitted: u64,
-    initialized: bool,
-}
-
-impl NetworkBaseline {
-    fn sample(
-        &mut self,
-        interface: Option<&str>,
-        available: bool,
-        received: u64,
-        transmitted: u64,
-        elapsed: f64,
-    ) -> (f64, f64) {
-        let interface_changed = self.interface.as_deref() != interface;
-        if interface_changed {
-            self.interface = interface.map(str::to_owned);
-            self.initialized = false;
-        }
-        if !available {
-            self.initialized = false;
-            self.received = received;
-            self.transmitted = transmitted;
-            return (0.0, 0.0);
-        }
-        let rates = if self.initialized {
-            let elapsed = elapsed.max(0.001);
-            (
-                transmitted.saturating_sub(self.transmitted) as f64 / elapsed,
-                received.saturating_sub(self.received) as f64 / elapsed,
-            )
-        } else {
-            self.initialized = true;
-            (0.0, 0.0)
-        };
-        self.received = received;
-        self.transmitted = transmitted;
-        rates
-    }
-}
-
-fn is_virtual_adapter(name: &str) -> bool {
-    let value = name.to_ascii_lowercase();
-    [
-        "loopback",
-        "vethernet",
-        "virtual",
-        "vmware",
-        "hyper-v",
-        "wsl",
-        "npcap",
-    ]
-    .iter()
-    .any(|marker| value.contains(marker))
 }
 
 fn emit_if_visible(app: &AppHandle, label: &str, payload: SysStatusPayload) -> bool {
@@ -261,6 +201,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn shutdown_wakes_a_hidden_monitor_without_waiting_for_its_sampling_interval() {
+        let control = SysMonitorControl::new(1);
+        let settings = control.settings.clone();
+        let (ready, waiting) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let (lock, wake) = &*settings;
+            let guard = lock.lock().unwrap();
+            ready.send(()).unwrap();
+            let (guard, timeout) = wake
+                .wait_timeout_while(guard, Duration::from_secs(10), |value| !value.shutdown)
+                .unwrap();
+            assert!(!timeout.timed_out());
+            assert!(guard.shutdown);
+        });
+        waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+        control.shutdown();
+        worker.join().unwrap();
+    }
+
+    #[test]
     fn hidden_main_keeps_collecting_samples_at_low_frequency() {
         let now = Instant::now();
         assert!(should_emit_main_telemetry(false, None, now));
@@ -280,32 +240,10 @@ mod tests {
     #[test]
     fn monitor_interval_is_clamped_and_shutdown_is_observable() {
         let control = SysMonitorControl::new(0);
-        assert_eq!(control.settings.borrow().interval_secs, 1);
+        assert_eq!(control.settings.0.lock().unwrap().interval_secs, 1);
         control.set_interval(9);
-        assert_eq!(control.settings.borrow().interval_secs, 5);
+        assert_eq!(control.settings.0.lock().unwrap().interval_secs, 5);
         control.shutdown();
-        assert!(control.settings.borrow().shutdown);
-    }
-
-    #[test]
-    fn changing_or_restoring_an_interface_resets_the_speed_baseline() {
-        let mut baseline = NetworkBaseline::default();
-        assert_eq!(
-            baseline.sample(Some("Ethernet"), true, 100, 200, 1.0),
-            (0.0, 0.0)
-        );
-        assert_eq!(
-            baseline.sample(Some("Ethernet"), true, 140, 260, 2.0),
-            (30.0, 20.0)
-        );
-        assert_eq!(
-            baseline.sample(Some("Wi-Fi"), true, 500, 900, 1.0),
-            (0.0, 0.0)
-        );
-        assert_eq!(baseline.sample(Some("Wi-Fi"), false, 0, 0, 1.0), (0.0, 0.0));
-        assert_eq!(
-            baseline.sample(Some("Wi-Fi"), true, 20, 30, 1.0),
-            (0.0, 0.0)
-        );
+        assert!(control.settings.0.lock().unwrap().shutdown);
     }
 }
