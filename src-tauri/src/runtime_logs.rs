@@ -306,16 +306,7 @@ pub async fn append_runtime_log(
 mod tests {
     use super::*;
     fn fixture() -> std::path::PathBuf {
-        let root = std::env::temp_dir().join(format!(
-            "dockmapper-logs-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&root).unwrap();
-        root
+        crate::test_support::temporary_directory("dockmapper-logs")
     }
     #[test]
     fn copying_all_logs_includes_records_beyond_the_visible_limit_and_redacts_paths() {

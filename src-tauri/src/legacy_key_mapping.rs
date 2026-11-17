@@ -400,16 +400,43 @@ mod tests {
         assert_eq!(config::AppConfig::default().key_mapping_runtime_version, 1);
     }
     fn root() -> PathBuf {
-        let p = std::env::temp_dir().join(format!(
-            "dock-key-migration-{}-{}",
-            std::process::id(),
+        root_at(
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&p).unwrap();
-        p
+                .as_nanos(),
+        )
+    }
+    fn root_at(nonce: u128) -> PathBuf {
+        crate::test_support::temporary_directory(&format!("dock-key-migration-{nonce}"))
+    }
+    #[test]
+    fn backup_change_check_is_not_masked_by_another_test_with_the_same_timestamp() {
+        let blocked = root_at(0);
+        fs::write(
+            blocked.join("keyboard-recovery"),
+            b"blocked by another fixture",
+        )
+        .unwrap();
+        let clean = root_at(0);
+        let mut reads = 0;
+        let error = clear_with(
+            &clean.join("config.json"),
+            &mut config::AppConfig::default(),
+            Some(&[1]),
+            100,
+            || {
+                reads += 1;
+                Ok(Some(vec![reads]))
+            },
+            |_| panic!("concurrent change overwritten"),
+        )
+        .unwrap_err();
+        assert!(error.contains("备份期间"), "unexpected error: {error}");
+        assert_eq!(reads, 2);
+        assert_ne!(blocked, clean);
+        fs::remove_dir_all(blocked).unwrap();
+        fs::remove_dir_all(clean).unwrap();
     }
     #[test]
     fn legacy_unknown_keys_remain_visible_and_bad_bytes_are_not_reported_as_empty() {
@@ -529,7 +556,8 @@ mod tests {
             |_| panic!("concurrent change overwritten"),
         )
         .unwrap_err();
-        assert!(error.contains("备份期间"));
+        assert!(error.contains("备份期间"), "unexpected error: {error}");
+        assert_eq!(reads, 2);
         fs::remove_dir_all(root).unwrap();
     }
     #[test]

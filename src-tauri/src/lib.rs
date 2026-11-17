@@ -31,6 +31,8 @@ mod screenshot;
 mod startup_runtime;
 mod sys_monitor;
 mod taskbar;
+#[cfg(test)]
+mod test_support;
 mod translation;
 mod tray;
 mod visualizer_effects;
