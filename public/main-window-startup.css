@@ -27,11 +27,8 @@
   padding: 24px;
   background: var(--dock-boot-bg, #f3f5f7);
   color: var(--dock-boot-text, #20252b);
-  font:
-    14px/1.6 "Segoe UI Variable",
-    "Segoe UI",
-    "Microsoft YaHei UI",
-    sans-serif;
+  font: 14px/1.6
+    var(--app-font-family, "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif);
 }
 .dock-startup__card {
   display: flex;

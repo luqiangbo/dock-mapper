@@ -6,6 +6,7 @@
     "taskbar_widget"
   ],
   "permissions": [
+    "allow-get-ui-font",
     "allow-application-ready",
     "core:event:allow-listen",
     "core:event:allow-unlisten",

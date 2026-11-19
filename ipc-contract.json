@@ -1,6 +1,11 @@
 {
   "version": 1,
   "commands": [
+    "reset_app_settings",
+    "set_app_autostart",
+    "get_ui_font",
+    "set_ui_font",
+    "list_system_fonts",
     "get_translation_settings",
     "update_translation_settings",
     "test_translation_service",

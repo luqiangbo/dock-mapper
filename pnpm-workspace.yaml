@@ -1,19 +1,21 @@
 allowBuilds:
-  '@parcel/watcher': false
+  "@parcel/watcher": false
 overrides:
-  '@tauri-apps/api': 2.11.1
+  "@tauri-apps/api": 2.12.5
+  # Excalidraw 0.18.1 pins tabs 1.0.2, whose peer range predates React 19.
+  "@excalidraw/excalidraw>@radix-ui/react-tabs": 1.2.1
 minimumReleaseAgeExclude:
-  - '@tauri-apps/api@2.12.1'
-  - '@tauri-apps/cli-darwin-arm64@2.12.1'
-  - '@tauri-apps/cli-darwin-x64@2.12.1'
-  - '@tauri-apps/cli-linux-arm-gnueabihf@2.12.1'
-  - '@tauri-apps/cli-linux-arm64-gnu@2.12.1'
-  - '@tauri-apps/cli-linux-arm64-musl@2.12.1'
-  - '@tauri-apps/cli-linux-riscv64-gnu@2.12.1'
-  - '@tauri-apps/cli-linux-x64-gnu@2.12.1'
-  - '@tauri-apps/cli-linux-x64-musl@2.12.1'
-  - '@tauri-apps/cli-win32-arm64-msvc@2.12.1'
-  - '@tauri-apps/cli-win32-ia32-msvc@2.12.1'
-  - '@tauri-apps/cli-win32-x64-msvc@2.12.1'
-  - '@tauri-apps/cli@2.12.1'
-  - '@tauri-apps/plugin-autostart@2.7.0'
+  - "@tauri-apps/api@2.12.1"
+  - "@tauri-apps/cli-darwin-arm64@2.12.1"
+  - "@tauri-apps/cli-darwin-x64@2.12.1"
+  - "@tauri-apps/cli-linux-arm-gnueabihf@2.12.1"
+  - "@tauri-apps/cli-linux-arm64-gnu@2.12.1"
+  - "@tauri-apps/cli-linux-arm64-musl@2.12.1"
+  - "@tauri-apps/cli-linux-riscv64-gnu@2.12.1"
+  - "@tauri-apps/cli-linux-x64-gnu@2.12.1"
+  - "@tauri-apps/cli-linux-x64-musl@2.12.1"
+  - "@tauri-apps/cli-win32-arm64-msvc@2.12.1"
+  - "@tauri-apps/cli-win32-ia32-msvc@2.12.1"
+  - "@tauri-apps/cli-win32-x64-msvc@2.12.1"
+  - "@tauri-apps/cli@2.12.1"
+  - "@tauri-apps/plugin-autostart@2.7.0"

@@ -140,6 +140,7 @@ pub struct BootstrapResult {
     reset: bool,
     identity: String,
     restart_required: bool,
+    reset_revision: u64,
 }
 
 #[tauri::command]
@@ -288,19 +289,17 @@ fn initialize_defaults_impl(
             reset: false,
             identity: format!("{build_id}:{installation}"),
             restart_required: true,
+            reset_revision: state
+                .config
+                .lock()
+                .map_err(|_| "配置状态已损坏")?
+                .settings_reset_revision,
         });
     }
-    let _mutation = state
-        .mutation_lock
-        .lock()
-        .map_err(|_| "配置事务状态已损坏")?;
+    let _mutation = state.lock_mutation()?;
     let mut reset = false;
     if progress.identity.as_deref() != Some(&build_id) {
         stage(&app, generation, "配置")?;
-        let previous = crate::config::load(&state.config_path);
-        if previous.defaults_build_id.as_deref() != Some(&build_id) {
-            crate::autostart_reset::ensure_disabled(&app)?;
-        }
         let (next, did_reset) = timed("配置", || {
             crate::config::load_for_build(&state.config_path, &build_id)
         })?;
@@ -369,9 +368,15 @@ fn initialize_defaults_impl(
         .installation_id
         .clone()
         .unwrap_or_default();
+    let reset_revision = state
+        .config
+        .lock()
+        .map_err(|_| "配置状态已损坏")?
+        .settings_reset_revision;
     Ok(BootstrapResult {
         reset,
         identity: format!("{build_id}:{installation}"),
         restart_required,
+        reset_revision,
     })
 }

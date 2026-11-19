@@ -46,6 +46,11 @@ export interface NativeStartupStatus {
 }
 
 interface CommandContract {
+  set_app_autostart: { args: { enabled: boolean }; result: void };
+  reset_app_settings: { args: undefined; result: number };
+  get_ui_font: { args: undefined; result: string };
+  set_ui_font: { args: { font: string }; result: string };
+  list_system_fonts: { args: undefined; result: string[] };
   translate_ocr_blocks: {
     args: { request: import("./translation").BlockTranslationRequest };
     result: import("./translation").TranslationBlock[];
@@ -88,7 +93,7 @@ interface CommandContract {
   };
   initialize_defaults: {
     args: { buildId: string; activate: boolean };
-    result: { reset: boolean; identity: string; restartRequired: boolean };
+    result: { reset: boolean; identity: string; restartRequired: boolean; resetRevision: number };
   };
   application_ready: { args: undefined; result: boolean };
   get_startup_status: { args: undefined; result: NativeStartupStatus };

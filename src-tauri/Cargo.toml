@@ -10,21 +10,21 @@ name = "dock_mapper_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
-serde_json = "1"
+tauri-build = { version = "2.7.6", features = [] }
+serde_json = "1.0.154"
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
-tauri-plugin-opener = "2"
-tauri-plugin-updater = "=2.11.0"
-tauri-plugin-process = "2"
-tauri-plugin-autostart = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-reqwest = { version = "0.13", default-features = false, features = ["json", "query", "form", "rustls-no-provider", "system-proxy"] }
-md5 = "0.8"
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-windows = { version = "0.61", features = [
+tauri = { version = "2.12.7", features = ["tray-icon", "image-png"] }
+tauri-plugin-opener = "2.7.3"
+tauri-plugin-updater = "=2.14.1"
+tauri-plugin-process = "2.4.0"
+tauri-plugin-autostart = "2.7.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "query", "form", "rustls-no-provider", "system-proxy"] }
+md5 = "0.8.1"
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+windows = { version = "0.62.2", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_Security_Cryptography",
@@ -45,6 +45,7 @@ windows = { version = "0.61", features = [
     "Win32_UI_Input",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_Graphics_Gdi",
+    "Win32_Graphics_DirectWrite",
     "Win32_Graphics_Direct3D",
     "Win32_Graphics_Direct3D11",
     "Win32_Graphics_Dwm",
@@ -55,22 +56,18 @@ windows = { version = "0.61", features = [
     "Globalization",
     "Graphics_Imaging"
 ] }
-sysinfo = "0.30"
-tokio = { version = "1", features = ["full"] }
-tracing = "0.1"
-tracing-appender = "0.2"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-arboard = "3.6"
-base64 = "0.22"
-directories = "6"
-image = { version = "0.25", default-features = false, features = ["png"] }
-quircs = "0.10"
-rfd = "0.15"
-tauri-plugin-global-shortcut = "2.3"
-tauri-plugin-single-instance = "2"
-tauri-plugin-window-state = "2"
-paddleocr_rs_onnx = "=0.2.7"
-
-[patch.crates-io]
-# 0.2.7 在未启用加速器时仍引用对应类型；此处仅补足 cfg 回退，默认仍是 CPU。
-paddleocr_rs_onnx = { path = "vendor/paddleocr_rs_onnx" }
+sysinfo = "0.40.4"
+tokio = { version = "1.54.1", features = ["full"] }
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+arboard = "3.7.0"
+base64 = "0.23.1"
+directories = "6.0.0"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+quircs = "0.10.3"
+rfd = "0.18.0"
+tauri-plugin-global-shortcut = "2.4.1"
+tauri-plugin-single-instance = "2.5.5"
+tauri-plugin-window-state = "2.5.0"
+paddleocr_rs_onnx = "=0.2.8"

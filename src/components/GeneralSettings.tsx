@@ -2,12 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { usePageActive } from "./PageActivity";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import {
-  disable as disableAutostart,
-  enable as enableAutostart,
-  isEnabled as isAutostartEnabled,
-} from "@tauri-apps/plugin-autostart";
+import { isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 import SoftwareUpdate from "./SoftwareUpdate";
+import UiFontSettings from "./UiFontSettings";
+import ResetSettings from "./ResetSettings";
 
 import {
   App as AntApp,
@@ -118,8 +116,7 @@ export default function GeneralSettings() {
       readRevision.current.autoStart += 1;
       setAutoStartLoading(true);
       try {
-        if (checked) await enableAutostart();
-        else await disableAutostart();
+        await generalSettingsApi.setAutostart(checked);
         setAutoStart(checked);
         form.setFieldValue("autoStart", checked);
         notification.success({ message: checked ? "开机自启已开启" : "开机自启已关闭" });
@@ -244,6 +241,16 @@ export default function GeneralSettings() {
             </Card>
           </Col>
 
+          <Col xs={24}>
+            <Card className={styles.surfaceCard} title="字体与显示">
+              <UiFontSettings />
+            </Card>
+          </Col>
+          <Col xs={24}>
+            <Card className={styles.surfaceCard} title="恢复设置">
+              <ResetSettings />
+            </Card>
+          </Col>
           <Col xs={24}>
             <Card className={styles.surfaceCard} title="更新与关于">
               <SoftwareUpdate>

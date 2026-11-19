@@ -1,7 +1,10 @@
 use crate::{config, history, image_store, widget_layout};
 use std::{
     path::PathBuf,
-    sync::{atomic::AtomicBool, Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, MutexGuard,
+    },
 };
 
 /// Process-wide state shared by commands that operate on persisted settings,
@@ -17,6 +20,7 @@ pub struct AppState {
     pub(crate) config_path: PathBuf,
     pub(crate) widget_layout: Mutex<widget_layout::WidgetLayoutController>,
     pub(crate) mutation_lock: Mutex<()>,
+    pub(crate) reset_pending: AtomicBool,
     pub(crate) admin_operation_in_progress: AtomicBool,
 }
 
@@ -33,8 +37,17 @@ impl AppState {
             config_path,
             widget_layout: Mutex::new(widget_layout::WidgetLayoutController::default()),
             mutation_lock: Mutex::new(()),
+            reset_pending: AtomicBool::new(false),
             admin_operation_in_progress: AtomicBool::new(false),
         }
+    }
+
+    pub(crate) fn lock_mutation(&self) -> Result<MutexGuard<'_, ()>, String> {
+        let guard = self.mutation_lock.lock().map_err(|_| "配置写入锁已损坏")?;
+        if self.reset_pending.load(Ordering::Acquire) {
+            return Err("设置已恢复，请重启应用后再修改".into());
+        }
+        Ok(guard)
     }
 
     pub(crate) fn persist_config(&self) -> Result<(), String> {

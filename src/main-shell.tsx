@@ -5,7 +5,7 @@ import "./global.scss";
 import { accentColors, themePalettes } from "./themePalette";
 
 function ThemedApp() {
-  const { accentColor, resolved } = useTheme();
+  const { accentColor, resolved, fontFamily } = useTheme();
   const palette = themePalettes[resolved];
   const accent = accentColors(accentColor, resolved);
 
@@ -23,7 +23,7 @@ function ThemedApp() {
           borderRadius: 6,
           controlHeight: 32,
           fontSize: 14,
-          fontFamily: '"Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif',
+          fontFamily,
           colorText: palette["text-primary"],
           colorTextSecondary: palette["text-secondary"],
           colorBgContainer: palette["surface-base"],

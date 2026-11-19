@@ -16,7 +16,7 @@ export default function StartupFeedback({
         algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm,
         token: {
           colorPrimary: "#526d87",
-          fontFamily: '"Segoe UI", "Microsoft YaHei UI", sans-serif',
+          fontFamily: 'var(--app-font-family, "Segoe UI", "Microsoft YaHei UI", sans-serif)',
         },
       }}
     >

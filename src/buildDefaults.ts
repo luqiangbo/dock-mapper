@@ -4,12 +4,16 @@ const PREFERENCES = [
   "navigation",
   "sidebar-width",
   "screenshot-history-view",
+  "ui-font",
 ];
 export function clearBuildPreferences(
   storage: Pick<Storage, "getItem" | "removeItem" | "setItem">,
-  identity: string,
+  revision: number,
 ) {
-  if (storage.getItem("dock-mapper:defaults-build-id") === identity) return;
+  // Builds and installations never reset preferences. Only a committed user reset does.
+  if (!Number.isSafeInteger(revision) || revision <= 0) return;
+  const key = "dock-mapper:settings-reset-revision";
+  if (storage.getItem(key) === String(revision)) return;
   for (const key of PREFERENCES) storage.removeItem(`dock-mapper:${key}`);
-  storage.setItem("dock-mapper:defaults-build-id", identity);
+  storage.setItem(key, String(revision));
 }

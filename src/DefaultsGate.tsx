@@ -23,7 +23,7 @@ function initialize() {
         await restartForBuild(__DOCKMAPPER_DEV_MODE__, relaunch);
         return;
       }
-      clearBuildPreferences(localStorage, result.identity);
+      clearBuildPreferences(localStorage, result.resetRevision);
       recordRuntimeLog(
         "application",
         `应用配置已就绪：${Math.round(performance.now())} ms`,

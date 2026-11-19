@@ -22,7 +22,7 @@ pub fn update_capture_preferences(
     experience: Option<config::CaptureExperience>,
     toolbar_tools: Option<Vec<config::ScreenshotToolbarTool>>,
 ) -> Result<config::ScreenshotConfig, String> {
-    let _mutation = state.mutation_lock.lock().map_err(|_| "配置写入锁已损坏")?;
+    let _mutation = state.lock_mutation()?;
     let mut next = state.config.lock().map_err(|_| "配置状态已损坏")?.clone();
     if let Some(experience) = experience {
         next.screenshot_config.experience = experience;
@@ -82,10 +82,7 @@ fn update_screenshot_config_impl(
     mut screenshot_config: config::ScreenshotConfig,
     from_overlay: bool,
 ) -> Result<config::ScreenshotConfig, String> {
-    let _mutation = state
-        .mutation_lock
-        .lock()
-        .map_err(|_| "配置写入锁已损坏".to_string())?;
+    let _mutation = state.lock_mutation()?;
     let previous_config = state
         .config
         .lock()
@@ -133,10 +130,7 @@ pub fn update_screenshot_annotation_color(
     state: State<'_, AppState>,
     color: String,
 ) -> Result<String, String> {
-    let _mutation = state
-        .mutation_lock
-        .lock()
-        .map_err(|_| "配置写入锁已损坏".to_string())?;
+    let _mutation = state.lock_mutation()?;
     let mut next = state
         .config
         .lock()
@@ -168,10 +162,7 @@ pub fn update_screenshot_annotation_outline(
     state: State<'_, AppState>,
     outline: config::AnnotationOutlineConfig,
 ) -> Result<config::AnnotationOutlineConfig, String> {
-    let _mutation = state
-        .mutation_lock
-        .lock()
-        .map_err(|_| "配置写入锁已损坏".to_string())?;
+    let _mutation = state.lock_mutation()?;
     let mut next = state
         .config
         .lock()
@@ -207,10 +198,7 @@ pub fn update_screenshot_annotation_styles(
     state: State<'_, AppState>,
     styles: config::ScreenshotAnnotationStyles,
 ) -> Result<config::ScreenshotAnnotationStyles, String> {
-    let _mutation = state
-        .mutation_lock
-        .lock()
-        .map_err(|_| "配置写入锁已损坏".to_string())?;
+    let _mutation = state.lock_mutation()?;
     let mut next = state
         .config
         .lock()
@@ -260,10 +248,7 @@ pub fn reset_screenshot_shortcuts(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<config::ScreenshotConfig, String> {
-    let _mutation = state
-        .mutation_lock
-        .lock()
-        .map_err(|_| "配置写入锁已损坏".to_string())?;
+    let _mutation = state.lock_mutation()?;
     let previous_config = state
         .config
         .lock()
@@ -318,10 +303,7 @@ fn mutate_palette(
     state: &AppState,
     change: impl FnOnce(&mut config::ColorPaletteConfig) -> Result<(), String>,
 ) -> Result<config::ColorPaletteConfig, String> {
-    let _mutation = state
-        .mutation_lock
-        .lock()
-        .map_err(|_| "配置写入锁已损坏".to_string())?;
+    let _mutation = state.lock_mutation()?;
     let previous = state
         .config
         .lock()
@@ -417,10 +399,7 @@ pub fn get_minimize_to_tray(state: State<'_, AppState>) -> Result<bool, String> 
 
 #[tauri::command]
 pub fn set_minimize_to_tray(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
-    let _mutation = state
-        .mutation_lock
-        .lock()
-        .map_err(|_| "配置写入锁已损坏".to_string())?;
+    let _mutation = state.lock_mutation()?;
     let previous_config = {
         let mut config = state
             .config

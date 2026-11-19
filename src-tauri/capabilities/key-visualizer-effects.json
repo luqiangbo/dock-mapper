@@ -5,6 +5,7 @@
     "key-visualizer-effect-*"
   ],
   "permissions": [
+    "allow-get-ui-font",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "allow-get-key-visualizer-effects-status",

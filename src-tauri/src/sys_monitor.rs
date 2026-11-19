@@ -69,11 +69,11 @@ impl SysMonitorControl {
 }
 
 pub fn start_sys_monitor(app: AppHandle) -> Result<(), String> {
+    let mut sys = System::new().map_err(|error| format!("初始化系统采集失败：{error}"))?;
     tracing::info!(target: "dock_mapper::monitor", "system sampling started");
     let settings = app.state::<SysMonitorControl>().settings.clone();
     let metrics = app.state::<SysMonitorControl>().metrics.clone();
     std::thread::Builder::new().name("dockmapper-sampling".into()).spawn(move || {
-        let mut sys = System::new();
         let mut cpu_baseline = false;
         let mut networks = crate::network_monitor::NetworkMonitor::default();
         let mut last_resources: Option<Instant> = None;
@@ -111,7 +111,7 @@ pub fn start_sys_monitor(app: AppHandle) -> Result<(), String> {
                 sys.refresh_cpu_usage();
                 let total = sys.total_memory() as f32;
                 memory_usage = if total > 0.0 { sys.used_memory() as f32 / total * 100.0 } else { 0.0 };
-                cpu_usage = cpu_baseline.then(|| sys.global_cpu_info().cpu_usage());
+                cpu_usage = cpu_baseline.then(|| sys.global_cpu_usage());
                 cpu_baseline = true;
                 battery = battery_status();
                 last_resources = Some(now);

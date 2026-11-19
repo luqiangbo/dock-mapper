@@ -4,6 +4,11 @@ import type { ThemeMode } from "./types";
 import { useWindowTheme } from "./hooks/useWindowTheme";
 import { THEME_KEY, ACCENT_COLOR_KEY, THEME_CHANGED, parseAccent } from "./themePalette";
 interface ThemeContextValue {
+  uiFont: string;
+  fontFamily: string;
+  fontError: string | null;
+  fontLoading: boolean;
+  retryFont: () => void;
   mode: ThemeMode;
   resolved: "light" | "dark";
   accentColor: string;
@@ -29,7 +34,16 @@ export function ThemeProvider({ children }: PropsWithChildren) {
         notifyTheme();
       },
     }),
-    [state.mode, state.resolved, state.accentColor],
+    [
+      state.mode,
+      state.resolved,
+      state.accentColor,
+      state.uiFont,
+      state.fontFamily,
+      state.fontError,
+      state.fontLoading,
+      state.retryFont,
+    ],
   );
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

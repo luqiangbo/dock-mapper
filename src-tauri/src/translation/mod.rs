@@ -38,7 +38,7 @@ pub(crate) fn save_settings(
     state: &AppState,
     draft: SettingsDraft,
 ) -> Result<SettingsView, String> {
-    let _mutation = state.mutation_lock.lock().map_err(|_| "配置写入锁已损坏")?;
+    let _mutation = state.lock_mutation()?;
     let mut next = state.config.lock().map_err(|_| "配置状态已损坏")?.clone();
     let previous_provider = next.translation_config.provider;
     next.translation_config = settings::apply(&next.translation_config, draft)?;

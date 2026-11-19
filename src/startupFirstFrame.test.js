@@ -6,7 +6,7 @@ const source = readFileSync(
   "utf8",
 );
 function appearance(stored, systemDark, denied = false) {
-  const root = { dataset: {}, style: {} };
+  const root = { dataset: {}, style: { setProperty: vi.fn() } };
   const storage = {
     getItem: vi.fn(() => {
       if (denied) throw new Error("拒绝访问");
@@ -40,4 +40,12 @@ describe("不依赖入口脚本的首帧", () => {
     expect(denied.root.dataset.theme).toBe("dark");
     expect(denied.storage.getItem).toHaveBeenCalledWith("dock-mapper:theme");
   });
+});
+
+it("首帧从本机缓存应用字体，同时拒绝可注入样式的字体名称", () => {
+  expect(appearance("微软雅黑", false).root.style.setProperty).toHaveBeenCalledWith(
+    "--app-font-family",
+    expect.stringContaining('"微软雅黑"'),
+  );
+  expect(appearance('Arial";color:red', false).root.style.setProperty).not.toHaveBeenCalled();
 });

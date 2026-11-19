@@ -609,6 +609,12 @@
           "markdownDescription": "Enables the get_translation_settings command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_ui_font command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-ui-font",
+          "markdownDescription": "Enables the get_ui_font command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_widget_config command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-widget-config",
@@ -637,6 +643,12 @@
           "type": "string",
           "const": "allow-list-screenshot-history",
           "markdownDescription": "Enables the list_screenshot_history command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_system_fonts command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-system-fonts",
+          "markdownDescription": "Enables the list_system_fonts command without any pre-configured scope."
         },
         {
           "description": "Enables the locate_key_visualizer_mouse command without any pre-configured scope.",
@@ -729,6 +741,12 @@
           "markdownDescription": "Enables the report_capture_rendered command without any pre-configured scope."
         },
         {
+          "description": "Enables the reset_app_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-reset-app-settings",
+          "markdownDescription": "Enables the reset_app_settings command without any pre-configured scope."
+        },
+        {
           "description": "Enables the reset_screenshot_shortcuts command without any pre-configured scope.",
           "type": "string",
           "const": "allow-reset-screenshot-shortcuts",
@@ -771,6 +789,12 @@
           "markdownDescription": "Enables the schedule_screenshot command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_app_autostart command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-app-autostart",
+          "markdownDescription": "Enables the set_app_autostart command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_key_mapping_enabled command without any pre-configured scope.",
           "type": "string",
           "const": "allow-set-key-mapping-enabled",
@@ -799,6 +823,12 @@
           "type": "string",
           "const": "allow-set-screenshot-history-favorite",
           "markdownDescription": "Enables the set_screenshot_history_favorite command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_ui_font command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-ui-font",
+          "markdownDescription": "Enables the set_ui_font command without any pre-configured scope."
         },
         {
           "description": "Enables the show_capture_overlay command without any pre-configured scope.",
@@ -1173,6 +1203,12 @@
           "markdownDescription": "Denies the get_translation_settings command without any pre-configured scope."
         },
         {
+          "description": "Denies the get_ui_font command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-ui-font",
+          "markdownDescription": "Denies the get_ui_font command without any pre-configured scope."
+        },
+        {
           "description": "Denies the get_widget_config command without any pre-configured scope.",
           "type": "string",
           "const": "deny-get-widget-config",
@@ -1201,6 +1237,12 @@
           "type": "string",
           "const": "deny-list-screenshot-history",
           "markdownDescription": "Denies the list_screenshot_history command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_system_fonts command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-system-fonts",
+          "markdownDescription": "Denies the list_system_fonts command without any pre-configured scope."
         },
         {
           "description": "Denies the locate_key_visualizer_mouse command without any pre-configured scope.",
@@ -1293,6 +1335,12 @@
           "markdownDescription": "Denies the report_capture_rendered command without any pre-configured scope."
         },
         {
+          "description": "Denies the reset_app_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-reset-app-settings",
+          "markdownDescription": "Denies the reset_app_settings command without any pre-configured scope."
+        },
+        {
           "description": "Denies the reset_screenshot_shortcuts command without any pre-configured scope.",
           "type": "string",
           "const": "deny-reset-screenshot-shortcuts",
@@ -1335,6 +1383,12 @@
           "markdownDescription": "Denies the schedule_screenshot command without any pre-configured scope."
         },
         {
+          "description": "Denies the set_app_autostart command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-app-autostart",
+          "markdownDescription": "Denies the set_app_autostart command without any pre-configured scope."
+        },
+        {
           "description": "Denies the set_key_mapping_enabled command without any pre-configured scope.",
           "type": "string",
           "const": "deny-set-key-mapping-enabled",
@@ -1363,6 +1417,12 @@
           "type": "string",
           "const": "deny-set-screenshot-history-favorite",
           "markdownDescription": "Denies the set_screenshot_history_favorite command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_ui_font command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-ui-font",
+          "markdownDescription": "Denies the set_ui_font command without any pre-configured scope."
         },
         {
           "description": "Denies the show_capture_overlay command without any pre-configured scope.",
@@ -1551,6 +1611,12 @@
           "markdownDescription": "Enables the default_window_icon command without any pre-configured scope."
         },
         {
+          "description": "Enables the exit command without any pre-configured scope.",
+          "type": "string",
+          "const": "core:app:allow-exit",
+          "markdownDescription": "Enables the exit command without any pre-configured scope."
+        },
+        {
           "description": "Enables the fetch_data_store_identifiers command without any pre-configured scope.",
           "type": "string",
           "const": "core:app:allow-fetch-data-store-identifiers",
@@ -1639,6 +1705,12 @@
           "type": "string",
           "const": "core:app:deny-default-window-icon",
           "markdownDescription": "Denies the default_window_icon command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the exit command without any pre-configured scope.",
+          "type": "string",
+          "const": "core:app:deny-exit",
+          "markdownDescription": "Denies the exit command without any pre-configured scope."
         },
         {
           "description": "Denies the fetch_data_store_identifiers command without any pre-configured scope.",
@@ -2901,6 +2973,12 @@
           "markdownDescription": "Enables the set_fullscreen command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_fullscreen_on_monitor command without any pre-configured scope.",
+          "type": "string",
+          "const": "core:window:allow-set-fullscreen-on-monitor",
+          "markdownDescription": "Enables the set_fullscreen_on_monitor command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_icon command without any pre-configured scope.",
           "type": "string",
           "const": "core:window:allow-set-icon",
@@ -3367,6 +3445,12 @@
           "type": "string",
           "const": "core:window:deny-set-fullscreen",
           "markdownDescription": "Denies the set_fullscreen command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_fullscreen_on_monitor command without any pre-configured scope.",
+          "type": "string",
+          "const": "core:window:deny-set-fullscreen-on-monitor",
+          "markdownDescription": "Denies the set_fullscreen_on_monitor command without any pre-configured scope."
         },
         {
           "description": "Denies the set_icon command without any pre-configured scope.",

@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { clearBuildPreferences } from "./buildDefaults";
-describe("构建默认值偏好", () => {
-  it("新构建和同构建重新安装清理偏好，普通重启保留用户修改", () => {
-    const values = new Map<string, string>([
-      ["dock-mapper:theme", "dark"],
-      ["unrelated-app", "keep"],
-      ["dock-mapper:telemetry-archive", "history"],
-    ]);
-    const storage = {
+function fixture() {
+  const values = new Map([
+    ["dock-mapper:theme", "dark"],
+    ["dock-mapper:ui-font", "Arial"],
+    ["dock-mapper:defaults-build-id", "old-build:old-install"],
+    ["dockmapper.telemetry-archive.v1", "history"],
+    ["unrelated-app", "keep"],
+  ]);
+  return {
+    values,
+    storage: {
       getItem: (key: string) => values.get(key) ?? null,
       removeItem: (key: string) => {
         values.delete(key);
@@ -15,32 +18,44 @@ describe("构建默认值偏好", () => {
       setItem: (key: string, value: string) => {
         values.set(key, value);
       },
-    };
-    clearBuildPreferences(storage, "build-A:install-A");
-    expect(values.has("dock-mapper:theme")).toBe(false);
-    values.set("dock-mapper:theme", "dark");
-    clearBuildPreferences(storage, "build-A:install-A");
+    },
+  };
+}
+describe("显式重置后的前端偏好", () => {
+  it("旧版本升级或重新安装没有显式重置时保留主题与字体", () => {
+    const { values, storage } = fixture();
+    clearBuildPreferences(storage, 0);
     expect(values.get("dock-mapper:theme")).toBe("dark");
-    clearBuildPreferences(storage, "build-B:install-A");
-    expect(values.has("dock-mapper:theme")).toBe(false);
-    values.set("dock-mapper:theme", "dark");
-    clearBuildPreferences(storage, "build-B:install-B");
-    expect(values.has("dock-mapper:theme")).toBe(false);
-    expect(values.get("unrelated-app")).toBe("keep");
-    expect(values.get("dock-mapper:telemetry-archive")).toBe("history");
+    expect(values.get("dock-mapper:ui-font")).toBe("Arial");
   });
-  it("清理失败不记录已完成标识，允许下次重试", () => {
-    let identity: string | null = null;
-    const storage = {
-      getItem: () => identity,
-      removeItem: () => {
-        throw new Error("拒绝写入");
-      },
-      setItem: (_key: string, value: string) => {
-        identity = value;
-      },
-    };
-    expect(() => clearBuildPreferences(storage, "new-build")).toThrow("拒绝写入");
-    expect(identity).toBeNull();
+  it("仅新重置代次清理设置，同一代次重开保留修改和归档", () => {
+    const { values, storage } = fixture();
+    clearBuildPreferences(storage, 1);
+    expect(values.has("dock-mapper:theme")).toBe(false);
+    expect(values.has("dock-mapper:ui-font")).toBe(false);
+    values.set("dock-mapper:theme", "dark");
+    clearBuildPreferences(storage, 1);
+    expect(values.get("dock-mapper:theme")).toBe("dark");
+    clearBuildPreferences(storage, 2);
+    expect(values.has("dock-mapper:theme")).toBe(false);
+    expect(values.get("dockmapper.telemetry-archive.v1")).toBe("history");
+    expect(values.get("unrelated-app")).toBe("keep");
+  });
+  it("清理失败不提交代次，下次启动仍能重试", () => {
+    const { values, storage } = fixture();
+    expect(() =>
+      clearBuildPreferences(
+        {
+          ...storage,
+          removeItem: () => {
+            throw new Error("拒绝写入");
+          },
+        },
+        1,
+      ),
+    ).toThrow("拒绝写入");
+    expect(values.has("dock-mapper:settings-reset-revision")).toBe(false);
+    clearBuildPreferences(storage, 1);
+    expect(values.has("dock-mapper:theme")).toBe(false);
   });
 });

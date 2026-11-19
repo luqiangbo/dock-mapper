@@ -648,10 +648,7 @@ pub async fn update_key_visualizer_config(
     {
         return Err("启用按键展示时至少选择一种展示内容".into());
     }
-    let _mutation = state
-        .mutation_lock
-        .lock()
-        .map_err(|_| "配置写入锁已损坏".to_string())?;
+    let _mutation = state.lock_mutation()?;
     let previous = state
         .config
         .lock()

@@ -4,6 +4,7 @@ mod app_state;
 mod autostart_reset;
 mod config;
 mod config_transaction;
+mod settings;
 mod defaults_bootstrap;
 mod diagnostics;
 mod dxgi_capture;
@@ -125,7 +126,6 @@ pub fn run() {
                 let mut legacy_config = config::load(&config_path);
                 legacy_key_mapping::migrate(&config_path, &mut legacy_config)?;
                 let token_path = std::env::current_exe()?.with_file_name("settings-reset.token");
-                config::prepare_installation(app, &config_path, &token_path)?;
                 let (loaded_config, _, _) =
                     config::load_for_installation(&config_path, &token_path)?;
                 tracing::info!(target: "dock_mapper::startup", stage = "配置加载", elapsed_ms = setup_started.elapsed().as_millis(), "Startup stage completed");
@@ -237,6 +237,11 @@ pub fn run() {
             screenshot::set_pin_window_geometry,
             screenshot::open_url,
             app_commands::update_capture_preferences,
+            settings::reset_app_settings,
+            settings::set_app_autostart,
+            settings::get_ui_font,
+            settings::set_ui_font,
+            settings::list_system_fonts,
             app_commands::get_screenshot_config,
             app_commands::update_screenshot_config,
             app_commands::update_screenshot_annotation_color,

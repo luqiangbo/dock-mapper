@@ -364,10 +364,7 @@ pub fn update_widget_config(
     state: State<'_, AppState>,
     mut config: WidgetConfig,
 ) -> Result<WidgetConfig, String> {
-    let _mutation = state
-        .mutation_lock
-        .lock()
-        .map_err(|_| "配置写入锁已损坏".to_string())?;
+    let _mutation = state.lock_mutation()?;
     config.normalize();
     commit_widget_config_with(&state.config, &config, |next| {
         app_config::save(&state.config_path, next)

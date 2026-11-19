@@ -9,12 +9,12 @@ import { accentColors } from "./themePalette";
 import "./screenshots/screenshot/assets/main.css";
 
 function PinWindow() {
-  const { accentColor } = useWindowTheme();
+  const { accentColor, fontFamily } = useWindowTheme();
   return (
     <ConfigProvider
       theme={{
         algorithm: antdTheme.darkAlgorithm,
-        token: { colorPrimary: accentColors(accentColor, "dark").solid },
+        token: { fontFamily, colorPrimary: accentColors(accentColor, "dark").solid },
       }}
     >
       <CaptureNoticeProvider>

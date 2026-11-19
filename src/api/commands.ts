@@ -105,6 +105,8 @@ export const paletteApi = {
 };
 
 export const generalSettingsApi = {
+  setAutostart: (enabled: boolean) =>
+    logOperation("settings", "修改开机启动", () => invokeCommand("set_app_autostart", { enabled })),
   minimizeToTray: () => invokeCommand("get_minimize_to_tray"),
   setMinimizeToTray: (enabled: boolean) =>
     logOperation("settings", "修改托盘设置", () =>

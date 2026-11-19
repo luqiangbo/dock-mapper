@@ -16,6 +16,10 @@ mod tests {
             let value: serde_json::Value = serde_json::from_str(source).unwrap();
             let permissions = value["permissions"].as_array().unwrap();
             for command in [
+                "allow-reset-app-settings",
+                "allow-set-app-autostart",
+                "allow-set-ui-font",
+                "allow-list-system-fonts",
                 "allow-set-key-mapping-enabled",
                 "allow-get-key-mapping-status",
                 "allow-get-legacy-key-mappings",
@@ -85,7 +89,7 @@ mod tests {
         }
     }
     #[test]
-    fn build_defaults_reset_is_exclusive_to_main_renderer() {
+    fn startup_initialization_is_exclusive_to_main_renderer() {
         for (source, allowed) in [
             (include_str!("../capabilities/main.json"), true),
             (include_str!("../capabilities/widget.json"), false),

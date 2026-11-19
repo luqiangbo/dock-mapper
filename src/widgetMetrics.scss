@@ -57,7 +57,7 @@
 }
 .wm-value,
 .wm-speed-row {
-  font-family: "Cascadia Code", Consolas, monospace;
+  font-family: var(--app-font-family, "Cascadia Code", Consolas, monospace);
   font-variant-numeric: tabular-nums;
 }
 .wm-value {
@@ -90,7 +90,7 @@
   height: 100%;
 }
 .wm-direction-text {
-  font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  font-family: var(--app-font-family, "Segoe UI", "Microsoft YaHei UI", sans-serif);
   font-size: 12px;
 }
 .wm-speed-value {

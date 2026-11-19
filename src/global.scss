@@ -28,7 +28,13 @@ body {
   overflow: hidden;
   color: var(--text-primary);
   background: transparent;
-  font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  font-family: var(
+    --app-font-family,
+    "Segoe UI Variable",
+    "Segoe UI",
+    "Microsoft YaHei UI",
+    sans-serif
+  );
   font-size: 14px;
   text-rendering: optimizeLegibility;
 }

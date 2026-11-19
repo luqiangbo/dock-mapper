@@ -6,6 +6,11 @@
     "main"
   ],
   "permissions": [
+    "allow-reset-app-settings",
+    "allow-set-app-autostart",
+    "allow-get-ui-font",
+    "allow-set-ui-font",
+    "allow-list-system-fonts",
     "allow-get-translation-settings",
     "allow-update-translation-settings",
     "allow-test-translation-service",
@@ -36,8 +41,6 @@
     "updater:allow-download",
     "updater:allow-install",
     "process:allow-restart",
-    "autostart:allow-enable",
-    "autostart:allow-disable",
     "autostart:allow-is-enabled",
     "allow-get-supported-keys",
     "allow-get-key-mappings",

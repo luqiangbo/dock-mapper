@@ -1,4 +1,5 @@
 import "./utils/disableBrowserContextMenu";
+import { useWindowTheme } from "./hooks/useWindowTheme";
 import { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { listen } from "@tauri-apps/api/event";
@@ -13,6 +14,7 @@ import {
 import "./key-visualizer-effects.scss";
 
 function KeyVisualizerEffectsWindow() {
+  useWindowTheme();
   const current = useRef<KeyVisualizerEffectsStatus | null>(null);
   const [status, setStatus] = useState<KeyVisualizerEffectsStatus | null>(null);
   const [pointer, setPointer] = useState<KeyVisualizerMouse | null>(null);

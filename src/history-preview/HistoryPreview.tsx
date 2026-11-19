@@ -32,7 +32,7 @@ import "./preview.scss";
 const initialView: ImageView = { scale: 1, x: 0, y: 0, mode: "fit" };
 
 export default function HistoryPreview() {
-  const { resolved, accentColor } = useWindowTheme();
+  const { resolved, accentColor, fontFamily } = useWindowTheme();
   const [session, setSession] = useState<HistoryPreviewSession | null>(null);
   const sessionGeneration = useRef(0);
   const [sessionError, setSessionError] = useState<string | null>(null);
@@ -230,7 +230,7 @@ export default function HistoryPreview() {
     <ConfigProvider
       theme={{
         algorithm: resolved === "dark" ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
-        token: { colorPrimary: accentColors(accentColor, resolved).solid },
+        token: { fontFamily, colorPrimary: accentColors(accentColor, resolved).solid },
       }}
     >
       <main className="history-preview">

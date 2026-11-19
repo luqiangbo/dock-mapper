@@ -1,5 +1,5 @@
 :root {
-  font-family: "Segoe UI Variable", "Microsoft YaHei UI", sans-serif;
+  font-family: var(--app-font-family, "Segoe UI Variable", "Microsoft YaHei UI", sans-serif);
   color-scheme: light;
 }
 

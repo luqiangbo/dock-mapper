@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 mod installation;
 mod migration;
 mod storage;
-pub use installation::prepare_installation;
 
 #[cfg(test)]
 pub(crate) use migration::normalize_annotation_tool_style;
@@ -13,8 +12,8 @@ pub use migration::{
     normalize_screenshot_config, record_palette_color, set_palette_favorite,
 };
 pub use storage::load_for_build;
-pub use storage::load_for_installation;
-pub use storage::{load, load_for_mutation, save};
+pub use installation::load_for_installation;
+pub use storage::{load, load_for_mutation, save, save_reset};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -58,6 +57,8 @@ impl Default for ColorCopyFormat {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
+    pub settings_reset_revision: u64,
+    pub ui_font: String,
     #[serde(rename = "_installation_id")]
     pub installation_id: Option<String>,
     #[serde(default, rename = "_defaults_build_id")]
@@ -703,6 +704,8 @@ impl Default for AnnotationOutlineConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
+            settings_reset_revision: 0,
+            ui_font: String::new(),
             key_mappings: Vec::new(),
             key_mapping_runtime_version: 1,
             key_mapping_enabled: true,

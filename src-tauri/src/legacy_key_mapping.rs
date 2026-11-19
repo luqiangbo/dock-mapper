@@ -139,7 +139,7 @@ pub fn migrate(path: &Path, config: &mut config::AppConfig) -> Result<(), String
         return Ok(());
     }
     match scancode_mapper::read() {
-        Ok(raw) => migrate_with(path, config, raw.as_deref(), sysinfo::System::boot_time()),
+        Ok(raw) => migrate_with(path, config, raw.as_deref(), current_boot_time()?),
         Err(error) => {
             tracing::error!(%error, "Legacy registry read failed; saved rules backed up separately and runtime remains blocked");
             backup_with_error(
@@ -147,7 +147,7 @@ pub fn migrate(path: &Path, config: &mut config::AppConfig) -> Result<(), String
                 "migration",
                 config,
                 None,
-                sysinfo::System::boot_time(),
+                current_boot_time()?,
                 Some(error),
             )?;
             finish_migration(path, config)
@@ -237,7 +237,7 @@ pub fn preview(path: &Path) -> Result<Preview, String> {
         value: scancode_mapper::backup_encode(raw.as_deref()),
         rules,
         parse_error,
-        waiting_restart: waiting_restart(path, sysinfo::System::boot_time())?,
+        waiting_restart: waiting_restart(path, current_boot_time()?)?,
     })
 }
 pub fn prepare_clear(path: &Path, expected: Option<&[u8]>) -> Result<(), String> {
@@ -252,7 +252,7 @@ pub fn prepare_clear(path: &Path, expected: Option<&[u8]>) -> Result<(), String>
         "prepare",
         &config,
         current.as_deref(),
-        sysinfo::System::boot_time(),
+        current_boot_time()?,
     )
 }
 pub fn prepare_apply(path: &Path, expected: Option<&[u8]>) -> Result<(), String> {
@@ -266,7 +266,7 @@ pub fn prepare_apply(path: &Path, expected: Option<&[u8]>) -> Result<(), String>
         "prepare-apply",
         &config,
         current.as_deref(),
-        sysinfo::System::boot_time(),
+        current_boot_time()?,
     )
 }
 pub fn clear(path: &Path, expected: Option<&[u8]>) -> Result<(), String> {
@@ -275,7 +275,7 @@ pub fn clear(path: &Path, expected: Option<&[u8]>) -> Result<(), String> {
         path,
         &mut config,
         expected,
-        sysinfo::System::boot_time(),
+        current_boot_time()?,
         scancode_mapper::read,
         scancode_mapper::write,
     )
@@ -320,7 +320,7 @@ pub fn apply(path: &Path, encoded: &[u8], expected: Option<&[u8]>) -> Result<(),
         &mut config,
         encoded,
         expected,
-        sysinfo::System::boot_time(),
+        current_boot_time()?,
         scancode_mapper::read,
         scancode_mapper::write,
     )
@@ -584,7 +584,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
-    fn build_and_installation_resets_keep_recovery_but_reset_runtime_preferences() {
+    fn build_and_installation_changes_preserve_runtime_preferences_and_system_recovery() {
         let root = root();
         let path = root.join("config.json");
         let token = root.join("install.token");
@@ -604,12 +604,19 @@ mod tests {
         assert_eq!(normal.key_mappings.len(), 1);
         assert!(!normal.key_mapping_enabled);
         let (new_build, reset) = config::load_for_build(&path, "B").unwrap();
-        assert!(reset);
-        assert!(new_build.key_mappings.is_empty());
-        assert!(new_build.key_mapping_enabled);
+        assert!(!reset);
+        assert_eq!(new_build.key_mappings.len(), 1);
+        assert!(!new_build.key_mapping_enabled);
         fs::write(&token, b"new-install").unwrap();
-        config::load_for_installation(&path, &token).unwrap();
+        let (reinstalled, _, reset) = config::load_for_installation(&path, &token).unwrap();
+        assert!(!reset);
+        assert_eq!(reinstalled.key_mappings.len(), 1);
+        assert!(!reinstalled.key_mapping_enabled);
         assert!(waiting_restart(&path, 100).unwrap());
         fs::remove_dir_all(root).unwrap();
     }
+}
+
+fn current_boot_time() -> Result<u64, String> {
+    sysinfo::System::boot_time().map_err(|error| format!("读取系统启动时间失败：{error}"))
 }

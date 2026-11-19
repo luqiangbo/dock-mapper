@@ -106,7 +106,7 @@ pub async fn get_key_mapping_status(
 
 fn mapping_status(app: &AppHandle, force: bool) -> Result<MappingStatus, String> {
     let state = app.state::<AppState>();
-    let _mutation = state.mutation_lock.lock().map_err(|_| "配置写入锁已损坏")?;
+    let _mutation = state.lock_mutation()?;
     let config = state.config.lock().map_err(|_| "配置状态已损坏")?.clone();
     let runtime = app.state::<Runtime>();
     let preview = legacy_key_mapping::preview_cached(&state.config_path, force);
@@ -194,7 +194,7 @@ fn change(
     state: &AppState,
     edit: impl FnOnce(&mut config::AppConfig),
 ) -> Result<(), String> {
-    let _mutation = state.mutation_lock.lock().map_err(|_| "配置写入锁已损坏")?;
+    let _mutation = state.lock_mutation()?;
     if state.admin_operation_in_progress.load(Ordering::Acquire) {
         return Err("遗留映射清理进行中，请稍候".into());
     }
@@ -260,7 +260,7 @@ pub fn toggle_from_tray(app: &AppHandle, state: &AppState) -> Result<(), String>
 pub fn initialize(app: &AppHandle) {
     let state = app.state::<AppState>();
     let result = (|| {
-        let _mutation = state.mutation_lock.lock().map_err(|_| "配置写入锁已损坏")?;
+        let _mutation = state.lock_mutation()?;
         let mut config = state.config.lock().map_err(|_| "配置状态已损坏")?;
         legacy_key_mapping::migrate(&state.config_path, &mut config)?;
         let legacy = legacy_key_mapping::preview(&state.config_path)?;
@@ -280,7 +280,7 @@ pub async fn clear_legacy_key_mappings(
 ) -> Result<(), String> {
     {
         let state = app.state::<AppState>();
-        let _mutation = state.mutation_lock.lock().map_err(|_| "配置写入锁已损坏")?;
+        let _mutation = state.lock_mutation()?;
         if state.admin_operation_in_progress.load(Ordering::Acquire) {
             return Err("已有管理员操作正在进行".into());
         }
@@ -308,7 +308,7 @@ pub async fn clear_legacy_key_mappings(
     .and_then(|result| result);
     {
         let state = app.state::<AppState>();
-        let _mutation = state.mutation_lock.lock().map_err(|_| "配置写入锁已损坏")?;
+        let _mutation = state.lock_mutation()?;
         state
             .admin_operation_in_progress
             .store(false, Ordering::Release);
@@ -332,7 +332,7 @@ pub async fn apply_scancode_map(app: AppHandle, mappings: Vec<KeyMapping>) -> Re
     let encoded_b64 = scancode_mapper::backup_encode(Some(&encoded));
     {
         let state = app.state::<AppState>();
-        let _mutation = state.mutation_lock.lock().map_err(|_| "配置写入锁已损坏")?;
+        let _mutation = state.lock_mutation()?;
         if state.admin_operation_in_progress.load(Ordering::Acquire) {
             return Err("管理员操作进行中，请稍候".into());
         }
@@ -376,7 +376,7 @@ pub async fn apply_scancode_map(app: AppHandle, mappings: Vec<KeyMapping>) -> Re
         .and_then(|result| result);
     {
         let state = app.state::<AppState>();
-        let _mutation = state.mutation_lock.lock().map_err(|_| "配置写入锁已损坏")?;
+        let _mutation = state.lock_mutation()?;
         state
             .admin_operation_in_progress
             .store(false, Ordering::Release);

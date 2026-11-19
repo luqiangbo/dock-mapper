@@ -84,7 +84,7 @@ interface Measurements {
 }
 
 function TaskbarWidget() {
-  useWindowTheme();
+  const { fontFamily } = useWindowTheme();
   const [status, setStatus] = useState<SysStatus | null>(null);
   const [lastSampleAt, setLastSampleAt] = useState<number | null>(null);
   const freshness = useTelemetryFreshness(lastSampleAt);
@@ -121,7 +121,7 @@ function TaskbarWidget() {
   const enabledKey = enabled
     .map((m) => `${m.kind}:${m.usage_scheme}:${m.icon_style}:${m.pair_with ?? ""}`)
     .join("|");
-  const presentationKey = `${enabledKey}:${config.speed_unit}:${JSON.stringify(config.layout)}`;
+  const presentationKey = `${fontFamily}:${enabledKey}:${config.speed_unit}:${JSON.stringify(config.layout)}`;
   const normalSpacing = widgetSpacing(config.layout, false);
   const compactSpacing = widgetSpacing(config.layout, true);
   const rowStyle = (compact: boolean): CSSProperties => {

@@ -23,7 +23,7 @@ window.EXCALIDRAW_ASSET_PATH = "/excalidraw/";
 const root = ReactDOM.createRoot(document.getElementById("root")!);
 
 function ScreenshotWindow() {
-  const { accentColor, resolved } = useWindowTheme();
+  const { accentColor, resolved, fontFamily } = useWindowTheme();
   const colors = accentColors(accentColor, "dark");
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -47,6 +47,7 @@ function ScreenshotWindow() {
           controlHeightSM: 24,
           borderRadius: 6,
           fontSize: 14,
+          fontFamily,
           fontWeightStrong: 600,
           zIndexPopupBase: 100,
         },

@@ -6,6 +6,7 @@
     "pin-*"
   ],
   "permissions": [
+    "allow-get-ui-font",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:window:allow-close",

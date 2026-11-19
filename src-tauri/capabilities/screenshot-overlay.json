@@ -6,6 +6,7 @@
     "overlay-*"
   ],
   "permissions": [
+    "allow-get-ui-font",
     "allow-get-translation-settings",
     "allow-translate-text",
     "allow-translate-ocr-blocks",

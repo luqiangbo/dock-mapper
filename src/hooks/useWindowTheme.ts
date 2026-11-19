@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useState } from "react";
+import { useUiFont } from "./useUiFont";
 import { listen } from "@tauri-apps/api/event";
 import {
   ACCENT_COLOR_KEY,
@@ -11,6 +12,7 @@ import {
 } from "../themePalette";
 
 export function useWindowTheme() {
+  const uiFont = useUiFont();
   const read = () => ({
     mode: parseThemeMode(localStorage.getItem(THEME_KEY)),
     accentColor: parseAccent(localStorage.getItem(ACCENT_COLOR_KEY)),
@@ -56,5 +58,13 @@ export function useWindowTheme() {
     () => applyTheme(resolved, preferences.accentColor),
     [resolved, preferences.accentColor],
   );
-  return { ...preferences, resolved };
+  return {
+    ...preferences,
+    resolved,
+    uiFont: uiFont.font,
+    fontFamily: uiFont.family,
+    fontError: uiFont.error,
+    fontLoading: uiFont.loading,
+    retryFont: uiFont.retry,
+  };
 }
