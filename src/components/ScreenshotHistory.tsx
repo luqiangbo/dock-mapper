@@ -11,11 +11,14 @@ import { captureStartup } from "./captureStartupRuntime";
 import { captureStarting } from "./captureStartup";
 import { listen } from "@tauri-apps/api/event";
 import {
+  ClearOutlined,
   CopyOutlined,
   CameraOutlined,
   DeleteOutlined,
   PushpinOutlined,
+  QrcodeOutlined,
   ReloadOutlined,
+  ScanOutlined,
   StarFilled,
   StarOutlined,
 } from "@ant-design/icons";
@@ -28,15 +31,19 @@ import {
   Empty,
   Form,
   Grid,
+  Input,
   Masonry,
+  Modal,
   Popconfirm,
   Select,
+  Space,
   Spin,
   Tooltip,
   Typography,
 } from "antd";
 import type { ScreenshotHistorySummary } from "../screenshots/screenshot/api";
 import { errorMessage, historyApi, MAIN_EVENTS, screenshotSettingsApi } from "../api/commands";
+import { invokeCommand } from "../api/ipc";
 import {
   loadScreenshotHistoryView,
   saveScreenshotHistoryView,
@@ -54,7 +61,16 @@ import { historyDateLocale, historyDateRange, historyDatesFromRange } from "./hi
 
 const { Text } = Typography;
 
-type HistoryAction = "copy" | "pin" | "favorite" | "delete";
+type HistoryAction = "copy" | "pin" | "favorite" | "delete" | "clear" | "ocr" | "qr";
+
+interface RecognitionDialog {
+  kind: "ocr" | "qr";
+  id: string;
+  loading: boolean;
+  text: string;
+  items: string[];
+  error: string | null;
+}
 
 export default function ScreenshotHistory() {
   const active = usePageActive();
@@ -76,10 +92,16 @@ export default function ScreenshotHistory() {
   const startingCapture = captureStarting(captureSnapshot);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [working, setWorking] = useState<{ id: string; action: HistoryAction } | null>(null);
+  const [recognition, setRecognition] = useState<RecognitionDialog | null>(null);
+  const recognitionRevision = useRef(0);
   const workingRef = useRef(false);
   const refreshGenerationRef = useRef(0);
   const refreshTimerRef = useRef<number | null>(null);
   const visibleEntries = useMemo(() => selectScreenshotHistory(entries, view), [entries, view]);
+  const unfavoritedCount = useMemo(
+    () => entries.filter((entry) => !entry.favorite).length,
+    [entries],
+  );
   const groups = useMemo(() => groupScreenshotHistory(visibleEntries), [visibleEntries]);
   const previewIds = useMemo(() => visibleEntries.map((entry) => entry.id), [visibleEntries]);
 
@@ -198,6 +220,42 @@ export default function ScreenshotHistory() {
     }
   };
 
+  const inspectHistory = async (id: string, kind: "ocr" | "qr") => {
+    const request = ++recognitionRevision.current;
+    setRecognition({ kind, id, loading: true, text: "", items: [], error: null });
+    try {
+      if (kind === "ocr") {
+        const result = await historyApi.recognize(id);
+        if (recognitionRevision.current !== request) return;
+        setRecognition({ kind, id, loading: false, text: result.text.trim(), items: [], error: null });
+      } else {
+        const result = await historyApi.decodeQr(id);
+        if (recognitionRevision.current !== request) return;
+        const items = result.contents.filter((value) => value.trim().length > 0);
+        setRecognition({
+          kind,
+          id,
+          loading: false,
+          text: items.join("\n"),
+          items,
+          error: null,
+        });
+      }
+    } catch (error) {
+      if (recognitionRevision.current !== request) return;
+      setRecognition({ kind, id, loading: false, text: "", items: [], error: errorMessage(error) });
+    }
+  };
+
+  const copyRecognizedText = async (value: string) => {
+    try {
+      await invokeCommand("copy_text", { value });
+      notification.success({ message: "识别结果已复制" });
+    } catch (error) {
+      notification.error({ message: "复制失败", description: errorMessage(error) });
+    }
+  };
+
   return (
     <div className={styles.historyPanel}>
       <ConfigProvider componentSize="middle" locale={historyDateLocale}>
@@ -281,6 +339,31 @@ export default function ScreenshotHistory() {
               <Text type="secondary" className={styles.historyCount}>
                 {visibleEntries.length} 条
               </Text>
+              <Popconfirm
+                title={`清理全部 ${unfavoritedCount} 条未收藏截图？`}
+                description="收藏的截图会保留，清理后无法恢复。"
+                okText="清理"
+                okButtonProps={{ danger: true }}
+                cancelText="取消"
+                disabled={unfavoritedCount === 0 || loading || working !== null}
+                onConfirm={() =>
+                  void run("__clear__", "clear", async () => {
+                    const removed = await historyApi.clearUnfavorited();
+                    setEntries((current) => current.filter((item) => item.favorite));
+                    notification.success({
+                      message: removed > 0 ? `已清理 ${removed} 条未收藏截图` : "没有可清理的未收藏截图",
+                    });
+                  })
+                }
+              >
+                <Button
+                  icon={<ClearOutlined />}
+                  loading={working?.action === "clear"}
+                  disabled={unfavoritedCount === 0 || loading || working !== null}
+                >
+                  清理未收藏
+                </Button>
+              </Popconfirm>
               <Button
                 icon={<ReloadOutlined />}
                 loading={loading}
@@ -423,6 +506,26 @@ export default function ScreenshotHistory() {
                         }
                       />
                     </Tooltip>
+                    <Tooltip title="识别文字 (OCR)">
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<ScanOutlined />}
+                        aria-label="识别截图文字"
+                        disabled={loading || working !== null}
+                        onClick={() => void inspectHistory(entry.id, "ocr")}
+                      />
+                    </Tooltip>
+                    <Tooltip title="识别二维码">
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<QrcodeOutlined />}
+                        aria-label="识别截图二维码"
+                        disabled={loading || working !== null}
+                        onClick={() => void inspectHistory(entry.id, "qr")}
+                      />
+                    </Tooltip>
                     <Tooltip title={entry.favorite ? "取消收藏" : "收藏"}>
                       <Button
                         type="text"
@@ -491,6 +594,76 @@ export default function ScreenshotHistory() {
           </section>
         ))
       )}
+      <Modal
+        open={recognition !== null}
+        title={recognition?.kind === "qr" ? "二维码识别结果" : "文字识别结果 (OCR)"}
+        onCancel={() => {
+          recognitionRevision.current += 1;
+          setRecognition(null);
+        }}
+        footer={
+          recognition && !recognition.loading && recognition.text ? (
+            <Space>
+              <Button onClick={() => setRecognition(null)}>关闭</Button>
+              <Button
+                type="primary"
+                icon={<CopyOutlined />}
+                onClick={() => void copyRecognizedText(recognition.text)}
+              >
+                复制全部
+              </Button>
+            </Space>
+          ) : (
+            <Button onClick={() => setRecognition(null)}>关闭</Button>
+          )
+        }
+      >
+        {recognition?.loading ? (
+          <div className={styles.centerState}>
+            <Spin tip={recognition.kind === "qr" ? "正在识别二维码…" : "正在识别文字…"} />
+          </div>
+        ) : recognition?.error ? (
+          <Alert
+            type="error"
+            showIcon
+            message="识别失败"
+            description={recognition.error}
+            action={
+              <Button size="small" onClick={() => void inspectHistory(recognition.id, recognition.kind)}>
+                重试
+              </Button>
+            }
+          />
+        ) : !recognition?.text ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={
+              recognition?.kind === "qr" ? "未在截图中检测到二维码" : "未在截图中识别到文字"
+            }
+          />
+        ) : recognition.kind === "qr" ? (
+          <Space direction="vertical" style={{ width: "100%" }}>
+            {recognition.items.map((item, index) => (
+              <Input
+                key={`${index}-${item}`}
+                readOnly
+                value={item}
+                addonAfter={
+                  <Button
+                    type="link"
+                    size="small"
+                    onClick={() => void copyRecognizedText(item)}
+                  >
+                    复制
+                  </Button>
+                }
+              />
+            ))}
+          </Space>
+        ) : (
+          <Input.TextArea value={recognition.text} readOnly autoSize={{ minRows: 4, maxRows: 14 }} />
+        )}
+      </Modal>
     </div>
   );
 }

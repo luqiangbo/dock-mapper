@@ -202,9 +202,16 @@ pub fn start_capture(app: &AppHandle) {
 }
 
 pub fn start_quick_ocr_capture(app: &AppHandle) {
+    if let Some(service) = app.try_state::<crate::ocr::OcrService>() {
+        service.prepare();
+    }
     if let Err(error) = handle_start_quick_ocr(app) {
         startup::request_error(app, error);
     }
+}
+
+pub fn start_delayed_capture(app: &AppHandle, delay_ms: u64) {
+    scheduled_capture::trigger_delayed(app, delay_ms);
 }
 
 pub(crate) fn show_main_window(app: &AppHandle) {
@@ -437,6 +444,96 @@ pub(crate) fn toggle_latest_pin(app: &AppHandle) {
         }
         return;
     }
+}
+
+pub(crate) fn toggle_all_pins(app: &AppHandle) {
+    let ready_ids = {
+        let state = app.state::<AppState>();
+        let runtime = state.pin_runtime.lock_or_recover();
+        runtime
+            .order
+            .iter()
+            .filter(|id| runtime.ready.contains(*id))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    if ready_ids.is_empty() {
+        return;
+    }
+    let windows = ready_ids
+        .iter()
+        .filter_map(|id| app.get_webview_window(id))
+        .collect::<Vec<_>>();
+    let any_visible = windows
+        .iter()
+        .any(|window| window.is_visible().unwrap_or(false));
+    for window in windows {
+        let result = if any_visible {
+            window.hide()
+        } else {
+            window.show()
+        };
+        if let Err(error) = result {
+            tracing::warn!(target: "dock_mapper::pin", %error, "批量切换贴图可见状态失败");
+        }
+    }
+}
+
+pub(crate) fn disable_all_pin_passthrough(app: &AppHandle) {
+    let updated = {
+        let state = app.state::<AppState>();
+        let mut runtime = state.pin_runtime.lock_or_recover();
+        let mut changed = Vec::new();
+        for (id, options) in runtime.options.iter_mut() {
+            if options.passthrough {
+                options.passthrough = false;
+                changed.push((id.clone(), *options));
+            }
+        }
+        changed
+    };
+    if updated.is_empty() {
+        return;
+    }
+    for (id, options) in updated {
+        if let Some(window) = app.get_webview_window(&id) {
+            if let Err(error) = window.set_ignore_cursor_events(false) {
+                tracing::warn!(target: "dock_mapper::pin", pin_id = %id, %error, "恢复贴图鼠标交互失败");
+            }
+        }
+        let _ = app.emit_to(
+            id.as_str(),
+            "pin-options-changed",
+            serde_json::json!({ "id": id, "options": options }),
+        );
+    }
+    pin_archive::schedule(app.clone());
+}
+
+pub(crate) fn close_all_pins(app: &AppHandle) {
+    let ids = app
+        .state::<AppState>()
+        .pin_runtime
+        .lock_or_recover()
+        .order
+        .clone();
+    if ids.is_empty() {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut errors = Vec::new();
+        for id in ids {
+            if let Err(error) = pin_lifecycle::close(app.clone(), id).await {
+                errors.push(error);
+            }
+        }
+        if !errors.is_empty() {
+            if let Err(notify) = app.emit("pin-persistence-error", errors.join("；")) {
+                tracing::warn!(%notify);
+            }
+        }
+    });
 }
 
 #[tauri::command]
@@ -929,31 +1026,45 @@ pub async fn update_pin_options(
     id: String,
     opacity: f64,
     locked: bool,
+    passthrough: Option<bool>,
     defer_save: Option<bool>,
 ) -> Result<PinOptions, String> {
     let _queued = pin_lifecycle::OPTION_QUEUE.lock().await;
     pin_lifecycle::require_writable(Some(&id))?;
-    let options = normalized_pin_options(opacity, locked);
     let state = app.state::<AppState>();
-    let previous = {
+    let (previous, options) = {
         let mut runtime = state.pin_runtime.lock_or_recover();
-        if !runtime.options.contains_key(&id) {
+        let Some(existing) = runtime.options.get(&id).copied() else {
             return Err("贴图窗口不存在".into());
-        }
-        runtime.options.insert(id.clone(), options)
+        };
+        let options = normalized_pin_options(
+            opacity,
+            locked,
+            passthrough.unwrap_or(existing.passthrough),
+        );
+        runtime.options.insert(id.clone(), options);
+        (existing, options)
     };
-    app.get_webview_window(&id)
+    let window = app
+        .get_webview_window(&id)
         .ok_or_else(|| "贴图窗口不存在".to_string())?;
+    if let Err(error) = window.set_ignore_cursor_events(options.passthrough) {
+        app.state::<AppState>()
+            .pin_runtime
+            .lock_or_recover()
+            .options
+            .insert(id, previous);
+        return Err(format!("切换贴图鼠标穿透失败：{error}"));
+    }
     if defer_save.unwrap_or(false) {
         pin_archive::schedule(app.clone());
     } else if let Err(error) = pin_archive::save(app.clone(), None).await {
-        if let Some(previous) = previous {
-            app.state::<AppState>()
-                .pin_runtime
-                .lock_or_recover()
-                .options
-                .insert(id, previous);
-        }
+        let _ = window.set_ignore_cursor_events(previous.passthrough);
+        app.state::<AppState>()
+            .pin_runtime
+            .lock_or_recover()
+            .options
+            .insert(id, previous);
         return Err(format!("贴图设置未保存：{error}"));
     }
     if let Err(error) = app.emit_to(
@@ -1097,9 +1208,10 @@ mod tests {
 
     #[test]
     fn pin_runtime_opacity_is_clamped_without_persisting_state() {
-        assert_eq!(normalized_pin_options(0.05, true).opacity, 0.2);
-        assert_eq!(normalized_pin_options(1.5, false).opacity, 1.0);
-        assert!(normalized_pin_options(0.75, true).locked);
+        assert_eq!(normalized_pin_options(0.05, true, false).opacity, 0.2);
+        assert_eq!(normalized_pin_options(1.5, false, true).opacity, 1.0);
+        assert!(normalized_pin_options(0.75, true, false).locked);
+        assert!(normalized_pin_options(0.75, false, true).passthrough);
     }
 
     #[test]

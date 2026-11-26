@@ -141,6 +141,12 @@ pub fn run() {
                 app.manage(ocr::OcrService::new(app.handle())?);
 
                 if let Some(window) = app.get_webview_window("main") {
+                    // Explicit show overrides an inherited STARTUPINFO SW_HIDE from
+                    // embedded terminals where Win32 SW_SHOWDEFAULT would keep main hidden.
+                    if let Err(error) = window.show() {
+                        tracing::warn!(target: "dock_mapper::window", %error, "启动时显示主窗口失败");
+                    }
+                    let _ = window.set_focus();
                     let app_handle = app.handle().clone();
                     window.on_window_event(move |event| {
                         if matches!(event, tauri::WindowEvent::Focused(true)) {
@@ -208,6 +214,9 @@ pub fn run() {
             history_commands::delete_screenshot_history,
             history_commands::copy_screenshot_history,
             history_commands::pin_screenshot_history,
+            history_commands::clear_unfavorited_screenshot_history,
+            history_commands::recognize_screenshot_history,
+            history_commands::decode_qr_screenshot_history,
             runtime_health::get_runtime_health,
             screenshot::pin_archive::restore_closed_pin,
             screenshot::pin_archive::get_pin_restore_error,

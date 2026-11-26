@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { copyBinaryPayload } from "../utils/binaryPayload";
 import { invokeCommand, type PinActionCommand } from "../../../api/ipc";
 import type { PinOptions } from "../../../api/screenshotTypes";
-import { pinDoubleClickAction, savedPinMatchesDraft } from "./pinInteractions";
+import { pinDoubleClickAction, pinKeyAction, savedPinMatchesDraft } from "./pinInteractions";
 import { usePinDragging } from "../hooks/usePinDragging";
 import { usePinOcr } from "../hooks/usePinOcr";
 import { usePinZoomController } from "../hooks/usePinZoomController";
@@ -27,6 +27,7 @@ export default function PinImage(): React.JSX.Element {
   const [options, setOptions] = useState<PinOptions>({
     opacity: 1,
     locked: false,
+    passthrough: false,
   });
   const [menuOpen, setMenuOpen] = useState(false);
   const imageUrlRef = useRef("");
@@ -40,6 +41,7 @@ export default function PinImage(): React.JSX.Element {
             id: pinId,
             opacity: next.opacity,
             locked: next.locked,
+            passthrough: Boolean(next.passthrough),
             deferSave: true,
           }),
         onSaved: (saved, latest) => {
@@ -64,12 +66,11 @@ export default function PinImage(): React.JSX.Element {
       writer.cancelPending();
     };
   }, [writer]);
+  const keyHandlerRef = useRef<(event: KeyboardEvent) => void>(() => {});
   useEffect(() => {
-    const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMenuOpen(false);
-    };
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
+    const onKeyDown = (event: KeyboardEvent) => keyHandlerRef.current(event);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
   const {
     onWheel: scaleAtPointer,
@@ -243,6 +244,7 @@ export default function PinImage(): React.JSX.Element {
           id: pinId,
           opacity: next.opacity,
           locked: next.locked,
+          passthrough: Boolean(next.passthrough),
         });
       }
       if (command === "restore_closed_pin") await invokeCommand(command);
@@ -254,6 +256,21 @@ export default function PinImage(): React.JSX.Element {
       actionBusy.current = false;
       if (mountedRef.current) setActionPending(false);
     }
+  };
+
+  keyHandlerRef.current = (event: KeyboardEvent) => {
+    const action = pinKeyAction(event, {
+      menuOpen,
+      locked: options.locked,
+      busy: actionBusy.current,
+      textSelected: Boolean(window.getSelection()?.toString()),
+    });
+    if (!action) return;
+    event.preventDefault();
+    if (action === "close-menu") setMenuOpen(false);
+    else if (action === "close") void runPinCommand("close_pin_window");
+    else if (action === "copy") void runPinCommand("copy_pin_image");
+    else if (action === "save") void runPinCommand("save_pin_image");
   };
 
   return (
@@ -274,16 +291,33 @@ export default function PinImage(): React.JSX.Element {
             onClick: () => updateOptions({ ...options, locked: !options.locked }),
           },
           {
+            key: "passthrough",
+            label: "开启鼠标穿透（可从托盘取消）",
+            disabled: !optionsReady,
+            onClick: () => {
+              setMenuOpen(false);
+              updateOptions({ ...options, passthrough: true });
+            },
+          },
+          {
             key: "restore",
             label: "恢复上次关闭贴图",
             disabled: actionPending,
             onClick: () => void runPinCommand("restore_closed_pin"),
           },
-          { key: "copy", label: "复制图片", onClick: () => void runPinCommand("copy_pin_image") },
-          { key: "save", label: "保存图片", onClick: () => void runPinCommand("save_pin_image") },
+          {
+            key: "copy",
+            label: "复制图片 (Ctrl+C)",
+            onClick: () => void runPinCommand("copy_pin_image"),
+          },
+          {
+            key: "save",
+            label: "保存图片 (Ctrl+S)",
+            onClick: () => void runPinCommand("save_pin_image"),
+          },
           {
             key: "close",
-            label: "关闭贴图",
+            label: "关闭贴图 (Esc)",
             danger: true,
             onClick: () => void runPinCommand("close_pin_window"),
           },

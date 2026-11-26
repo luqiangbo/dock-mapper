@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-recognize-screenshot-history"
+description = "Enables the recognize_screenshot_history command without any pre-configured scope."
+commands.allow = ["recognize_screenshot_history"]
+
+[[permission]]
+identifier = "deny-recognize-screenshot-history"
+description = "Denies the recognize_screenshot_history command without any pre-configured scope."
+commands.deny = ["recognize_screenshot_history"]

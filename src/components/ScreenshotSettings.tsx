@@ -14,6 +14,7 @@ import {
   Input,
   Row,
   Select,
+  Space,
   Spin,
   Tabs,
   Tag,
@@ -31,7 +32,11 @@ import {
   DEFAULT_FONT_FAVORITES,
 } from "../screenshots/screenshot/components/systemFonts";
 import { errorMessage, MAIN_EVENTS, screenshotSettingsApi } from "../api/commands";
-import { resetShortcutConfig, shortcutStatusDisplay } from "../utils/shortcutStatus";
+import {
+  applyLowConflictShortcuts,
+  resetShortcutConfig,
+  shortcutStatusDisplay,
+} from "../utils/shortcutStatus";
 import {
   SCREENSHOT_SHORTCUT_FIELDS,
   validateScreenshotShortcutDraft,
@@ -274,7 +279,7 @@ export default function ScreenshotSettings({
       className={styles.settingsForm}
       onValuesChange={(changed, next) => scheduleSave(next, "filename_prefix" in changed ? 400 : 0)}
     >
-      <Card className={styles.surfaceCard} title="截图">
+      <Card className={styles.surfaceCard} title="触发与快捷键">
         <div className={styles.settingsGroup}>
           <div className={styles.settingRow}>
             <div className={styles.settingCopy}>
@@ -305,14 +310,26 @@ export default function ScreenshotSettings({
                 <div className={styles.settingCopy}>
                   <Text strong>全局快捷键</Text>
                   <span className={styles.description}>
-                    选择一个修饰键和主键，也可增加第二个修饰键；修改后自动注册。
+                    选择一个修饰键和主键，也可增加第二个修饰键；修改后自动注册。如遇浏览器/编辑器冲突，可一键切换到低冲突组合。
                   </span>
                 </div>
               </Col>
               <Col>
-                <Button loading={saving} onClick={() => void resetShortcuts()}>
-                  恢复默认
-                </Button>
+                <Space wrap size={8}>
+                  <Button
+                    disabled={saving}
+                    onClick={() => {
+                      const next = applyLowConflictShortcuts(form.getFieldsValue(true));
+                      form.setFieldsValue(next);
+                      scheduleSave(next);
+                    }}
+                  >
+                    推荐低冲突组合
+                  </Button>
+                  <Button loading={saving} onClick={() => void resetShortcuts()}>
+                    恢复默认
+                  </Button>
+                </Space>
               </Col>
             </Row>
             <div className={styles.shortcutList}>
@@ -338,9 +355,11 @@ export default function ScreenshotSettings({
               ))}
             </div>
           </div>
-          <Form.Item name="toolbar_tools" className={styles.screenshotToolbarField}>
-            <ScreenshotToolbarSettings />
-          </Form.Item>
+        </div>
+      </Card>
+
+      <Card className={styles.surfaceCard} title="捕获与输出">
+        <div className={styles.settingsGroup}>
           <Form.Item name="experience" label="截图操作与输出">
             <CaptureExperienceSettings />
           </Form.Item>
@@ -378,6 +397,14 @@ export default function ScreenshotSettings({
           </Row>
           <Form.Item name="filename_prefix" label="文件名前缀">
             <Input />
+          </Form.Item>
+        </div>
+      </Card>
+
+      <Card className={styles.surfaceCard} title="标注与外观">
+        <div className={styles.settingsGroup}>
+          <Form.Item name="toolbar_tools" className={styles.screenshotToolbarField}>
+            <ScreenshotToolbarSettings />
           </Form.Item>
           <Form.Item
             name="text_font_favorites"

@@ -37,6 +37,18 @@ pub async fn schedule_screenshot(
         handle_start_capture_with_region(&app, selection, screen_id, physical.unwrap_or(false))?;
     Ok(Some(generation))
 }
+pub(crate) fn trigger_delayed(app: &AppHandle, delay_ms: u64) {
+    let request = REQUEST.fetch_add(1, Ordering::SeqCst) + 1;
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(delay_ms.min(60_000))).await;
+        if REQUEST.load(Ordering::SeqCst) != request {
+            return;
+        }
+        start_capture(&app);
+    });
+}
+
 pub(super) fn selection(generation: u64) -> Option<Rect> {
     REGIONS.lock_or_recover().get(&generation).copied()
 }

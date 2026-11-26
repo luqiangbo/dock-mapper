@@ -126,6 +126,9 @@ interface CommandContract {
   delete_screenshot_history: { args: { id: string }; result: boolean };
   copy_screenshot_history: { args: { id: string }; result: boolean };
   pin_screenshot_history: { args: { id: string }; result: string };
+  clear_unfavorited_screenshot_history: { args: undefined; result: number };
+  recognize_screenshot_history: { args: { id: string }; result: OcrResult };
+  decode_qr_screenshot_history: { args: { id: string }; result: QrDecodeResult };
   get_screenshot_config: { args: undefined; result: ScreenshotConfig };
   update_screenshot_config: {
     args: { screenshotConfig: ScreenshotConfig };
@@ -201,7 +204,13 @@ interface CommandContract {
   pin_image_ready: { args: { id: string }; result: boolean };
   get_pin_options: { args: { id: string }; result: PinOptions };
   update_pin_options: {
-    args: { id: string; opacity: number; locked: boolean; deferSave?: boolean };
+    args: {
+      id: string;
+      opacity: number;
+      locked: boolean;
+      passthrough?: boolean;
+      deferSave?: boolean;
+    };
     result: PinOptions;
   };
   copy_pin_image: { args: { id: string }; result: boolean };

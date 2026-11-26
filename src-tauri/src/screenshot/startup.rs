@@ -76,11 +76,18 @@ pub(super) fn publish(app: &AppHandle, status: &CaptureStartState) {
     }
 }
 
+fn should_reveal_main(error: &str) -> bool {
+    !error.contains("正在启动")
+}
+
 pub(super) fn request_error(app: &AppHandle, error: String) {
+    let reveal = should_reveal_main(&error);
     if let Err(error) = app.emit("capture-request-error", error) {
         tracing::error!(target: "dock_mapper::capture", %error, "无法通知主窗口截图请求失败");
     }
-    reveal_main(app);
+    if reveal {
+        reveal_main(app);
+    }
 }
 
 fn reveal_main(app: &AppHandle) {
@@ -102,9 +109,14 @@ pub(super) fn fail_startup(app: &AppHandle, generation: u64, error: String) -> b
         return false;
     };
     if let Some(window) = active_overlay_window(app) {
-        state.overlay_ready.lock_or_recover().remove(window.label());
-        if let Err(error) = window.close() {
-            tracing::warn!(target: "dock_mapper::capture", %error, "失败浮层关闭失败");
+        // Prefer hiding the prewarmed overlay over closing it so an immediate retry
+        // never races against asynchronous WebView destruction.
+        if let Err(hide_error) = window.hide() {
+            tracing::warn!(target: "dock_mapper::capture", %hide_error, "失败浮层隐藏失败，尝试销毁重建");
+            state.overlay_ready.lock_or_recover().remove(window.label());
+            if let Err(destroy_error) = window.destroy() {
+                tracing::warn!(target: "dock_mapper::capture", %destroy_error, "失败浮层销毁失败");
+            }
         }
     }
     *state.capture.lock_or_recover() = None;
@@ -184,5 +196,12 @@ mod tests {
             assert!(flow.finish(2, None).is_some());
         }
         assert_eq!(STARTUP_TIMEOUT.as_secs(), 8);
+    }
+
+    #[test]
+    fn busy_startup_errors_do_not_steal_focus_with_main_window() {
+        assert!(!should_reveal_main("截图正在启动，请稍候"));
+        assert!(should_reveal_main("截图启动超时（8 秒），请重试"));
+        assert!(should_reveal_main("No Windows monitor is available"));
     }
 }

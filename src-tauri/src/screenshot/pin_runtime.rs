@@ -6,6 +6,8 @@ use std::collections::HashMap;
 pub struct PinOptions {
     pub(super) opacity: f64,
     pub(super) locked: bool,
+    #[serde(default)]
+    pub(super) passthrough: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -147,13 +149,15 @@ impl Default for PinOptions {
         Self {
             opacity: 1.0,
             locked: false,
+            passthrough: false,
         }
     }
 }
 
-pub(super) fn normalized_pin_options(opacity: f64, locked: bool) -> PinOptions {
+pub(super) fn normalized_pin_options(opacity: f64, locked: bool, passthrough: bool) -> PinOptions {
     PinOptions {
         opacity: opacity.clamp(0.2, 1.0),
         locked,
+        passthrough,
     }
 }

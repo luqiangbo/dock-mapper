@@ -1,17 +1,30 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Input, InputNumber, Modal, Select, Space } from "antd";
+import { Alert, Button, Input, InputNumber, Modal, Popconfirm, Select, Space } from "antd";
 import { invokeCommand } from "../api/ipc";
 import { screenshotSettingsApi } from "../api/commands";
 import styles from "./components.module.scss";
 import {
   DEFAULT_CAPTURE_EXPERIENCE,
   type CaptureExperience,
+  type CaptureRegion,
 } from "../screenshots/screenshot/components/captureExperience";
+
+function sameCaptureRegion(left: CaptureRegion, right: CaptureRegion): boolean {
+  return (
+    left.screen === right.screen &&
+    Boolean(left.physical) === Boolean(right.physical) &&
+    Math.abs(left.x - right.x) < 0.5 &&
+    Math.abs(left.y - right.y) < 0.5 &&
+    Math.abs(left.width - right.width) < 0.5 &&
+    Math.abs(left.height - right.height) < 0.5
+  );
+}
 
 export default function ScheduledCapture() {
   const [open, setOpen] = useState(false),
     [delay, setDelay] = useState(3),
     [region, setRegion] = useState(-1);
+  const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
   const [name, setName] = useState(""),
     [error, setError] = useState("");
   const [experience, setExperience] = useState<CaptureExperience>(DEFAULT_CAPTURE_EXPERIENCE);
@@ -152,22 +165,73 @@ export default function ScheduledCapture() {
           )}
           <label className={styles.settingsField}>
             <span>已保存预设</span>
-            <Select
-              aria-label="已保存预设"
-              placeholder="选择已保存预设"
-              style={{ width: "100%" }}
-              disabled={remaining !== null}
-              options={experience.presets.map((p, index) => ({ value: index, label: p.name }))}
-              onChange={(index) => {
-                const preset = experience.presets[index];
-                setDelay(preset.delay_ms / 1000);
-                if (preset.region) {
-                  const next = [...experience.regions, preset.region];
-                  setExperience({ ...experience, regions: next });
-                  setRegion(next.length - 1);
-                } else setRegion(-1);
-              }}
-            />
+            <div className={styles.scheduledPresetRow}>
+              <Select
+                aria-label="已保存预设"
+                placeholder="选择已保存预设"
+                style={{ width: "100%" }}
+                allowClear
+                value={selectedPreset}
+                disabled={remaining !== null || saving}
+                options={experience.presets.map((p) => ({ value: p.name, label: p.name }))}
+                onChange={(presetName) => {
+                  setSelectedPreset(presetName ?? null);
+                  if (!presetName) return;
+                  const preset = experience.presets.find((item) => item.name === presetName);
+                  if (!preset) return;
+                  setDelay(preset.delay_ms / 1000);
+                  if (preset.region) {
+                    const presetRegion = preset.region;
+                    const existingIndex = experience.regions.findIndex((item) =>
+                      sameCaptureRegion(item, presetRegion),
+                    );
+                    if (existingIndex >= 0) {
+                      setRegion(existingIndex);
+                    } else {
+                      const next = [...experience.regions, presetRegion];
+                      setExperience({ ...experience, regions: next });
+                      setRegion(next.length - 1);
+                    }
+                  } else {
+                    setRegion(-1);
+                  }
+                }}
+              />
+              <Popconfirm
+                title={`删除预设「${selectedPreset ?? ""}」？`}
+                okText="删除"
+                okButtonProps={{ danger: true }}
+                cancelText="取消"
+                disabled={!selectedPreset || remaining !== null || saving}
+                onConfirm={() => {
+                  if (!selectedPreset) return;
+                  const targetName = selectedPreset;
+                  setSaving(true);
+                  setError("");
+                  void screenshotSettingsApi
+                    .get()
+                    .then(async (config) => {
+                      const current = { ...DEFAULT_CAPTURE_EXPERIENCE, ...config.experience };
+                      const next = {
+                        ...current,
+                        presets: current.presets.filter((p) => p.name !== targetName),
+                      };
+                      const saved = await screenshotSettingsApi.update({
+                        ...config,
+                        experience: next,
+                      });
+                      setExperience({ ...DEFAULT_CAPTURE_EXPERIENCE, ...saved.experience });
+                      setSelectedPreset(null);
+                    })
+                    .catch((e) => setError(`预设删除失败：${String(e)}`))
+                    .finally(() => setSaving(false));
+                }}
+              >
+                <Button danger disabled={!selectedPreset || remaining !== null || saving}>
+                  删除
+                </Button>
+              </Popconfirm>
+            </div>
           </label>
           <div className={styles.scheduledPresetRow}>
             <Input
@@ -203,6 +267,7 @@ export default function ScheduledCapture() {
                       experience: next,
                     });
                     setExperience({ ...DEFAULT_CAPTURE_EXPERIENCE, ...saved.experience });
+                    setSelectedPreset(preset.name);
                     setName("");
                   })
                   .catch((e) => setError(`预设保存失败：${String(e)}`))
@@ -215,7 +280,11 @@ export default function ScheduledCapture() {
           {remaining !== null && (
             <Alert
               type="info"
-              title={`请切换到目标应用，并将鼠标移到目标显示器。剩余 ${remaining} 秒。`}
+              title={
+                experience.regions[region]
+                  ? `将自动捕获预设所属显示器，剩余 ${remaining} 秒。`
+                  : `请切换到目标应用，并将鼠标移到目标显示器。剩余 ${remaining} 秒。`
+              }
             />
           )}
           {error && <Alert type="error" title={error} />}

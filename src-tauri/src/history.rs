@@ -221,6 +221,18 @@ impl HistoryStore {
         Ok(true)
     }
 
+    pub fn clear_unfavorited(&self) -> Result<usize, String> {
+        self.require_ready()?;
+        let entries = self.read_manifests()?;
+        let mut removed = 0;
+        for entry in entries.into_iter().filter(|entry| !entry.favorite) {
+            if self.delete(&entry.id)? {
+                removed += 1;
+            }
+        }
+        Ok(removed)
+    }
+
     pub fn cleanup(&self) -> Result<(), String> {
         self.cleanup_entries(self.read_manifests()?)
     }
@@ -664,6 +676,24 @@ mod tests {
                 .favorite
         );
         assert!(!root.join(&entry.id).join("manifest.json.tmp").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn clear_unfavorited_removes_only_non_favorites() {
+        let root = temporary_root("clear-unfavorited");
+        let store = HistoryStore::new(root.clone()).unwrap();
+        let favorite = store.create(&png()).unwrap();
+        store.set_favorite(&favorite.id, true).unwrap();
+        store.create(&png()).unwrap();
+        store.create(&png()).unwrap();
+
+        let deleted = store.clear_unfavorited().unwrap();
+        assert_eq!(deleted, 2);
+        let remaining = store.list().unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, favorite.id);
+        assert_eq!(store.clear_unfavorited().unwrap(), 0);
         let _ = fs::remove_dir_all(root);
     }
 }

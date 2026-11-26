@@ -76,6 +76,7 @@ export interface ScreenshotHistorySummary {
 export interface PinOptions {
   opacity: number;
   locked: boolean;
+  passthrough?: boolean;
 }
 
 export interface PinWindowGeometry {

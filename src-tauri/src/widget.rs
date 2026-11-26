@@ -185,9 +185,25 @@ impl Default for WidgetConfig {
                 WidgetMetricConfig {
                     pair_with: None,
                     row_layout: WidgetRowLayout::Single,
+                    kind: WidgetMetricKind::Cpu,
+                    enabled: true,
+                    usage_scheme: UsageScheme::Capsule,
+                    icon_style: WidgetIconStyle::Outline,
+                },
+                WidgetMetricConfig {
+                    pair_with: None,
+                    row_layout: WidgetRowLayout::Single,
                     kind: WidgetMetricKind::Memory,
                     enabled: true,
                     usage_scheme: MemoryScheme::Capsule,
+                    icon_style: WidgetIconStyle::Outline,
+                },
+                WidgetMetricConfig {
+                    pair_with: None,
+                    row_layout: WidgetRowLayout::Single,
+                    kind: WidgetMetricKind::Battery,
+                    enabled: true,
+                    usage_scheme: UsageScheme::Capsule,
                     icon_style: WidgetIconStyle::Outline,
                 },
             ],
@@ -664,6 +680,27 @@ mod tests {
     }
 
     #[test]
+    fn default_widget_config_enables_all_supported_metrics() {
+        let mut config = WidgetConfig::default();
+        config.normalize();
+        let kinds = config
+            .metrics
+            .iter()
+            .map(|metric| (metric.kind, metric.enabled))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            kinds,
+            vec![
+                (WidgetMetricKind::Upload, true),
+                (WidgetMetricKind::Download, true),
+                (WidgetMetricKind::Cpu, true),
+                (WidgetMetricKind::Memory, true),
+                (WidgetMetricKind::Battery, true),
+            ]
+        );
+    }
+
+    #[test]
     fn normalize_migrates_missing_metrics_to_network_and_memory() {
         let mut config = WidgetConfig {
             metrics: Vec::new(),
@@ -672,8 +709,13 @@ mod tests {
         };
         config.normalize();
         assert_eq!(config.metrics.len(), 5);
-        assert_eq!(config.metrics[2].kind, WidgetMetricKind::Memory);
-        assert_eq!(config.metrics[2].usage_scheme, MemoryScheme::Ring);
+        assert!(config.metrics.iter().all(|metric| metric.enabled));
+        let memory = config
+            .metrics
+            .iter()
+            .find(|metric| metric.kind == WidgetMetricKind::Memory)
+            .unwrap();
+        assert_eq!(memory.usage_scheme, MemoryScheme::Ring);
     }
 
     #[test]
@@ -815,7 +857,6 @@ mod tests {
         config.normalize();
         assert_eq!(config.metrics[0].kind, WidgetMetricKind::Cpu);
         assert_eq!(config.metrics[0].usage_scheme, UsageScheme::Ring);
-        assert!(!config.metrics[0].enabled);
         for default in WidgetConfig::default()
             .metrics
             .into_iter()

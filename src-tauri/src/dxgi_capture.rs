@@ -72,7 +72,7 @@ impl CaptureManager {
         &mut self,
         rect: MonitorRect,
         timeout_ms: u32,
-        not_before: i64,
+        not_before: Option<i64>,
     ) -> Result<BgraFrame, String> {
         // Release duplications for disconnected or reconfigured outputs before
         // selecting the active monitor. A resolution change produces a new
@@ -83,17 +83,24 @@ impl CaptureManager {
             self.ensure_output(rect)?;
         }
         let capture = self.outputs.get_mut(&rect).expect("DXGI output inserted");
-        match capture.read_frame(timeout_ms, not_before) {
-            Ok(Some(frame)) => Ok(frame),
-            // A stale frame is not a broken duplication: retain the warmed device.
-            Ok(None) => Err("DXGI 桌面帧早于窗口隐藏完成时间，改用即时截图".into()),
-            Err(error) => {
-                // Access-lost is normal after display changes or driver resets.
-                // Drop this entry so the next capture recreates it once.
-                self.outputs.remove(&rect);
-                Err(error)
+        // Drain at most one stale prewarmed desktop frame before falling back to GDI.
+        for attempt in 0..2 {
+            match capture.read_frame(timeout_ms, not_before) {
+                Ok(Some(frame)) => return Ok(frame),
+                Ok(None) if attempt == 0 => continue,
+                // A stale frame is not a broken duplication: retain the warmed device.
+                Ok(None) => {
+                    return Err("DXGI 桌面帧早于窗口隐藏完成时间，改用即时截图".into());
+                }
+                Err(error) => {
+                    // Access-lost is normal after display changes or driver resets.
+                    // Drop this entry so the next capture recreates it once.
+                    self.outputs.remove(&rect);
+                    return Err(error);
+                }
             }
         }
+        Err("DXGI 未获取到最新桌面帧，改用即时截图".into())
     }
 
     fn ensure_output(&mut self, wanted: MonitorRect) -> Result<(), String> {
@@ -160,7 +167,7 @@ impl OutputCapture {
     fn read_frame(
         &mut self,
         timeout_ms: u32,
-        not_before: i64,
+        not_before: Option<i64>,
     ) -> Result<Option<BgraFrame>, String> {
         let mut info = Default::default();
         let mut resource = None;
@@ -171,9 +178,9 @@ impl OutputCapture {
         .map_err(display_error)?;
         let result = (|| {
             // Prewarming may leave a desktop frame from before our windows hid.
-            // Mouse-only updates have no desktop present time. Reject both so
-            // the caller takes an immediate GDI snapshot of the current desktop.
-            if !frame_is_current(info.LastPresentTime, not_before) {
+            // Mouse-only updates have no desktop present time. Reject stale frames
+            // when an own window was just hidden so we never capture a ghost window.
+            if !frame_is_acceptable(info.LastPresentTime, not_before) {
                 return Ok(None);
             }
             let texture: ID3D11Texture2D = resource
@@ -273,13 +280,20 @@ fn frame_is_current(last_present_time: i64, not_before: i64) -> bool {
     last_present_time > 0 && last_present_time >= not_before
 }
 
+fn frame_is_acceptable(last_present_time: i64, not_before: Option<i64>) -> bool {
+    match not_before {
+        Some(threshold) => frame_is_current(last_present_time, threshold),
+        None => last_present_time > 0,
+    }
+}
+
 fn display_error(error: windows::core::Error) -> String {
     format!("DXGI capture failed: {error}")
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{frame_is_current, MonitorRect};
+    use super::{frame_is_acceptable, frame_is_current, MonitorRect};
 
     #[test]
     fn cached_desktop_and_mouse_only_frames_cannot_reintroduce_a_hidden_window() {
@@ -287,6 +301,9 @@ mod tests {
         assert!(!frame_is_current(0, 100));
         assert!(frame_is_current(100, 100));
         assert!(frame_is_current(101, 100));
+        assert!(!frame_is_acceptable(99, Some(100)));
+        assert!(frame_is_acceptable(99, None));
+        assert!(!frame_is_acceptable(0, None));
     }
 
     #[test]

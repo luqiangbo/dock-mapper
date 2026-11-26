@@ -195,11 +195,11 @@ fn handle_start_capture_with_mode(
     physical: bool,
 ) -> Result<u64, String> {
     crate::defaults_bootstrap::require_runtime_ready(app)?;
-    // Freeze the target before hiding the main window or scheduling the worker.
-    let screen = active_screen(app)?;
-    if screen_id.is_some_and(|id| id != screen.id) {
-        return Err("请将鼠标移到预设所属显示器后重试".into());
-    }
+    // Freeze the target before hiding own windows or scheduling the worker.
+    let screen = match screen_id {
+        Some(id) => screen_by_id(app, id)?,
+        None => active_screen(app)?,
+    };
     let selection = if physical {
         let sx = screen.physical_width as f64 / screen.bounds.width;
         let sy = screen.physical_height as f64 / screen.bounds.height;
@@ -230,15 +230,32 @@ fn handle_start_capture_with_mode(
     let generation = state.capture_generation.fetch_add(1, Ordering::SeqCst) + 1;
     let status = startup.begin(generation)?;
     scheduled_capture::remember(generation, selection);
+    let mut hidden_windows: Vec<tauri::WebviewWindow> = Vec::new();
     match crate::visualizer_effects::suspend_for_capture(app) {
-        Ok(token) => *state.visualizer_suspend_token.lock_or_recover() = token,
+        Ok(token) => {
+            if token.is_some() {
+                if let Some(window) = app.get_webview_window("key_visualizer") {
+                    hidden_windows.push(window);
+                }
+                for (label, window) in app.webview_windows() {
+                    if label.starts_with("key-visualizer-effect-") {
+                        hidden_windows.push(window);
+                    }
+                }
+            }
+            *state.visualizer_suspend_token.lock_or_recover() = token;
+        }
         Err(error) => {
             tracing::warn!(target: "dock_mapper::key_visualizer", %error, "截图前暂停按键展示失败")
         }
     }
     if let Some(window) = active_overlay_window(app) {
-        if let Err(error) = window.hide() {
-            tracing::warn!(target: "dock_mapper::capture", %error, "隐藏上一张截图失败");
+        if window.is_visible().unwrap_or(false) {
+            if let Err(error) = window.hide() {
+                tracing::warn!(target: "dock_mapper::capture", %error, "隐藏上一张截图失败");
+            } else {
+                hidden_windows.push(window);
+            }
         }
     }
     *state.capture.lock_or_recover() = None;
@@ -246,7 +263,9 @@ fn handle_start_capture_with_mode(
     startup::publish(app, &status);
     drop(startup);
 
-    let transition = if let Some(main) = app.get_webview_window("main").filter(|_| hide_main_window)
+    let transition = if let Some(main) = app
+        .get_webview_window("main")
+        .filter(|window| hide_main_window && window.is_visible().unwrap_or(false))
     {
         let hidden = capture_window::CaptureWindowTransition::suppress(&main).and_then(|guard| {
             main.hide()
@@ -254,7 +273,10 @@ fn handle_start_capture_with_mode(
             Ok(guard)
         });
         match hidden {
-            Ok(guard) => Some(guard),
+            Ok(guard) => {
+                hidden_windows.push(main);
+                Some(guard)
+            }
             Err(error) => {
                 startup::fail_startup(app, generation, error.clone());
                 return Err(error);
@@ -278,18 +300,18 @@ fn handle_start_capture_with_mode(
     thread::spawn(move || {
         let _transition = transition;
         let started = Instant::now();
-        // hide() is scheduled through the window event loop. Confirm it on the
-        // worker instead of rejecting a still-queued hide on the UI thread.
-        if let Some(main) = worker_app
-            .get_webview_window("main")
-            .filter(|_| hide_main_window)
-        {
+        let any_window_hidden = !hidden_windows.is_empty();
+        // hide() is scheduled through the window event loop. Confirm every hidden
+        // own window (main, previous overlay, key visualizer) is invisible before capture.
+        if any_window_hidden {
             let hidden = (|| {
-                while main.is_visible().map_err(|error| error.to_string())? {
-                    if started.elapsed() >= std::time::Duration::from_millis(500) {
-                        return Err("主窗口隐藏超时，请重试截图".to_string());
+                for window in &hidden_windows {
+                    while window.is_visible().unwrap_or(false) {
+                        if started.elapsed() >= std::time::Duration::from_millis(500) {
+                            return Err("窗口隐藏超时，请重试截图".to_string());
+                        }
+                        thread::sleep(std::time::Duration::from_millis(8));
                     }
-                    thread::sleep(std::time::Duration::from_millis(8));
                 }
                 Ok(())
             })();
@@ -301,6 +323,9 @@ fn handle_start_capture_with_mode(
         #[cfg(target_os = "windows")]
         unsafe {
             let _ = windows::Win32::Graphics::Dwm::DwmFlush();
+            if any_window_hidden {
+                let _ = windows::Win32::Graphics::Dwm::DwmFlush();
+            }
         }
         if !worker_app
             .state::<AppState>()
@@ -311,10 +336,11 @@ fn handle_start_capture_with_mode(
             return;
         }
         tracing::info!(target: "dock_mapper::capture", generation, "Native capture started");
-        let result = capture_active_screen(&worker_app, generation, screen).map(|mut capture| {
-            capture.mode = mode;
-            capture
-        });
+        let result = capture_active_screen(&worker_app, generation, screen, any_window_hidden)
+            .map(|mut capture| {
+                capture.mode = mode;
+                capture
+            });
         // WebView creation must not block a synchronous command or the UI event loop.
         let result = result.and_then(|capture| {
             if !worker_app

@@ -52,53 +52,70 @@ pub fn copy_image(
 }
 
 #[tauri::command]
-pub fn save_image(
+pub async fn save_image(
     app: AppHandle,
     config_state: State<'_, crate::AppState>,
     image_id: String,
 ) -> Result<bool, String> {
     tracing::info!(target: "dock_mapper::screenshot", "save screenshot started");
     let data = config_state.images.take(&image_id)?;
+    let screenshot_config = match config_state.config.lock() {
+        Ok(config) => config.screenshot_config.clone(),
+        Err(_) => return Err("配置状态已损坏".into()),
+    };
     hide_overlay_for_commit(&app);
-    if let Err(error) = clipboard::write_png(&data) {
-        restore_overlay_after_commit_failure(&app);
-        return Err(error);
-    }
-    remember_confirmed_image(&app, data.clone());
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
-    let screenshot_config = match config_state.config.lock() {
-        Ok(config) => config.screenshot_config.clone(),
-        Err(_) => {
+    let filename = format!("{}-{stamp}.png", screenshot_config.filename_prefix);
+    let save_directory = screenshot_config.save_directory.clone();
+    let payload = Arc::clone(&data);
+    let saved = tokio::task::spawn_blocking(move || -> Result<bool, String> {
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("Save Screenshot")
+            .set_file_name(filename)
+            .add_filter("PNG Image", &["png"]);
+        if let Some(directory) = save_directory {
+            let directory = PathBuf::from(directory);
+            if directory.is_dir() {
+                dialog = dialog.set_directory(directory);
+            }
+        }
+        let Some(path) = dialog.save_file() else {
+            return Ok(false);
+        };
+        fs::write(path, payload.as_ref()).map_err(|error| error.to_string())?;
+        Ok(true)
+    })
+    .await
+    .map_err(|error| format!("保存截图任务失败：{error}"));
+
+    match saved {
+        Ok(Ok(true)) => {
+            // Only update clipboard after the user actually commits saving.
+            let clipboard_data = Arc::clone(&data);
+            if let Ok(Err(error)) =
+                tokio::task::spawn_blocking(move || clipboard::write_png(&clipboard_data)).await
+            {
+                tracing::warn!(target: "dock_mapper::screenshot", error = %crate::diagnostics::redact_sensitive_text(&error), "save screenshot succeeded but clipboard copy failed");
+            }
+            remember_confirmed_image(&app, data);
+            finish_overlay_commit(&app);
+            tracing::info!(target: "dock_mapper::screenshot", "save screenshot completed");
+            Ok(true)
+        }
+        Ok(Ok(false)) => {
+            tracing::info!(target: "dock_mapper::screenshot", "save screenshot cancelled");
             restore_overlay_after_commit_failure(&app);
-            return Err("配置状态已损坏".into());
+            Ok(false)
         }
-    };
-    let mut dialog = rfd::FileDialog::new()
-        .set_title("Save Screenshot")
-        .set_file_name(format!("{}-{stamp}.png", screenshot_config.filename_prefix))
-        .add_filter("PNG Image", &["png"]);
-    if let Some(directory) = screenshot_config.save_directory {
-        let directory = PathBuf::from(directory);
-        if directory.is_dir() {
-            dialog = dialog.set_directory(directory);
+        Ok(Err(error)) | Err(error) => {
+            tracing::error!(target: "dock_mapper::screenshot", error = %crate::diagnostics::redact_sensitive_text(&error), "save screenshot failed");
+            restore_overlay_after_commit_failure(&app);
+            Err(error)
         }
     }
-    let Some(path) = dialog.save_file() else {
-        tracing::info!(target: "dock_mapper::screenshot", "save screenshot cancelled");
-        restore_overlay_after_commit_failure(&app);
-        return Ok(false);
-    };
-    if let Err(error) = fs::write(path, data.as_ref()) {
-        tracing::error!(target: "dock_mapper::screenshot", error = %crate::diagnostics::redact_sensitive_text(&error.to_string()), "save screenshot failed");
-        restore_overlay_after_commit_failure(&app);
-        return Err(error.to_string());
-    }
-    finish_overlay_commit(&app);
-    tracing::info!(target: "dock_mapper::screenshot", "save screenshot completed");
-    Ok(true)
 }
 
 #[tauri::command]
@@ -115,7 +132,7 @@ pub fn copy_pin_image(state: State<AppState>, id: String) -> Result<bool, String
 }
 
 #[tauri::command]
-pub fn save_pin_image(state: State<AppState>, id: String) -> Result<bool, String> {
+pub async fn save_pin_image(state: State<'_, AppState>, id: String) -> Result<bool, String> {
     let data = state
         .pin_runtime
         .lock_or_recover()
@@ -123,14 +140,18 @@ pub fn save_pin_image(state: State<AppState>, id: String) -> Result<bool, String
         .get(&id)
         .cloned()
         .ok_or_else(|| "贴图数据不存在".to_string())?;
-    let Some(path) = rfd::FileDialog::new()
-        .set_title("保存贴图")
-        .set_file_name("DockMapper-pin.png")
-        .add_filter("PNG Image", &["png"])
-        .save_file()
-    else {
-        return Ok(false);
-    };
-    fs::write(path, data.as_ref()).map_err(|error| error.to_string())?;
-    Ok(true)
+    tokio::task::spawn_blocking(move || {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("保存贴图")
+            .set_file_name("DockMapper-pin.png")
+            .add_filter("PNG Image", &["png"])
+            .save_file()
+        else {
+            return Ok(false);
+        };
+        fs::write(path, data.as_ref()).map_err(|error| error.to_string())?;
+        Ok(true)
+    })
+    .await
+    .map_err(|error| format!("保存贴图任务失败：{error}"))?
 }

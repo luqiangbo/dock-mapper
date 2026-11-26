@@ -3,9 +3,14 @@ use super::{
     toggle_latest_pin, AppState,
 };
 use crate::config::ScreenshotConfig;
-use std::collections::{HashMap, HashSet};
-use tauri::{AppHandle, Manager};
+use std::{
+    collections::{HashMap, HashSet},
+    time::{Duration, Instant},
+};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+
+const SHORTCUT_DEBOUNCE: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum ShortcutAction {
@@ -50,6 +55,7 @@ impl ShortcutAction {
 pub(super) struct ShortcutRegistryState {
     registered: HashMap<ShortcutAction, String>,
     errors: HashMap<ShortcutAction, String>,
+    last_triggered: HashMap<ShortcutAction, Instant>,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -104,7 +110,39 @@ pub(super) fn validate_bindings(config: &ScreenshotConfig) -> Result<(), String>
     Ok(())
 }
 
+fn should_dispatch_at(
+    last_triggered: &mut HashMap<ShortcutAction, Instant>,
+    action: ShortcutAction,
+    now: Instant,
+    window: Duration,
+) -> bool {
+    if let Some(previous) = last_triggered.get(&action) {
+        if now.saturating_duration_since(*previous) < window {
+            return false;
+        }
+    }
+    last_triggered.insert(action, now);
+    true
+}
+
 fn dispatch(app: &AppHandle, action: ShortcutAction) {
+    let allowed = app
+        .state::<AppState>()
+        .shortcut_registry
+        .lock()
+        .map(|mut registry| {
+            should_dispatch_at(
+                &mut registry.last_triggered,
+                action,
+                Instant::now(),
+                SHORTCUT_DEBOUNCE,
+            )
+        })
+        .unwrap_or(true);
+    if !allowed {
+        tracing::debug!(target: "dock_mapper::shortcut", action = action.label(), "忽略防抖窗口内的重复快捷键触发");
+        return;
+    }
     match action {
         ShortcutAction::Capture => start_capture(app),
         ShortcutAction::PinRecent => pin_recent_screenshot(app),
@@ -345,6 +383,7 @@ pub(super) fn register_initial(app: &AppHandle, config: &ScreenshotConfig) {
             );
         }
     }
+    let _ = app.emit("shortcut-status-changed", ());
 }
 
 #[cfg(test)]
@@ -390,5 +429,36 @@ mod tests {
         assert_eq!(capture.error, None);
         assert!(!pin.registered);
         assert_eq!(pin.error.as_deref(), Some("已被其他应用占用"));
+    }
+
+    #[test]
+    fn debounces_rapid_duplicate_presses_per_action() {
+        let mut last = HashMap::new();
+        let start = Instant::now();
+        let window = Duration::from_millis(250);
+        assert!(should_dispatch_at(
+            &mut last,
+            ShortcutAction::Capture,
+            start,
+            window
+        ));
+        assert!(!should_dispatch_at(
+            &mut last,
+            ShortcutAction::Capture,
+            start + Duration::from_millis(120),
+            window
+        ));
+        assert!(should_dispatch_at(
+            &mut last,
+            ShortcutAction::QuickOcr,
+            start + Duration::from_millis(120),
+            window
+        ));
+        assert!(should_dispatch_at(
+            &mut last,
+            ShortcutAction::Capture,
+            start + Duration::from_millis(260),
+            window
+        ));
     }
 }

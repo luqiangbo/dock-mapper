@@ -9,9 +9,14 @@ use tauri::{
 enum TrayAction {
     ShowMain,
     Capture,
+    QuickOcr,
+    DelayedCapture,
     OpenHistory,
     PinRecent,
     ToggleLatestPin,
+    ToggleAllPins,
+    RestorePinInteraction,
+    CloseAllPins,
     ToggleMapping,
     Quit,
 }
@@ -20,9 +25,14 @@ fn tray_action(id: &str) -> Option<TrayAction> {
     match id {
         "show" => Some(TrayAction::ShowMain),
         "capture" => Some(TrayAction::Capture),
+        "quick_ocr" => Some(TrayAction::QuickOcr),
+        "delayed_capture" => Some(TrayAction::DelayedCapture),
         "screenshot_history" => Some(TrayAction::OpenHistory),
         "pin_recent" => Some(TrayAction::PinRecent),
         "toggle_latest_pin" => Some(TrayAction::ToggleLatestPin),
+        "toggle_all_pins" => Some(TrayAction::ToggleAllPins),
+        "restore_pin_interaction" => Some(TrayAction::RestorePinInteraction),
+        "close_all_pins" => Some(TrayAction::CloseAllPins),
         "toggle_mapping" => Some(TrayAction::ToggleMapping),
         "quit" => Some(TrayAction::Quit),
         _ => None,
@@ -45,22 +55,40 @@ pub fn sync_mapping_toggle(app: &tauri::AppHandle, enabled: bool) {
 pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let show = MenuItemBuilder::with_id("show", "显示主窗口").build(app)?;
     let capture = MenuItemBuilder::with_id("capture", "截图").build(app)?;
+    let quick_ocr = MenuItemBuilder::with_id("quick_ocr", "快速 OCR").build(app)?;
+    let delayed_capture =
+        MenuItemBuilder::with_id("delayed_capture", "延时截图（3 秒）").build(app)?;
     let history = MenuItemBuilder::with_id("screenshot_history", "截图历史").build(app)?;
+    let pin_separator = PredefinedMenuItem::separator(app)?;
     let pin_recent = MenuItemBuilder::with_id("pin_recent", "贴出最近截图").build(app)?;
     let toggle_pin =
         MenuItemBuilder::with_id("toggle_latest_pin", "显示/隐藏最近贴图").build(app)?;
-    let separator = PredefinedMenuItem::separator(app)?;
+    let toggle_all_pins =
+        MenuItemBuilder::with_id("toggle_all_pins", "全部显隐贴图").build(app)?;
+    let restore_pin_interaction =
+        MenuItemBuilder::with_id("restore_pin_interaction", "取消贴图穿透").build(app)?;
+    let close_all_pins =
+        MenuItemBuilder::with_id("close_all_pins", "关闭全部贴图").build(app)?;
+    let mapping_separator = PredefinedMenuItem::separator(app)?;
     let mapping = MenuItemBuilder::with_id("toggle_mapping", "暂停按键映射").build(app)?;
     app.manage(MappingMenu(mapping.clone()));
+    let quit_separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItemBuilder::with_id("quit", "退出").build(app)?;
     let menu = MenuBuilder::new(app)
         .item(&show)
         .item(&capture)
+        .item(&quick_ocr)
+        .item(&delayed_capture)
         .item(&history)
+        .item(&pin_separator)
         .item(&pin_recent)
         .item(&toggle_pin)
+        .item(&toggle_all_pins)
+        .item(&restore_pin_interaction)
+        .item(&close_all_pins)
+        .item(&mapping_separator)
         .item(&mapping)
-        .item(&separator)
+        .item(&quit_separator)
         .item(&quit)
         .build()?;
     let icon = app
@@ -76,9 +104,14 @@ pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .on_menu_event(|app, event| match tray_action(event.id().as_ref()) {
             Some(TrayAction::ShowMain) => screenshot::show_main_window(app),
             Some(TrayAction::Capture) => screenshot::start_capture(app),
+            Some(TrayAction::QuickOcr) => screenshot::start_quick_ocr_capture(app),
+            Some(TrayAction::DelayedCapture) => screenshot::start_delayed_capture(app, 3_000),
             Some(TrayAction::OpenHistory) => screenshot::open_screenshot_history(app),
             Some(TrayAction::PinRecent) => screenshot::pin_recent_screenshot(app),
             Some(TrayAction::ToggleLatestPin) => screenshot::toggle_latest_pin(app),
+            Some(TrayAction::ToggleAllPins) => screenshot::toggle_all_pins(app),
+            Some(TrayAction::RestorePinInteraction) => screenshot::disable_all_pin_passthrough(app),
+            Some(TrayAction::CloseAllPins) => screenshot::close_all_pins(app),
             Some(TrayAction::ToggleMapping) => {
                 let app = app.clone();
                 tauri::async_runtime::spawn_blocking(move || {
@@ -128,6 +161,11 @@ mod tests {
     fn routes_all_screenshot_entries_without_an_about_action() {
         assert_eq!(tray_action("show"), Some(TrayAction::ShowMain));
         assert_eq!(tray_action("capture"), Some(TrayAction::Capture));
+        assert_eq!(tray_action("quick_ocr"), Some(TrayAction::QuickOcr));
+        assert_eq!(
+            tray_action("delayed_capture"),
+            Some(TrayAction::DelayedCapture)
+        );
         assert_eq!(
             tray_action("screenshot_history"),
             Some(TrayAction::OpenHistory)
@@ -136,6 +174,18 @@ mod tests {
         assert_eq!(
             tray_action("toggle_latest_pin"),
             Some(TrayAction::ToggleLatestPin)
+        );
+        assert_eq!(
+            tray_action("toggle_all_pins"),
+            Some(TrayAction::ToggleAllPins)
+        );
+        assert_eq!(
+            tray_action("restore_pin_interaction"),
+            Some(TrayAction::RestorePinInteraction)
+        );
+        assert_eq!(
+            tray_action("close_all_pins"),
+            Some(TrayAction::CloseAllPins)
         );
         assert_eq!(tray_action("about"), None);
         assert_eq!(

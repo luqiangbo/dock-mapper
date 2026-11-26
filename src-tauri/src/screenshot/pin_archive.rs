@@ -397,6 +397,13 @@ fn restore_entry(app: &AppHandle, entry: Entry) -> Result<String, String> {
             .lock_or_recover()
             .options
             .insert(id.clone(), entry.options);
+        if entry.options.passthrough {
+            if let Some(window) = app.get_webview_window(&id) {
+                if let Err(error) = window.set_ignore_cursor_events(true) {
+                    tracing::warn!(%error, pin_id = %id, "恢复贴图鼠标穿透失败");
+                }
+            }
+        }
         let data = app
             .state::<AppState>()
             .pin_runtime
@@ -602,6 +609,7 @@ mod tests {
             options: PinOptions {
                 opacity: 0.6,
                 locked: true,
+                passthrough: false,
             },
             geometry: PinWindowGeometry {
                 x: -500,
@@ -623,6 +631,11 @@ mod tests {
         assert_eq!(restored.geometry.scale, 2.0);
         assert_eq!(restored.options.opacity, 0.6);
         assert!(restored.options.locked);
+        assert!(!restored.options.passthrough);
+        // Legacy manifests without passthrough default to interactive.
+        let legacy: PinOptions =
+            serde_json::from_str(r#"{"opacity":0.8,"locked":false}"#).unwrap();
+        assert!(!legacy.passthrough);
     }
     #[test]
     fn history_limit_keeps_open_pins_and_the_most_recent_closed_pin() {

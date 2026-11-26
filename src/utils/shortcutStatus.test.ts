@@ -2,7 +2,14 @@ import { defaultScreenshotTools } from "./screenshotTools";
 import { describe, expect, it } from "vitest";
 import type { ScreenshotConfig } from "../types";
 import { DEFAULT_ANNOTATION_STYLES } from "../screenshots/screenshot/components/annotationStyleDefaults";
-import { resetShortcutConfig, shortcutStatusDisplay } from "./shortcutStatus";
+import {
+  applyLowConflictShortcuts,
+  conflictingShortcuts,
+  LOW_CONFLICT_SCREENSHOT_SHORTCUTS,
+  resetShortcutConfig,
+  shortcutStatusDisplay,
+} from "./shortcutStatus";
+import { validateScreenshotShortcutDraft } from "../components/screenshotSettingsSave";
 
 const config: ScreenshotConfig = {
   toolbar_tools: defaultScreenshotTools(),
@@ -48,5 +55,28 @@ describe("shortcut status presentation", () => {
     const result = await resetShortcutConfig(config, () => Promise.reject(error));
     expect(result.config).toBe(config);
     expect(result.error).toBe(error);
+  });
+
+  it("provides a valid distinct low-conflict shortcut preset and detects conflicts", () => {
+    const updated = applyLowConflictShortcuts(config);
+    expect(updated.shortcut).toBe(LOW_CONFLICT_SCREENSHOT_SHORTCUTS.shortcut);
+    expect(validateScreenshotShortcutDraft(updated)).toEqual({ invalid: [], duplicates: [] });
+    const conflicts = conflictingShortcuts([
+      {
+        actionId: "capture",
+        action: "区域截图",
+        shortcut: "Control+1",
+        registered: false,
+        error: "已被其他应用占用",
+      },
+      {
+        actionId: "pin_recent",
+        action: "最近截图贴图",
+        shortcut: "Control+2",
+        registered: true,
+        error: null,
+      },
+    ]);
+    expect(conflicts.map((item) => item.actionId)).toEqual(["capture"]);
   });
 });

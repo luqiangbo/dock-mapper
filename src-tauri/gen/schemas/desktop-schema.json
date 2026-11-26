@@ -393,6 +393,12 @@
           "markdownDescription": "Enables the clear_runtime_logs command without any pre-configured scope."
         },
         {
+          "description": "Enables the clear_unfavorited_screenshot_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-unfavorited-screenshot-history",
+          "markdownDescription": "Enables the clear_unfavorited_screenshot_history command without any pre-configured scope."
+        },
+        {
           "description": "Enables the close_overlay command without any pre-configured scope.",
           "type": "string",
           "const": "allow-close-overlay",
@@ -433,6 +439,12 @@
           "type": "string",
           "const": "allow-create-screenshot-history",
           "markdownDescription": "Enables the create_screenshot_history command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the decode_qr_screenshot_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-decode-qr-screenshot-history",
+          "markdownDescription": "Enables the decode_qr_screenshot_history command without any pre-configured scope."
         },
         {
           "description": "Enables the decode_qr_selection command without any pre-configured scope.",
@@ -703,6 +715,12 @@
           "type": "string",
           "const": "allow-query-capture-elements",
           "markdownDescription": "Enables the query_capture_elements command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the recognize_screenshot_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-recognize-screenshot-history",
+          "markdownDescription": "Enables the recognize_screenshot_history command without any pre-configured scope."
         },
         {
           "description": "Enables the recognize_selection command without any pre-configured scope.",
@@ -987,6 +1005,12 @@
           "markdownDescription": "Denies the clear_runtime_logs command without any pre-configured scope."
         },
         {
+          "description": "Denies the clear_unfavorited_screenshot_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-unfavorited-screenshot-history",
+          "markdownDescription": "Denies the clear_unfavorited_screenshot_history command without any pre-configured scope."
+        },
+        {
           "description": "Denies the close_overlay command without any pre-configured scope.",
           "type": "string",
           "const": "deny-close-overlay",
@@ -1027,6 +1051,12 @@
           "type": "string",
           "const": "deny-create-screenshot-history",
           "markdownDescription": "Denies the create_screenshot_history command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the decode_qr_screenshot_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-decode-qr-screenshot-history",
+          "markdownDescription": "Denies the decode_qr_screenshot_history command without any pre-configured scope."
         },
         {
           "description": "Denies the decode_qr_selection command without any pre-configured scope.",
@@ -1297,6 +1327,12 @@
           "type": "string",
           "const": "deny-query-capture-elements",
           "markdownDescription": "Denies the query_capture_elements command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the recognize_screenshot_history command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-recognize-screenshot-history",
+          "markdownDescription": "Denies the recognize_screenshot_history command without any pre-configured scope."
         },
         {
           "description": "Denies the recognize_selection command without any pre-configured scope.",

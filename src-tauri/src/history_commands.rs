@@ -123,3 +123,40 @@ pub async fn pin_screenshot_history(
     let data = run_history_task(move || history.image(&id)).await?;
     screenshot::pin_external_image(app, data)
 }
+
+#[tauri::command]
+pub async fn clear_unfavorited_screenshot_history(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    let history = Arc::clone(&state.history);
+    let removed = run_history_task(move || history.clear_unfavorited()).await?;
+    if removed > 0 {
+        let _ = app.emit("screenshot-history-changed", ());
+    }
+    Ok(removed)
+}
+
+#[tauri::command]
+pub async fn recognize_screenshot_history(
+    state: State<'_, AppState>,
+    service: State<'_, crate::ocr::OcrService>,
+    id: String,
+) -> Result<crate::ocr::OcrTextResult, String> {
+    let history = Arc::clone(&state.history);
+    let data = run_history_task(move || history.image(&id)).await?;
+    service.recognize(data).await
+}
+
+#[tauri::command]
+pub async fn decode_qr_screenshot_history(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<crate::ocr::QrDecodeResult, String> {
+    let history = Arc::clone(&state.history);
+    run_history_task(move || {
+        let data = history.image(&id)?;
+        crate::ocr::decode_qr(data)
+    })
+    .await
+}

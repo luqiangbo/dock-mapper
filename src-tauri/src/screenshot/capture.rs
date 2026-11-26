@@ -27,6 +27,32 @@ pub(super) fn screen_identity(name: Option<&str>, x: i32, y: i32) -> u32 {
     hash.finish() as u32
 }
 
+pub(super) fn screen_by_id(app: &AppHandle, target_id: u32) -> Result<ActiveScreen, String> {
+    let monitors = app.available_monitors().map_err(|error| error.to_string())?;
+    for monitor in monitors {
+        let position = monitor.position();
+        let size = monitor.size();
+        let scale = monitor.scale_factor().max(1.0);
+        let id = screen_identity(monitor.name().map(String::as_str), position.x, position.y);
+        if id == target_id {
+            return Ok(ActiveScreen {
+                id,
+                bounds: Rect {
+                    x: position.x as f64 / scale,
+                    y: position.y as f64 / scale,
+                    width: size.width as f64 / scale,
+                    height: size.height as f64 / scale,
+                },
+                physical_origin_x: position.x,
+                physical_origin_y: position.y,
+                physical_width: size.width,
+                physical_height: size.height,
+            });
+        }
+    }
+    Err("预设所属显示器当前不可用，请检查显示器连接或重新选择区域".into())
+}
+
 pub(super) fn active_screen(app: &AppHandle) -> Result<ActiveScreen, String> {
     let cursor = app.cursor_position().map_err(|error| error.to_string())?;
     let monitor = app
@@ -89,20 +115,14 @@ fn is_blank_bgra(width: u32, height: u32, pixels: &[u8]) -> bool {
     if width < 2 || height < 2 {
         return true;
     }
-    let first = &pixels[..4];
-    let mut varied = 0;
+    // Only treat an unrendered all-black buffer (e.g. protected/secure desktop) as blank.
+    // Solid non-black screens (white documents, solid wallpapers, dark-gray editors) are valid.
     for pixel in pixels
         .chunks_exact(4)
         .step_by(((width as usize * height as usize) / 600).max(1))
     {
-        let difference = (pixel[0] as i16 - first[0] as i16).unsigned_abs()
-            + (pixel[1] as i16 - first[1] as i16).unsigned_abs()
-            + (pixel[2] as i16 - first[2] as i16).unsigned_abs();
-        if difference > 36 {
-            varied += 1;
-            if varied > 6 {
-                return false;
-            }
+        if pixel[0] > 2 || pixel[1] > 2 || pixel[2] > 2 {
+            return false;
         }
     }
     true
@@ -190,6 +210,7 @@ pub(super) fn capture_active_screen(
     app: &AppHandle,
     generation: u64,
     screen: ActiveScreen,
+    require_fresh_frame: bool,
 ) -> Result<CaptureData, String> {
     let rect = crate::dxgi_capture::MonitorRect {
         x: screen.physical_origin_x,
@@ -197,18 +218,21 @@ pub(super) fn capture_active_screen(
         width: screen.physical_width,
         height: screen.physical_height,
     };
-    let mut not_before = 0;
-    let freshness =
+    let freshness = if require_fresh_frame {
+        let mut not_before = 0;
         unsafe { windows::Win32::System::Performance::QueryPerformanceCounter(&mut not_before) }
-            .map(|_| not_before)
-            .map_err(|error| format!("读取截图帧时钟失败：{error}"));
+            .map(|_| Some(not_before))
+            .map_err(|error| format!("读取截图帧时钟失败：{error}"))
+    } else {
+        Ok(None)
+    };
     let dxgi = freshness
         .and_then(|not_before| {
             app.state::<AppState>()
                 .dxgi_capture
                 .try_lock()
                 .map_err(|_| "DXGI 正忙或正在预热，改用兼容截图".to_string())
-                .and_then(|mut capture| capture.capture(rect, 20, not_before))
+                .and_then(|mut capture| capture.capture(rect, 25, not_before))
         })
         .and_then(|frame| {
             Ok((
@@ -266,5 +290,15 @@ mod monitor_identity_tests {
             screen_identity(None, -1920, 0)
         );
         assert_ne!(screen_identity(None, 0, 0), screen_identity(None, -1920, 0));
+    }
+
+    #[test]
+    fn solid_non_black_screens_are_not_rejected_as_blank() {
+        let solid_white = vec![255_u8; 4 * 10 * 10];
+        let solid_dark_gray = [30_u8, 30, 30, 0].repeat(100);
+        let all_black = vec![0_u8; 4 * 10 * 10];
+        assert!(!is_blank_bgra(10, 10, &solid_white));
+        assert!(!is_blank_bgra(10, 10, &solid_dark_gray));
+        assert!(is_blank_bgra(10, 10, &all_black));
     }
 }

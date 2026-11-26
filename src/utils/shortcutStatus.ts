@@ -18,6 +18,27 @@ export function shortcutStatusDisplay(
   };
 }
 
+export const LOW_CONFLICT_SCREENSHOT_SHORTCUTS = {
+  shortcut: "Control+Alt+A",
+  pin_shortcut: "Control+Alt+S",
+  history_shortcut: "Control+Alt+H",
+  toggle_pin_shortcut: "Control+Alt+P",
+  quick_ocr_shortcut: "Control+Alt+O",
+} as const;
+
+export function applyLowConflictShortcuts(config: ScreenshotConfig): ScreenshotConfig {
+  return {
+    ...config,
+    ...LOW_CONFLICT_SCREENSHOT_SHORTCUTS,
+  };
+}
+
+export function conflictingShortcuts(
+  statuses: readonly ShortcutRuntimeStatus[],
+): ShortcutRuntimeStatus[] {
+  return statuses.filter((status) => !status.registered);
+}
+
 export async function resetShortcutConfig(
   current: ScreenshotConfig,
   request: () => Promise<ScreenshotConfig>,

@@ -80,6 +80,18 @@ export const historyApi = {
     logOperation("history", "删除历史截图", () =>
       invokeCommand("delete_screenshot_history", { id }),
     ),
+  clearUnfavorited: () =>
+    logOperation("history", "清理未收藏截图历史", () =>
+      invokeCommand("clear_unfavorited_screenshot_history"),
+    ),
+  recognize: (id: string) =>
+    logOperation("ocr", "识别历史截图文字", () =>
+      invokeCommand("recognize_screenshot_history", { id }),
+    ),
+  decodeQr: (id: string) =>
+    logOperation("ocr", "识别历史截图二维码", () =>
+      invokeCommand("decode_qr_screenshot_history", { id }),
+    ),
 };
 
 export const screenshotSettingsApi = {
