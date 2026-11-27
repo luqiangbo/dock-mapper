@@ -114,4 +114,23 @@ describe("原文和译文切换", () => {
     expect(execute).not.toHaveBeenCalled();
     expect(task.state.error).toContain("5,000");
   });
+  it("切换其他工具时 hide 隐藏已就绪译文并保留缓存，同时可取消进行中的翻译", async () => {
+    const task = new TranslationTask(vi.fn());
+    const execute = vi.fn().mockResolvedValue(translated);
+    task.toggle();
+    task.start(source, settings, execute);
+    await settle();
+    expect(task.state.visible).toBe(true);
+    task.hide();
+    expect(task.state.phase).toBe("ready");
+    expect(task.state.visible).toBe(false);
+    expect(task.state.blocks).toHaveLength(2);
+
+    const pendingTask = new TranslationTask(vi.fn());
+    pendingTask.toggle();
+    expect(pendingTask.state.phase).toBe("waiting-ocr");
+    pendingTask.hide();
+    expect(pendingTask.state.phase).toBe("idle");
+    expect(pendingTask.state.visible).toBe(false);
+  });
 });

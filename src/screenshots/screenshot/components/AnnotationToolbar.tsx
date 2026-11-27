@@ -56,6 +56,7 @@ interface AnnotationToolbarProps {
   onTranslate: () => void;
   translationVisible?: boolean;
   translationRunning?: boolean;
+  qrActive?: boolean;
   onQr: () => void;
   onCancel: () => void;
   onConfirm: () => void;
@@ -83,6 +84,7 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
       onTranslate,
       translationVisible,
       translationRunning,
+      qrActive,
       onQr,
       onCancel,
       onConfirm,
@@ -101,7 +103,12 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
     const icons = screenshotToolIcons;
     const labels = { ...SCREENSHOT_TOOL_LABELS, eraser: "对象橡皮擦" };
     const { main, more } = screenshotToolbarGroups(toolbarTools);
-    const selectedMore = more.find((item) => item === tool);
+    const modeActive = Boolean(translationVisible || translationRunning || qrActive);
+    const activeToolKey = modeActive && tool === "select" ? null : tool;
+    const selectedMore =
+      more.find((item) =>
+        item === "translate" ? Boolean(translationVisible) : item === activeToolKey,
+      ) ?? (qrActive ? "qr" : undefined);
     const iconProps = { size: 20, strokeWidth: 1.8, "aria-hidden": true };
     const translationLabel = translationRunning
       ? "正在翻译…"
@@ -142,7 +149,7 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
                   <TooltipButton
                     key={key}
                     label={key === "translate" ? `翻译 · ${translationLabel}` : labels[key]}
-                    active={key === "translate" ? translationVisible : tool === key}
+                    active={key === "translate" ? translationVisible : activeToolKey === key}
                     loading={key === "translate" && translationRunning}
                     disabled={toolsDisabled || (key === "translate" && translationRunning)}
                     onClick={() => (key === "translate" ? onTranslate() : onToolChange(key))}
@@ -160,8 +167,9 @@ const AnnotationToolbar = forwardRef<HTMLDivElement, AnnotationToolbarProps>(
                   items,
                   selectable: true,
                   selectedKeys: [
-                    ...(tool ? [tool] : []),
+                    ...(activeToolKey ? [activeToolKey] : []),
                     ...(translationVisible ? ["translate"] : []),
+                    ...(qrActive ? ["qr"] : []),
                   ],
                   onClick: ({ key }) => {
                     changeOpen(false);

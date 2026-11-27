@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef } from "react";
 
 export function scheduleAutomaticOcr(recognize: () => void, dismiss: () => void) {
-  const timer = window.setTimeout(recognize, 150);
+  const timer = window.setTimeout(recognize, 60);
   return () => {
     window.clearTimeout(timer);
     dismiss();

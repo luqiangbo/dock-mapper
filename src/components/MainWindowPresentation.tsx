@@ -31,20 +31,11 @@ export default function MainWindowPresentation() {
     };
   }, [background]);
   useLayoutEffect(() => {
-    const root = document.documentElement;
-    const sync = () => {
-      if (windowResizeActivity.getSnapshot()) root.dataset.windowResizing = "true";
-      else delete root.dataset.windowResizing;
-    };
     const resize = () => windowResizeActivity.begin();
-    const off = windowResizeActivity.subscribe(sync);
     window.addEventListener("resize", resize, { passive: true });
-    sync();
     return () => {
       window.removeEventListener("resize", resize);
-      off();
       windowResizeActivity.finish();
-      delete root.dataset.windowResizing;
     };
   }, []);
   useEffect(() => {

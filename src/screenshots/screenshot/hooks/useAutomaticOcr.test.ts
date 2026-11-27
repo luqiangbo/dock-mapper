@@ -12,7 +12,9 @@ describe("框选后的后台识别", () => {
     const recognize = vi.fn();
     const cancel = scheduleAutomaticOcr(recognize, vi.fn());
     expect(recognize).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(150);
+    vi.advanceTimersByTime(59);
+    expect(recognize).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
     vi.advanceTimersByTime(1000);
     expect(recognize).toHaveBeenCalledTimes(1);
     cancel();
@@ -26,7 +28,7 @@ describe("框选后的后台识别", () => {
     scheduleAutomaticOcr(old, dismiss)();
     expect(dismiss).toHaveBeenCalledOnce();
     const cancel = scheduleAutomaticOcr(next, dismiss);
-    vi.advanceTimersByTime(150);
+    vi.advanceTimersByTime(60);
     expect(old).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalledOnce();
     cancel();

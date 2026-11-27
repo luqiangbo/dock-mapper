@@ -3,16 +3,30 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 import { PinOcrText } from "../hooks/usePinOcr";
 import { TRANSLATION_FONT, type TranslationTextLayout } from "./translationAppearance";
 
+function ocrBlockSuffix(
+  current: OcrResult["blocks"][number],
+  next: OcrResult["blocks"][number] | undefined,
+): string {
+  if (!next) return "";
+  const currentCenterY = current.y + current.height / 2;
+  const nextCenterY = next.y + next.height / 2;
+  const tolerance = Math.max(current.height, next.height) * 0.55;
+  if (Math.abs(nextCenterY - currentCenterY) <= tolerance && next.x >= current.x) {
+    return " ";
+  }
+  return "\n";
+}
+
 function TranslatedSelectionText({
   layout,
   width,
   height,
-  lineBreak,
+  suffix,
 }: {
   layout: TranslationTextLayout;
   width: number;
   height: number;
-  lineBreak: boolean;
+  suffix: string;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
   useLayoutEffect(() => {
@@ -39,7 +53,7 @@ function TranslatedSelectionText({
         width: `${(layout.width / width) * 100}%`,
         height: `${(layout.height / height) * 100}%`,
         fontFamily: TRANSLATION_FONT,
-        fontWeight: 400,
+        fontWeight: layout.fontWeight ?? 400,
         whiteSpace: "pre",
         color: "transparent",
         cursor: "text",
@@ -47,7 +61,7 @@ function TranslatedSelectionText({
       }}
     >
       {layout.lines.join("\n")}
-      {lineBreak ? "\n" : ""}
+      {suffix}
     </span>
   );
 }
@@ -92,7 +106,14 @@ export function OcrSelectionLayer({
               layout={layout}
               width={width}
               height={height}
-              lineBreak={index < layouts.length - 1}
+              suffix={
+                index < layouts.length - 1
+                  ? ocrBlockSuffix(
+                      result.blocks[index] ?? { ...layout, text: "", confidence: 1 },
+                      result.blocks[index + 1],
+                    )
+                  : ""
+              }
             />
           ))
         : result.blocks.map((block, index) => (
@@ -101,7 +122,7 @@ export function OcrSelectionLayer({
               block={block}
               width={width}
               height={height}
-              lineBreak={index < result.blocks.length - 1}
+              suffix={ocrBlockSuffix(block, result.blocks[index + 1])}
             />
           ))}
     </div>

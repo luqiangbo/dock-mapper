@@ -35,6 +35,7 @@
     "core:window:allow-set-theme",
     "core:window:allow-set-background-color",
     "core:webview:allow-set-webview-background-color",
+    "core:window:allow-is-maximized",
     "core:window:allow-toggle-maximize",
     "core:window:allow-start-dragging",
     "updater:allow-check",

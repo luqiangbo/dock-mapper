@@ -279,6 +279,87 @@ fn batched_results_match_source_lines_and_reject_partial_or_reordered_translatio
 }
 
 #[test]
+fn baidu_sanitizes_control_breaks_normalizes_spaces_and_merges_single_block_segments() {
+    assert_eq!(
+        super::blocks::sanitize_baidu_line("Hello\r\u{2028}world\u{200B}"),
+        "Hello  world"
+    );
+    assert!(!super::blocks::needs_translation("12345 • ---"));
+    assert!(super::blocks::needs_translation("设置 123"));
+    assert!(super::blocks::needs_translation("Hello"));
+    assert_eq!(
+        super::blocks::parse_batch(
+            Provider::Baidu,
+            &json!({"trans_result":[{"src":"Hello world","dst":"你好世界"},{"src":"Settings Panel","dst":"设置面板"}]}),
+            &["Hello   world".into(), "Settings\tPanel".into()]
+        )
+        .unwrap(),
+        vec!["你好世界", "设置面板"]
+    );
+    assert_eq!(
+        super::blocks::parse_batch(
+            Provider::Baidu,
+            &json!({"trans_result":[{"src":"First.","dst":"第一句。"},{"src":"Second.","dst":"第二句。"}]}),
+            &["First. Second.".into()]
+        )
+        .unwrap(),
+        vec!["第一句。第二句。"]
+    );
+    assert!(super::blocks::parse_batch(
+        Provider::Baidu,
+        &json!({"trans_result":[]}),
+        &["Hello".into()]
+    )
+    .is_err());
+}
+
+#[tokio::test]
+async fn baidu_alignment_mismatch_splits_batch_automatically_while_fatal_errors_stop_immediately() {
+    let batch = vec![
+        (0, "Alpha".into()),
+        (1, "Beta".into()),
+        (2, "Gamma".into()),
+    ];
+    let mut attempts = 0usize;
+    let resolved = super::blocks::resolve_baidu_batches(&batch, |texts| {
+        attempts += 1;
+        async move {
+            if texts.len() == 3 {
+                // Simulate Baidu merging/dropping a line in a multi-line batch.
+                return Ok(json!({"trans_result":[{"src":"Alpha","dst":"甲"}]}));
+            }
+            Ok(json!({
+                "trans_result": texts
+                    .into_iter()
+                    .map(|src| json!({"src": src, "dst": format!("译:{src}")}))
+                    .collect::<Vec<_>>()
+            }))
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(attempts, 3);
+    assert_eq!(
+        resolved,
+        vec![
+            (0, "译:Alpha".into()),
+            (1, "译:Beta".into()),
+            (2, "译:Gamma".into()),
+        ]
+    );
+
+    let mut fatal_attempts = 0usize;
+    let error = super::blocks::resolve_baidu_batches(&batch, |_| {
+        fatal_attempts += 1;
+        async { Ok(json!({"error_code":"54001"})) }
+    })
+    .await
+    .unwrap_err();
+    assert_eq!(fatal_attempts, 1);
+    assert!(error.contains("密钥"));
+}
+
+#[test]
 fn credential_frequency_and_quota_errors_explain_what_to_fix_without_echoing_keys() {
     for (code, expected) in [
         ("54001", "密钥"),

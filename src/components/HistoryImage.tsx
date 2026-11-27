@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from "react";
-import { App as AntApp, Button, Image, Spin } from "antd";
+import { memo, useEffect, useRef, useState } from "react";
+import { App as AntApp, Button, Spin } from "antd";
 import { errorMessage, historyApi } from "../api/commands";
 import { createRequestQueue } from "../utils/requestQueue";
 import styles from "./components.module.scss";
 const thumbnailRequests = createRequestQueue(4);
 
-export default function HistoryImage({ id, ids }: { id: string; ids?: string[] }) {
+function HistoryImage({ id, ids }: { id: string; ids?: string[] }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const thumbnailUrlRef = useRef("");
   const { notification } = AntApp.useApp();
@@ -91,11 +91,12 @@ export default function HistoryImage({ id, ids }: { id: string; ids?: string[] }
               .finally(() => setOpening(false));
           }}
         >
-          <Image
+          <img
             src={thumbnailUrl}
             alt="历史截图"
+            decoding="async"
+            loading="lazy"
             className={styles.historyImage}
-            preview={false}
             onError={() => {
               if (thumbnailUrlRef.current) URL.revokeObjectURL(thumbnailUrlRef.current);
               thumbnailUrlRef.current = "";
@@ -109,3 +110,5 @@ export default function HistoryImage({ id, ids }: { id: string; ids?: string[] }
     </div>
   );
 }
+
+export default memo(HistoryImage);

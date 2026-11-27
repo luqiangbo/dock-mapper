@@ -81,6 +81,9 @@ export function useScreenshotTranslation(
     controller.toggle();
     if (!ocr.result && !ocr.pending && !ocr.error) recognize();
   };
+  const hide = () => {
+    controller.hide();
+  };
   const running = state.phase === "waiting-ocr" || state.phase === "pending";
   const feedback =
     state.phase === "waiting-ocr"
@@ -98,6 +101,7 @@ export function useScreenshotTranslation(
               : "";
   return {
     toggle,
+    hide,
     running,
     visible,
     appearance: visible ? appearance : null,

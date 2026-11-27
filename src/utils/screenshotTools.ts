@@ -1,17 +1,17 @@
 export const SCREENSHOT_TOOL_IDS = [
-  "select",
   "rect",
   "arrow",
-  "pen",
   "text",
   "mosaic",
-  "ellipse",
-  "diamond",
+  "pen",
   "highlight",
   "translate",
-  "picker",
   "number",
+  "ellipse",
+  "diamond",
+  "picker",
   "eraser",
+  "select",
 ] as const;
 export type ScreenshotToolId = (typeof SCREENSHOT_TOOL_IDS)[number];
 export interface ScreenshotToolbarTool {
@@ -34,7 +34,7 @@ export const SCREENSHOT_TOOL_LABELS: Record<ScreenshotToolId, string> = {
   eraser: "橡皮擦",
 };
 export function defaultScreenshotTools(): ScreenshotToolbarTool[] {
-  return SCREENSHOT_TOOL_IDS.map((id, index) => ({ id, visible: index < 6 || id === "translate" }));
+  return SCREENSHOT_TOOL_IDS.map((id, index) => ({ id, visible: index < 7 }));
 }
 export function normalizeScreenshotTools(
   value?: readonly ScreenshotToolbarTool[],

@@ -112,6 +112,7 @@ import { useCommittedImageAction } from "../hooks/useCommittedImageAction";
 import { useQrDecoder } from "../hooks/useQrDecoder";
 import { useOverlayPreferences } from "../hooks/useOverlayPreferences";
 import { useOverlayToolbarLayout } from "../hooks/useOverlayToolbarLayout";
+import { resolveToolbarModeAction, resolveToolbarToolSelection } from "./toolbarToolState";
 import { useObjectHistoryController } from "../hooks/useObjectHistoryController";
 import {
   annotationBounds,
@@ -515,6 +516,14 @@ function ScreenshotOverlay(): React.JSX.Element {
     isNew: boolean;
   } | null>(null);
   const [arrowLabelDraft, setArrowLabelDraft] = useState("");
+  const selectedStyleTool = tool === "select" ? editorSelection.tool : tool;
+  const optionsTool =
+    selectedStyleTool === "mosaic" ||
+    selectedStyleTool === "number" ||
+    selectedStyleTool === "picker" ||
+    isExcalidrawStyleTool(selectedStyleTool)
+      ? selectedStyleTool
+      : null;
   const {
     primaryRef: primaryToolbarRef,
     secondaryRef: secondaryToolbarRef,
@@ -525,7 +534,7 @@ function ScreenshotOverlay(): React.JSX.Element {
     popupOpen: toolbarPopupOpen,
     reportPopup: reportToolbarPopup,
     closePopups: closeToolbarPopups,
-  } = useOverlayToolbarLayout(phase === "editing", tool === "select" ? editorSelection.tool : tool);
+  } = useOverlayToolbarLayout(phase === "editing", optionsTool);
 
   useEffect(
     () => () => {
@@ -547,7 +556,7 @@ function ScreenshotOverlay(): React.JSX.Element {
       void loadExcalidrawEditor().catch((error) => {
         setError(`标注工具预加载失败，可在选区内重试：${String(error)}`);
       });
-    }, 250);
+    }, 50);
     return () => window.clearTimeout(timer);
   }, []);
 
@@ -1924,9 +1933,18 @@ function ScreenshotOverlay(): React.JSX.Element {
       runOcr();
     },
     changeTool: (next) => {
-      if (isFrameAnnotationKind(next)) setShapeKind(next);
-      setTool(next as AnnotTool);
-      excalidrawEditorRef.current?.setTool(next as AnnotTool);
+      const transition = resolveToolbarToolSelection(tool, next as AnnotTool, false);
+      if (transition.dismissQr && qrResult !== null) {
+        qrRequest.current.cancel();
+        setQrResult(null);
+        setQrPending(false);
+        setQrError("");
+      }
+      if (transition.hideTranslation) translation.hide();
+      if (isFrameAnnotationKind(transition.nextTool)) setShapeKind(transition.nextTool);
+      setTool(transition.nextTool);
+      excalidrawEditorRef.current?.setTool(transition.nextTool);
+      if (transition.nextTool !== "picker") setPickerSample(null);
     },
     confirm: () => {
       void runCommittedImageAction(window.api.copyImage, "复制截图失败");
@@ -3201,22 +3219,15 @@ function ScreenshotOverlay(): React.JSX.Element {
       ? selectionToImageCrop(selection, fullImageRef.current)
       : null;
 
-  const selectedStyleTool = tool === "select" ? editorSelection.tool : tool;
-  const optionsTool =
-    selectedStyleTool === "mosaic" ||
-    selectedStyleTool === "number" ||
-    selectedStyleTool === "picker" ||
-    isExcalidrawStyleTool(selectedStyleTool)
-      ? selectedStyleTool
-      : null;
   const secondarySize =
     optionsTool && secondaryToolbarSize.width > 0 ? secondaryToolbarSize : undefined;
   const toolbarLayout =
     selection && phase === "editing" && primaryToolbarSize.width > 0
       ? calculateToolbarLayout(selection, viewportSize, primaryToolbarSize, secondarySize)
       : undefined;
-  const toolbarMeasured = Boolean(
-    toolbarLayout && (!optionsTool || (secondarySize && toolbarLayout.secondary)),
+  const primaryToolbarMeasured = Boolean(toolbarLayout);
+  const secondaryToolbarMeasured = Boolean(
+    optionsTool && secondarySize && toolbarLayout?.secondary,
   );
 
   // Tools usable as soon as crop is on canvas — only lock while an action is running
@@ -4924,7 +4935,28 @@ function ScreenshotOverlay(): React.JSX.Element {
             busy={busy}
             confirmDisabled={actionsLocked}
             qrDisabled={!selection || !shotReady || qrPending}
-            onTranslate={translation.toggle}
+            qrActive={qrResult !== null}
+            onTranslate={() => {
+              const action = resolveToolbarModeAction(
+                "translate",
+                translation.visible || translation.running,
+              );
+              if (action.resetDrawingTool) {
+                if (textEditor) commitText(textDraft);
+                if (arrowLabelEditor) commitArrowLabel();
+                closeToolbarPopups();
+                setTool("select");
+                excalidrawEditorRef.current?.setTool("select");
+                setPickerSample(null);
+              }
+              if (action.dismissQr && qrResult !== null) {
+                qrRequest.current.cancel();
+                setQrResult(null);
+                setQrPending(false);
+                setQrError("");
+              }
+              translation.toggle();
+            }}
             translationVisible={translation.visible}
             translationRunning={translation.running}
 
@@ -4932,9 +4964,9 @@ function ScreenshotOverlay(): React.JSX.Element {
             style={{
               left: toolbarLayout?.primary.left ?? 8,
               top: toolbarLayout?.primary.top ?? 8,
-              visibility: toolbarMeasured ? "visible" : "hidden",
+              visibility: primaryToolbarMeasured ? "visible" : "hidden",
             }}
-            onToolChange={(next) => {
+            onToolChange={(clicked) => {
               if (textEditor) commitText(textDraft);
               if (arrowLabelEditor) commitArrowLabel();
               if (objectMutationRef.current.active) {
@@ -4942,6 +4974,15 @@ function ScreenshotOverlay(): React.JSX.Element {
                 objectStyleChangedRef.current = false;
               }
               closeToolbarPopups();
+              const transition = resolveToolbarToolSelection(tool, clicked);
+              const next = transition.nextTool;
+              if (transition.dismissQr && qrResult !== null) {
+                qrRequest.current.cancel();
+                setQrResult(null);
+                setQrPending(false);
+                setQrError("");
+              }
+              if (transition.hideTranslation) translation.hide();
               setTool(next);
               excalidrawEditorRef.current?.setTool(next);
               if (isFrameAnnotationKind(next)) setShapeKind(next);
@@ -4975,6 +5016,16 @@ function ScreenshotOverlay(): React.JSX.Element {
                 setQrError("");
                 return;
               }
+              const action = resolveToolbarModeAction("qr", false);
+              if (action.resetDrawingTool) {
+                if (textEditor) commitText(textDraft);
+                if (arrowLabelEditor) commitArrowLabel();
+                closeToolbarPopups();
+                setTool("select");
+                excalidrawEditorRef.current?.setTool("select");
+                setPickerSample(null);
+              }
+              if (action.hideTranslation) translation.hide();
               decodeQr();
             }}
             onCancel={cancelOverlay}
@@ -5025,7 +5076,7 @@ function ScreenshotOverlay(): React.JSX.Element {
               style={{
                 left: toolbarLayout?.secondary?.left ?? 8,
                 top: toolbarLayout?.secondary?.top ?? 8,
-                visibility: toolbarMeasured ? "visible" : "hidden",
+                visibility: secondaryToolbarMeasured ? "visible" : "hidden",
               }}
             />
           )}

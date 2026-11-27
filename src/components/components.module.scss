@@ -859,11 +859,18 @@ $compact-radius: 10px;
 
 .historyMasonry {
   width: 100%;
+  column-count: var(--history-columns, 3);
+  column-gap: 12px;
 }
 
 .historyCard {
   position: relative;
+  display: inline-block;
+  width: 100%;
   min-width: 0;
+  break-inside: avoid;
+  margin-bottom: 12px;
+  contain: layout style paint;
   overflow: hidden;
   border: 1px solid var(--glass-border);
   border-radius: 8px;
@@ -951,6 +958,7 @@ $compact-radius: 10px;
 }
 
 .historyImage {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;

@@ -1,5 +1,7 @@
 import {
   createContext,
+  memo,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -14,19 +16,24 @@ export function usePageActive() {
   return useContext(PageActivity);
 }
 
-export function PageScope({ active, children }: { active: boolean; children: ReactNode }) {
+export const PageScope = memo(function PageScope({
+  active,
+  children,
+}: {
+  active: boolean;
+  children: ReactNode;
+}) {
   const parentActive = usePageActive();
   const host = useRef<HTMLDivElement>(null);
+  const getPopupContainer = useCallback(() => host.current ?? document.body, []);
   return (
     <PageActivity.Provider value={parentActive && active}>
       <div ref={host} style={{ position: "relative", minWidth: 0 }}>
-        <ConfigProvider getPopupContainer={() => host.current ?? document.body}>
-          {children}
-        </ConfigProvider>
+        <ConfigProvider getPopupContainer={getPopupContainer}>{children}</ConfigProvider>
       </div>
     </PageActivity.Provider>
   );
-}
+});
 
 export function usePageReadGuard() {
   const active = usePageActive();

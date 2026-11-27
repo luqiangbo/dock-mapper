@@ -47,6 +47,15 @@ export class TranslationTask {
     }
     this.publish({ ...EMPTY_TRANSLATION, phase: "waiting-ocr" });
   }
+  hide() {
+    if (this.state.phase === "ready") {
+      if (this.state.visible) this.publish({ ...this.state, visible: false });
+      return;
+    }
+    if (this.state.phase === "waiting-ocr" || this.state.phase === "pending") {
+      this.reset();
+    }
+  }
   start(
     source: OcrResult,
     settings: () => Promise<TranslationSettings>,

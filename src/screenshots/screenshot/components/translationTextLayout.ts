@@ -4,6 +4,7 @@ export interface TranslationTextLayout {
   width: number;
   height: number;
   fontSize: number;
+  fontWeight?: number;
   lineHeight: number;
   /** Alphabetic baseline measured from the first line box's top. */
   baseline: number;
@@ -11,6 +12,11 @@ export interface TranslationTextLayout {
   selectionOffsetY: number;
   lines: string[];
   color: string;
+}
+
+export interface TranslationLayoutOptions {
+  inkRect?: { x: number; y: number; width: number; height: number } | null;
+  fontWeight?: number;
 }
 
 type Measure = (text: string, size: number) => number;
@@ -135,24 +141,71 @@ export function fitTranslationText(
   return { fontSize: low, lineHeight: low * 1.25, lines };
 }
 
+const cjkScript = /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}/u;
+const latinAscender = /[A-Z0-9bdfhklt]/;
+const latinDescender = /[gjpqy]/;
+
+function estimateFontSizeFromInk(
+  original: string,
+  inkHeight: number,
+  rectHeight: number,
+): number {
+  let factor = 0.82;
+  if (cjkScript.test(original)) {
+    factor = 0.82;
+  } else {
+    const hasAscender = latinAscender.test(original);
+    const hasDescender = latinDescender.test(original);
+    if (hasAscender && hasDescender) factor = 0.92;
+    else if (hasAscender) factor = 0.72;
+    else if (hasDescender) factor = 0.72;
+    else factor = 0.56;
+  }
+  const estimated = inkHeight / factor;
+  const minSize = Math.min(rectHeight * 0.65, inkHeight);
+  const maxSize = rectHeight * 0.96;
+  return Math.max(minSize, Math.min(maxSize, estimated));
+}
+
 export function layoutTranslationText(
   original: string,
   translated: string,
   rect: { x: number; y: number; width: number; height: number },
   measure: Measure,
   metrics?: Metrics,
+  options?: TranslationLayoutOptions,
 ): Omit<TranslationTextLayout, "color"> {
+  const ink = options?.inkRect ?? null;
+  const fontWeight = options?.fontWeight ?? 400;
   const source = fitTranslationText(original, rect.width, rect.height, measure);
-  const padX = Math.min(source.fontSize * 0.12, rect.width * 0.05);
-  const padY = Math.min(source.fontSize * 0.08, rect.height * 0.05);
-  const width = rect.width - padX * 2;
-  const fit = fitTranslationText(
-    translated,
-    width,
-    rect.height - padY * 2,
-    measure,
-    source.fontSize * 0.9,
+  const padX = ink ? 0 : Math.min(source.fontSize * 0.12, rect.width * 0.05);
+  const padY = ink ? 0 : Math.min(source.fontSize * 0.08, rect.height * 0.05);
+  const horizontalLeft = ink ? Math.max(rect.x, ink.x) : rect.x + padX;
+  const availableWidth = Math.max(
+    1,
+    ink ? rect.x + rect.width - horizontalLeft : rect.width - padX * 2,
   );
+  const targetMaxSize = ink
+    ? estimateFontSizeFromInk(original, ink.height, rect.height)
+    : source.fontSize;
+  const singleLineBudget = Math.max(rect.height - padY * 2, targetMaxSize * 1.25);
+  const singleTry = fitTranslationText(
+    translated,
+    availableWidth,
+    singleLineBudget,
+    measure,
+    targetMaxSize,
+  );
+  const fit =
+    singleTry.lines.length === 1 && singleTry.fontSize <= rect.height
+      ? singleTry
+      : fitTranslationText(
+          translated,
+          availableWidth,
+          Math.max(1, rect.height - padY * 2),
+          measure,
+          targetMaxSize,
+        );
   const height = fit.lines.length * fit.lineHeight;
   const values = fit.lines.filter(Boolean).map((line) => metrics?.(line, fit.fontSize));
   const ascent = Math.max(fit.fontSize * 0.8, ...values.map((value) => value?.ascent ?? 0));
@@ -162,10 +215,43 @@ export function layoutTranslationText(
   const fontDescent = font?.fontDescent ?? fit.fontSize * 0.2;
   const naturalBaseline = (fit.lineHeight - fontAscent - fontDescent) / 2 + fontAscent;
   const baseline = Math.max(ascent, Math.min(fit.lineHeight - descent, naturalBaseline));
+
+  let x = horizontalLeft;
+  let width = availableWidth;
+  if (ink && fit.lines.length === 1) {
+    const leftMargin = ink.x - rect.x;
+    const rightMargin = rect.x + rect.width - (ink.x + ink.width);
+    const centeredInBox =
+      leftMargin > rect.width * 0.12 &&
+      rightMargin > rect.width * 0.12 &&
+      Math.abs(leftMargin - rightMargin) <= Math.max(leftMargin, rightMargin) * 0.25;
+    if (centeredInBox) {
+      const lineWidth = measure(fit.lines[0].trimEnd(), fit.fontSize);
+      const inkCenterX = ink.x + ink.width / 2;
+      const centeredX = inkCenterX - lineWidth / 2;
+      x = Math.max(rect.x, Math.min(rect.x + rect.width - lineWidth, centeredX));
+      width = Math.max(1, rect.x + rect.width - x);
+    }
+  }
+
+  let y: number;
+  if (fit.lines.length === 1) {
+    if (ink) {
+      const inkCenterY = ink.y + ink.height / 2;
+      const glyphCenterOffset = baseline - (ascent - descent) / 2;
+      y = inkCenterY - glyphCenterOffset;
+    } else {
+      y = rect.y + (rect.height - height) / 2;
+    }
+  } else {
+    y = rect.y + padY;
+  }
+
   return {
     ...fit,
-    x: rect.x + padX,
-    y: rect.y + (fit.lines.length === 1 ? (rect.height - height) / 2 : padY),
+    fontWeight,
+    x,
+    y,
     width,
     height,
     baseline,

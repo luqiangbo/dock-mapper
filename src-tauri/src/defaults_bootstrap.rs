@@ -63,6 +63,10 @@ impl BootstrapState {
         self.tracker.finish(0, result.clone(), false);
         self.setup.finish(result);
     }
+
+    pub(crate) async fn wait_for_setup(&self, timeout: std::time::Duration) -> Result<(), String> {
+        self.setup.wait(timeout).await
+    }
 }
 
 #[cfg(test)]

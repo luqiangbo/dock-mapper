@@ -113,6 +113,7 @@ $compact-radius: 6px;
 }
 
 .workspacePanel {
+  flex: 1 1 0% !important;
   min-width: 0;
   overflow: hidden;
   padding-left: 6px;
@@ -261,6 +262,12 @@ $compact-radius: 6px;
 
   .nav {
     padding-inline: 5px !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .githubAction {
+    display: none;
   }
 }
 

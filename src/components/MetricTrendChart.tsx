@@ -67,54 +67,70 @@ function MetricTrendChart({
     chartRef.current = chart;
     let previousWidth = container.clientWidth;
     let previousHeight = container.clientHeight;
+    let appliedConfigKey = "";
     const queue = createSettledRenderQueue(windowResizeActivity, () => {
       const width = container.clientWidth;
       const height = container.clientHeight;
       if (!width || !height) return;
       const { title, samples, series, percent, resolved } = latest.current;
-      const textColor = resolved === "dark" ? "#b6bdc7" : "#59636f";
-      const lineColor = resolved === "dark" ? "#414750" : "#dce1e7";
-      const option: ChartOption = {
-        animation: false,
-        aria: { enabled: true, description: `${title}动态折线图` },
-        color: series.map((item) => item.color),
-        grid: { left: 12, right: 12, top: 34, bottom: 8, containLabel: true },
-        legend: { top: 0, right: 0, textStyle: { color: textColor, fontSize: 11 } },
-        tooltip: {
-          trigger: "axis",
-          valueFormatter: (value) =>
-            percent ? `${Number(value).toFixed(1)}%` : formatSpeed(Number(value)),
-        },
-        xAxis: {
-          type: "time",
-          axisLabel: { color: textColor, hideOverlap: true },
-          axisLine: { lineStyle: { color: lineColor } },
-          splitLine: { show: false },
-        },
-        yAxis: {
-          type: "value",
-          min: 0,
-          max: percent ? 100 : undefined,
-          axisLabel: {
-            color: textColor,
-            formatter: (value: number) => (percent ? `${value}%` : formatSpeed(value)),
+      const configKey = `${resolved}|${title}|${percent}|${series
+        .map((item) => `${item.key}:${item.name}:${item.color}`)
+        .join(",")}`;
+      if (configKey !== appliedConfigKey) {
+        appliedConfigKey = configKey;
+        const textColor = resolved === "dark" ? "#b6bdc7" : "#59636f";
+        const lineColor = resolved === "dark" ? "#414750" : "#dce1e7";
+        const option: ChartOption = {
+          animation: false,
+          aria: { enabled: true, description: `${title}动态折线图` },
+          color: series.map((item) => item.color),
+          grid: { left: 12, right: 12, top: 34, bottom: 8, containLabel: true },
+          legend: { top: 0, right: 0, textStyle: { color: textColor, fontSize: 11 } },
+          tooltip: {
+            trigger: "axis",
+            valueFormatter: (value) =>
+              percent ? `${Number(value).toFixed(1)}%` : formatSpeed(Number(value)),
           },
-          splitLine: { lineStyle: { color: lineColor } },
-        },
-        series: series.map((item) => ({
-          name: item.name,
-          data: samples.map((sample) => [sample.timestamp, sample[item.key]]),
-          type: "line",
-          showSymbol: false,
-          connectNulls: false,
-          smooth: 0.22,
-          lineStyle: { width: 2 },
-          areaStyle: { opacity: 0.06 },
-        })),
-      };
-
-      // Let resize consume the pending option so final geometry and data paint together.
-      chart.setOption(option, { lazyUpdate: true });
+          xAxis: {
+            type: "time",
+            axisLabel: { color: textColor, hideOverlap: true },
+            axisLine: { lineStyle: { color: lineColor } },
+            splitLine: { show: false },
+          },
+          yAxis: {
+            type: "value",
+            min: 0,
+            max: percent ? 100 : undefined,
+            axisLabel: {
+              color: textColor,
+              formatter: (value: number) => (percent ? `${value}%` : formatSpeed(value)),
+            },
+            splitLine: { lineStyle: { color: lineColor } },
+          },
+          series: series.map((item) => ({
+            name: item.name,
+            data: samples.map((sample) => [sample.timestamp, sample[item.key]]),
+            type: "line",
+            showSymbol: false,
+            connectNulls: false,
+            smooth: 0.22,
+            lineStyle: { width: 2 },
+            areaStyle: { opacity: 0.06 },
+          })),
+        };
+        // Let resize consume the pending option so final geometry and data paint together.
+        chart.setOption(option, { lazyUpdate: true });
+      } else {
+        chart.setOption(
+          {
+            series: series.map((item) => ({
+              name: item.name,
+              data: samples.map((sample) => [sample.timestamp, sample[item.key]]),
+            })),
+          },
+          { lazyUpdate: true },
+        );
+      }
       if (width !== previousWidth || height !== previousHeight) {
         previousWidth = width;
         previousHeight = height;
@@ -125,7 +141,6 @@ function MetricTrendChart({
     const observer = new ResizeObserver(() => {
       if (container.clientWidth === previousWidth && container.clientHeight === previousHeight)
         return;
-      windowResizeActivity.begin();
       queue.request();
     });
     observer.observe(container);

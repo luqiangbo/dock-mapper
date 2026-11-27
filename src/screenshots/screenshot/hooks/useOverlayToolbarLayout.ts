@@ -29,7 +29,6 @@ export function useOverlayToolbarLayout(active: boolean, tool: string | null) {
   const closePopups = useCallback(() => {
     openPopups.current.clear();
     setPopupOpen(false);
-    setSecondarySize(EMPTY_SIZE);
   }, []);
 
   useEffect(() => {

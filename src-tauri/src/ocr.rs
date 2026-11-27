@@ -17,6 +17,13 @@ use tokio::sync::oneshot;
 
 const MAX_IMAGE_EDGE: u32 = 2_048;
 const MIN_RESIZED_EDGE: u32 = 96;
+const SMALL_OCR_LONG_EDGE: u32 = 480;
+const SMALL_OCR_SHORT_EDGE: u32 = 140;
+const SMALL_OCR_TARGET_SHORT: f64 = 180.0;
+const SMALL_OCR_MAX_UPSAMPLED_EDGE: f64 = 1_600.0;
+const OCR_BORDER_PAD: u32 = 12;
+const MIN_OCR_CONFIDENCE: f32 = 0.45;
+const MIN_SINGLE_SYMBOL_CONFIDENCE: f32 = 0.72;
 const ENGINE_ID: &str = "onnx";
 const OCR_QUEUE_CAPACITY: usize = 4;
 
@@ -39,6 +46,7 @@ pub struct OcrTextBlock {
     pub height: f32,
 }
 
+#[cfg(test)]
 fn scaled_text_block(
     text: String,
     confidence: f32,
@@ -225,6 +233,117 @@ fn load_engine(root: &Path) -> Result<OcrEngine, String> {
         .map_err(|error| format!("初始化 ONNX OCR 失败：{error}"))
 }
 
+fn pad_edges_for_onnx(image: &image::DynamicImage, pad: u32) -> image::DynamicImage {
+    if pad == 0 || image.width() == 0 || image.height() == 0 {
+        return image.clone();
+    }
+    let src = image.to_rgb8();
+    let (w, h) = src.dimensions();
+    let mut dst = image::RgbImage::new(w + pad * 2, h + pad * 2);
+    for dy in 0..dst.height() {
+        let sy = dy.saturating_sub(pad).min(h - 1);
+        for dx in 0..dst.width() {
+            let sx = dx.saturating_sub(pad).min(w - 1);
+            dst.put_pixel(dx, dy, *src.get_pixel(sx, sy));
+        }
+    }
+    image::DynamicImage::ImageRgb8(dst)
+}
+
+fn prepare_for_onnx(image: image::DynamicImage) -> (image::DynamicImage, (f32, f32), (f32, f32)) {
+    let original_w = image.width().max(1);
+    let original_h = image.height().max(1);
+    let mut working = resize_for_onnx(image);
+    let w = working.width().max(1);
+    let h = working.height().max(1);
+    let shortest = w.min(h);
+    let longest = w.max(h);
+    if longest < SMALL_OCR_LONG_EDGE || (shortest < SMALL_OCR_SHORT_EDGE && longest <= 1_024) {
+        let desired = (SMALL_OCR_TARGET_SHORT / shortest as f64).clamp(1.25, 2.0);
+        let max_scale = (SMALL_OCR_MAX_UPSAMPLED_EDGE / longest as f64).max(1.0);
+        let scale = desired.min(max_scale);
+        if scale > 1.05 {
+            working = working.resize(
+                (w as f64 * scale).round().max(1.0) as u32,
+                (h as f64 * scale).round().max(1.0) as u32,
+                image::imageops::FilterType::Triangle,
+            );
+        }
+    }
+    let scale_x = original_w as f32 / working.width().max(1) as f32;
+    let scale_y = original_h as f32 / working.height().max(1) as f32;
+    let pad = OCR_BORDER_PAD;
+    let padded = pad_edges_for_onnx(&working, pad);
+    (padded, (scale_x, scale_y), (pad as f32, pad as f32))
+}
+
+fn unmap_text_block(
+    text: String,
+    confidence: f32,
+    bounds: (f32, f32, f32, f32),
+    pad: (f32, f32),
+    scale: (f32, f32),
+    original_size: (f32, f32),
+) -> Option<OcrTextBlock> {
+    let left = ((bounds.0 - pad.0) * scale.0).clamp(0.0, original_size.0);
+    let top = ((bounds.1 - pad.1) * scale.1).clamp(0.0, original_size.1);
+    let right = ((bounds.0 + bounds.2 - pad.0) * scale.0).clamp(left, original_size.0);
+    let bottom = ((bounds.1 + bounds.3 - pad.1) * scale.1).clamp(top, original_size.1);
+    let width = right - left;
+    let height = bottom - top;
+    (width > 0.5 && height > 0.5).then_some(OcrTextBlock {
+        text,
+        confidence,
+        x: left,
+        y: top,
+        width,
+        height,
+    })
+}
+
+fn keep_ocr_block(text: &str, confidence: f32) -> bool {
+    if text.is_empty() || confidence < MIN_OCR_CONFIDENCE {
+        return false;
+    }
+    let mut chars = text.chars();
+    if let (Some(only), None) = (chars.next(), chars.next()) {
+        if !only.is_alphanumeric() && confidence < MIN_SINGLE_SYMBOL_CONFIDENCE {
+            return false;
+        }
+    }
+    true
+}
+
+fn order_ocr_blocks(mut blocks: Vec<OcrTextBlock>) -> Vec<OcrTextBlock> {
+    blocks.sort_by(|left, right| {
+        let left_center = left.y + left.height / 2.0;
+        let right_center = right.y + right.height / 2.0;
+        left_center
+            .total_cmp(&right_center)
+            .then_with(|| left.x.total_cmp(&right.x))
+    });
+    let mut lines: Vec<Vec<OcrTextBlock>> = Vec::new();
+    for block in blocks {
+        let center_y = block.y + block.height / 2.0;
+        if let Some(line) = lines.last_mut() {
+            let reference = &line[0];
+            let reference_center = reference.y + reference.height / 2.0;
+            let tolerance = reference.height.max(block.height) * 0.55;
+            if (center_y - reference_center).abs() <= tolerance {
+                line.push(block);
+                continue;
+            }
+        }
+        lines.push(vec![block]);
+    }
+    let mut ordered = Vec::new();
+    for mut line in lines {
+        line.sort_by(|left, right| left.x.total_cmp(&right.x));
+        ordered.extend(line);
+    }
+    ordered
+}
+
 fn recognize_with_engine(engine: &mut OcrEngine, png: Vec<u8>) -> Result<OcrTextResult, String> {
     let png = validate_png(png)?;
     let started = Instant::now();
@@ -235,7 +354,7 @@ fn recognize_with_engine(engine: &mut OcrEngine, png: Vec<u8>) -> Result<OcrText
     let original_height = image.height();
     let decode_ms = decode_started.elapsed().as_millis();
     let resize_started = Instant::now();
-    let image = resize_for_onnx(image);
+    let (image, scale, pad) = prepare_for_onnx(image);
     let resize_ms = resize_started.elapsed().as_millis();
     let inference_started = Instant::now();
     let results = engine
@@ -243,20 +362,25 @@ fn recognize_with_engine(engine: &mut OcrEngine, png: Vec<u8>) -> Result<OcrText
         .map_err(|error| format!("ONNX OCR 识别失败：{error}"))?;
     let inference_ms = inference_started.elapsed().as_millis();
     let postprocess_started = Instant::now();
-    let scale_x = original_width as f32 / image.width().max(1) as f32;
-    let scale_y = original_height as f32 / image.height().max(1) as f32;
-    let blocks = results
-        .into_iter()
-        .filter_map(|block| {
-            let text = normalized_block_text(&block.text);
-            (!text.is_empty()).then_some(scaled_text_block(
-                text,
-                block.confidence,
-                (block.x, block.y, block.width, block.height),
-                (scale_x, scale_y),
-            ))
-        })
-        .collect::<Vec<_>>();
+    let blocks = order_ocr_blocks(
+        results
+            .into_iter()
+            .filter_map(|block| {
+                let text = normalized_block_text(&block.text);
+                if !keep_ocr_block(&text, block.confidence) {
+                    return None;
+                }
+                unmap_text_block(
+                    text,
+                    block.confidence,
+                    (block.x, block.y, block.width, block.height),
+                    pad,
+                    scale,
+                    (original_width as f32, original_height as f32),
+                )
+            })
+            .collect::<Vec<_>>(),
+    );
     let text = normalize_positioned_blocks(
         blocks
             .iter()
@@ -584,5 +708,77 @@ mod tests {
             (20.0, 30.0, 60.0, 12.0)
         );
         assert_eq!(block.text, "DockMapper");
+    }
+
+    #[test]
+    fn upsamples_small_selections_with_edge_padding_and_unmaps_coordinates() {
+        let mut raw = image::RgbImage::new(200, 40);
+        for pixel in raw.pixels_mut() {
+            *pixel = image::Rgb([32, 35, 40]);
+        }
+        let (prepared, scale, pad) = prepare_for_onnx(image::DynamicImage::ImageRgb8(raw));
+        assert!(prepared.width() > 200 + OCR_BORDER_PAD * 2);
+        assert!(prepared.height() > 40 + OCR_BORDER_PAD * 2);
+        assert_eq!(prepared.to_rgb8().get_pixel(0, 0), &image::Rgb([32, 35, 40]));
+        let mapped = unmap_text_block(
+            "菜单".into(),
+            0.95,
+            (
+                pad.0 + 10.0 / scale.0,
+                pad.1 + 5.0 / scale.1,
+                40.0 / scale.0,
+                16.0 / scale.1,
+            ),
+            pad,
+            scale,
+            (200.0, 40.0),
+        )
+        .unwrap();
+        assert!((mapped.x - 10.0).abs() < 0.01);
+        assert!((mapped.y - 5.0).abs() < 0.01);
+        assert!((mapped.width - 40.0).abs() < 0.01);
+        assert!((mapped.height - 16.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn filters_low_confidence_noise_and_orders_blocks_in_reading_order() {
+        assert!(!keep_ocr_block("噪", 0.30));
+        assert!(!keep_ocr_block("•", 0.60));
+        assert!(keep_ocr_block("•", 0.85));
+        assert!(keep_ocr_block("设置", 0.70));
+
+        let ordered = order_ocr_blocks(vec![
+            OcrTextBlock {
+                text: "第二行".into(),
+                confidence: 0.9,
+                x: 0.0,
+                y: 40.0,
+                width: 40.0,
+                height: 14.0,
+            },
+            OcrTextBlock {
+                text: "右上".into(),
+                confidence: 0.9,
+                x: 80.0,
+                y: 2.0,
+                width: 30.0,
+                height: 14.0,
+            },
+            OcrTextBlock {
+                text: "左上".into(),
+                confidence: 0.9,
+                x: 10.0,
+                y: 0.0,
+                width: 30.0,
+                height: 14.0,
+            },
+        ]);
+        assert_eq!(
+            ordered
+                .into_iter()
+                .map(|block| block.text)
+                .collect::<Vec<_>>(),
+            vec!["左上", "右上", "第二行"]
+        );
     }
 }

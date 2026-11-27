@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   fitTranslationText,
   sampleTranslationBackground,
+  sampleTranslationStyle,
   translationExportBackground,
   buildTranslationAppearance,
 } from "./translationAppearance";
@@ -36,6 +37,34 @@ describe("原位置译文排版", () => {
       expect(sampled.color).toBe(color);
       expect(sampled.background).toBe(`rgb(${value}, ${value}, ${value})`);
     }
+  });
+  it("从框内前景像素还原真实文字颜色与墨迹边界，并区分字重", () => {
+    const width = 40;
+    const height = 24;
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let i = 0; i < width * height; i++) {
+      data[i * 4] = 250;
+      data[i * 4 + 1] = 250;
+      data[i * 4 + 2] = 250;
+      data[i * 4 + 3] = 255;
+    }
+    // Paint blue link strokes inside [8..28, 6..18]
+    for (let y = 6; y <= 18; y++) {
+      for (const x of [8, 9, 18, 19, 27, 28]) {
+        const offset = (y * width + x) * 4;
+        data[offset] = 25;
+        data[offset + 1] = 113;
+        data[offset + 2] = 194;
+      }
+    }
+    const sampled = sampleTranslationStyle(
+      { width, height, data },
+      { x: 4, y: 2, width: 32, height: 20 },
+    );
+    expect(sampled.background).toBe("rgb(250, 250, 250)");
+    expect(sampled.color).toBe("rgb(25, 113, 194)");
+    expect(sampled.fontWeight).toBe(400);
+    expect(sampled.inkRect).toMatchObject({ x: 8, y: 6, width: 21, height: 13 });
   });
   it("导出固定当前显示背景，之后切回原文不改变已取得的快照", () => {
     const original = { id: "original" } as unknown as HTMLCanvasElement;

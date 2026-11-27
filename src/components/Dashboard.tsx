@@ -1,6 +1,6 @@
 import { loadView } from "../utils/loadView";
-import { lazy, Suspense, useMemo, useState, type ReactNode } from "react";
-import { Card, Col, Grid, Row, Segmented, Spin, Typography } from "antd";
+import { lazy, memo, Suspense, useMemo, useState, type ReactNode } from "react";
+import { Card, Col, Row, Segmented, Spin, Typography } from "antd";
 import { ArrowDownOutlined, ArrowUpOutlined, DashboardOutlined } from "@ant-design/icons";
 import RuntimeLogPanel from "./RuntimeLogPanel";
 import type { SysStatus } from "../types";
@@ -11,6 +11,7 @@ import type { TelemetryFreshness } from "../utils/telemetryFreshness";
 import styles from "./components.module.scss";
 import { useTheme } from "../ThemeContext";
 import { accentColors, themePalettes } from "../themePalette";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 
 const MetricTrendChart = lazy(() => loadView(() => import("./MetricTrendChart")));
 const { Text, Title } = Typography;
@@ -36,7 +37,7 @@ function MetricCard({ icon, label, value }: { icon: ReactNode; label: string; va
   );
 }
 
-export default function Dashboard({ status, freshness, samples, archive }: Props) {
+function Dashboard({ status, freshness, samples, archive }: Props) {
   const { accentColor, resolved } = useTheme();
   const chartColor = accentColors(accentColor, resolved).foreground;
   const secondaryColor = themePalettes[resolved]["chart-secondary"];
@@ -55,8 +56,8 @@ export default function Dashboard({ status, freshness, samples, archive }: Props
     ],
     [chartColor, secondaryColor],
   );
-  const screens = Grid.useBreakpoint();
-  const gutter: [number, number] = [screens.lg ? 16 : 12, 12];
+  const isLg = useMediaQuery("(min-width: 992px)");
+  const gutter: [number, number] = useMemo(() => [isLg ? 16 : 12, 12], [isLg]);
   const [trendRange, setTrendRange] = useState<TrendRange>("live");
   const archiveSamples = useMemo(
     () => (trendRange === "live" ? [] : selectTelemetryArchive(archive, trendRange, Date.now())),
@@ -188,3 +189,5 @@ export default function Dashboard({ status, freshness, samples, archive }: Props
     </div>
   );
 }
+
+export default memo(Dashboard);

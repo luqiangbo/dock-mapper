@@ -31,25 +31,101 @@ pub(super) fn baidu_error(code: &str) -> String {
     .into()
 }
 
-pub(super) fn parse_batch(
+#[derive(Debug)]
+enum BatchError {
+    Alignment(String),
+    Fatal(String),
+}
+
+impl BatchError {
+    fn into_message(self) -> String {
+        match self {
+            Self::Alignment(message) | Self::Fatal(message) => message,
+        }
+    }
+}
+
+pub(super) fn needs_translation(text: &str) -> bool {
+    text.chars().any(char::is_alphabetic)
+}
+
+pub(super) fn sanitize_baidu_line(text: &str) -> String {
+    text.chars()
+        .filter_map(|c| match c {
+            '\r' | '\n' | '\u{000B}' | '\u{000C}' | '\u{0085}' | '\u{2028}' | '\u{2029}' => {
+                Some(' ')
+            }
+            '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}' => None,
+            c if c.is_control() => None,
+            c => Some(c),
+        })
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+fn normalize_for_match(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn join_translated_segments(segments: &[&str]) -> String {
+    let mut joined = String::new();
+    for segment in segments {
+        let trimmed = segment.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if !joined.is_empty() {
+            let prev = joined.chars().last();
+            let next = trimmed.chars().next();
+            let needs_space = prev.is_some_and(|c| c.is_ascii_alphanumeric())
+                && next.is_some_and(|c| c.is_ascii_alphanumeric());
+            if needs_space {
+                joined.push(' ');
+            }
+        }
+        joined.push_str(trimmed);
+    }
+    joined
+}
+
+fn parse_batch_detailed(
     provider: Provider,
     value: &Value,
     texts: &[String],
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<String>, BatchError> {
     if provider == Provider::Baidu {
         if let Some(code) = value.get("error_code") {
             let code = code
                 .as_str()
                 .map(str::to_owned)
                 .unwrap_or_else(|| code.as_u64().unwrap_or_default().to_string());
-            return Err(baidu_error(&code));
+            return Err(BatchError::Fatal(baidu_error(&code)));
         }
         let values = value
             .get("trans_result")
             .and_then(Value::as_array)
-            .ok_or("百度未返回译文，请检查服务开通状态")?;
+            .ok_or_else(|| BatchError::Fatal("百度未返回译文，请检查服务开通状态".into()))?;
+        if texts.len() == 1 {
+            if values.is_empty() {
+                return Err(BatchError::Alignment(
+                    "百度返回的文字段落数量不匹配，请重试".into(),
+                ));
+            }
+            let segments = values
+                .iter()
+                .filter_map(|item| item.get("dst").and_then(Value::as_str))
+                .collect::<Vec<_>>();
+            let merged = join_translated_segments(&segments);
+            if merged.trim().is_empty() {
+                return Err(BatchError::Fatal("百度返回了空译文".into()));
+            }
+            return Ok(vec![merged]);
+        }
         if values.len() != texts.len() {
-            return Err("百度返回的文字段落数量不匹配，请重试".into());
+            return Err(BatchError::Alignment(
+                "百度返回的文字段落数量不匹配，请重试".into(),
+            ));
         }
         return values
             .iter()
@@ -58,25 +134,29 @@ pub(super) fn parse_batch(
                 if value
                     .get("src")
                     .and_then(Value::as_str)
-                    .is_none_or(|text| text.trim() != source.trim())
+                    .is_none_or(|text| normalize_for_match(text) != normalize_for_match(source))
                 {
-                    return Err("百度返回的原文与文字块不匹配，请重试".into());
+                    return Err(BatchError::Alignment(
+                        "百度返回的原文与文字块不匹配，请重试".into(),
+                    ));
                 }
                 value
                     .get("dst")
                     .and_then(Value::as_str)
                     .filter(|text| !text.trim().is_empty())
                     .map(str::to_owned)
-                    .ok_or_else(|| "百度返回了空译文".into())
+                    .ok_or_else(|| BatchError::Fatal("百度返回了空译文".into()))
             })
             .collect();
     }
     let values = value
         .get("translations")
         .and_then(Value::as_array)
-        .ok_or("DeepL 未返回译文，请检查套餐和 Key")?;
+        .ok_or_else(|| BatchError::Fatal("DeepL 未返回译文，请检查套餐和 Key".into()))?;
     if values.len() != texts.len() {
-        return Err("DeepL 返回的文字块数量不匹配，请重试".into());
+        return Err(BatchError::Fatal(
+            "DeepL 返回的文字块数量不匹配，请重试".into(),
+        ));
     }
     values
         .iter()
@@ -86,9 +166,17 @@ pub(super) fn parse_batch(
                 .and_then(Value::as_str)
                 .filter(|text| !text.trim().is_empty())
                 .map(str::to_owned)
-                .ok_or_else(|| "DeepL 返回了空译文".into())
+                .ok_or_else(|| BatchError::Fatal("DeepL 返回了空译文".into()))
         })
         .collect()
+}
+
+pub(super) fn parse_batch(
+    provider: Provider,
+    value: &Value,
+    texts: &[String],
+) -> Result<Vec<String>, String> {
+    parse_batch_detailed(provider, value, texts).map_err(BatchError::into_message)
 }
 
 pub(super) fn validate(request: &BlockTranslationRequest) -> Result<(), String> {
@@ -117,10 +205,12 @@ pub(super) fn batches(jobs: Vec<(usize, String)>, provider: Provider) -> Vec<Vec
     let mut output = Vec::new();
     let mut batch = Vec::new();
     let mut characters = 0;
+    let max_items = if provider == Provider::Baidu { 25 } else { 50 };
     for job in jobs {
         let length = job.1.chars().count();
         if !batch.is_empty()
-            && (batch.len() >= 50 || (provider == Provider::Baidu && characters + 1 + length > 900))
+            && (batch.len() >= max_items
+                || (provider == Provider::Baidu && characters + 1 + length > 900))
         {
             output.push(std::mem::take(&mut batch));
             characters = 0;
@@ -144,6 +234,84 @@ async fn baidu_rate_limit() {
         tokio::time::sleep_until(*next).await;
     }
     *next = tokio::time::Instant::now() + Duration::from_secs(1);
+}
+
+pub(super) async fn resolve_baidu_batches<F, Fut>(
+    batch: &[(usize, String)],
+    mut fetch: F,
+) -> Result<Vec<(usize, String)>, String>
+where
+    F: FnMut(Vec<String>) -> Fut,
+    Fut: std::future::Future<Output = Result<Value, String>>,
+{
+    let mut pending = vec![batch.to_vec()];
+    let mut resolved = Vec::with_capacity(batch.len());
+    while let Some(current) = pending.pop() {
+        let texts = current
+            .iter()
+            .map(|(_, text)| text.clone())
+            .collect::<Vec<_>>();
+        let value = fetch(texts.clone()).await?;
+        match parse_batch_detailed(Provider::Baidu, &value, &texts) {
+            Ok(results) => {
+                for ((index, _), translated_text) in current.into_iter().zip(results) {
+                    resolved.push((index, translated_text));
+                }
+            }
+            Err(BatchError::Alignment(_)) if current.len() > 1 => {
+                let mid = current.len() / 2;
+                let right = current[mid..].to_vec();
+                let left = current[..mid].to_vec();
+                tracing::warn!(
+                    target: "dock_mapper::translation",
+                    batch_len = current.len(),
+                    "百度翻译批次段落不匹配，自动二分降级重试"
+                );
+                pending.push(right);
+                pending.push(left);
+            }
+            Err(error) => return Err(format!("解析译文：{}", error.into_message())),
+        }
+    }
+    Ok(resolved)
+}
+
+async fn translate_baidu_slice(
+    client: &reqwest::Client,
+    config: &TranslationConfig,
+    key: &str,
+    source: &str,
+    target: &str,
+    batch: &[(usize, String)],
+) -> Result<Vec<(usize, String)>, String> {
+    resolve_baidu_batches(batch, |texts| async move {
+        baidu_rate_limit().await;
+        static NEXT_SALT: AtomicU64 = AtomicU64::new(1);
+        let salt = format!(
+            "{}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+            NEXT_SALT.fetch_add(1, Ordering::Relaxed)
+        );
+        let text = texts.join("\n");
+        let sign = baidu_sign(&config.baidu_app_id, &text, &salt, key);
+        let http = client
+            .post("https://fanyi-api.baidu.com/api/trans/vip/translate")
+            .form(&[
+                ("q", text.as_str()),
+                ("from", source),
+                ("to", target),
+                ("appid", config.baidu_app_id.as_str()),
+                ("salt", salt.as_str()),
+                ("sign", sign.as_str()),
+            ]);
+        send(http, Provider::Baidu)
+            .await
+            .map_err(|error| format!("翻译请求：{error}"))
+    })
+    .await
 }
 
 async fn run(
@@ -180,60 +348,50 @@ async fn run(
             parts.push(part);
         }
     }
-    let jobs = parts
-        .iter()
-        .enumerate()
-        .filter(|(_, part)| !part.text.trim().is_empty())
-        .map(|(index, part)| (index, part.text.clone()))
-        .collect();
+    let mut translated = vec![String::new(); parts.len()];
+    let mut jobs = Vec::new();
+    for (index, part) in parts.iter().enumerate() {
+        if part.text.trim().is_empty() {
+            continue;
+        }
+        if request.provider == Provider::Baidu {
+            let cleaned = sanitize_baidu_line(&part.text);
+            if cleaned.is_empty() || !needs_translation(&cleaned) {
+                translated[index] = part.text.clone();
+            } else {
+                jobs.push((index, cleaned));
+            }
+        } else {
+            jobs.push((index, part.text.clone()));
+        }
+    }
     let source = language_code(request.provider, request.source, false);
     let target = language_code(request.provider, request.target, true);
-    let mut translated = vec![String::new(); parts.len()];
     for batch in batches(jobs, request.provider) {
+        if request.provider == Provider::Baidu {
+            for (index, text) in
+                translate_baidu_slice(&client, config, key, source, target, &batch).await?
+            {
+                translated[index] = text;
+            }
+            continue;
+        }
         let texts = batch
             .iter()
             .map(|(_, text)| text.clone())
             .collect::<Vec<_>>();
-        let http = match request.provider {
-            Provider::Baidu => {
-                baidu_rate_limit().await;
-                static NEXT_SALT: AtomicU64 = AtomicU64::new(1);
-                let salt = format!(
-                    "{}-{}",
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_nanos(),
-                    NEXT_SALT.fetch_add(1, Ordering::Relaxed)
-                );
-                let text = texts.join("\n");
-                let sign = baidu_sign(&config.baidu_app_id, &text, &salt, key);
-                client
-                    .post("https://fanyi-api.baidu.com/api/trans/vip/translate")
-                    .form(&[
-                        ("q", text.as_str()),
-                        ("from", source),
-                        ("to", target),
-                        ("appid", config.baidu_app_id.as_str()),
-                        ("salt", salt.as_str()),
-                        ("sign", sign.as_str()),
-                    ])
-            }
-            Provider::Deepl => {
-                let mut payload = json!({"text":texts,"target_lang":target});
-                if request.source != Language::Auto {
-                    payload["source_lang"] = json!(source);
-                }
-                client
-                    .post(if config.deepl_free {
-                        "https://api-free.deepl.com/v2/translate"
-                    } else {
-                        "https://api.deepl.com/v2/translate"
-                    })
-                    .header("Authorization", format!("DeepL-Auth-Key {key}"))
-                    .json(&payload)
-            }
-        };
+        let mut payload = json!({"text":texts,"target_lang":target});
+        if request.source != Language::Auto {
+            payload["source_lang"] = json!(source);
+        }
+        let http = client
+            .post(if config.deepl_free {
+                "https://api-free.deepl.com/v2/translate"
+            } else {
+                "https://api.deepl.com/v2/translate"
+            })
+            .header("Authorization", format!("DeepL-Auth-Key {key}"))
+            .json(&payload);
         let value = send(http, request.provider)
             .await
             .map_err(|error| format!("翻译请求：{error}"))?;

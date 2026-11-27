@@ -1,11 +1,11 @@
-use crate::diagnostics::{redact_sensitive_text, DiagnosticsState};
+use crate::diagnostics::{redact_sensitive_text, DiagnosticsState, SharedLogWriter};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
     io::{Read, Seek, SeekFrom},
-    path::Path,
+    path::{Path, PathBuf},
 };
-use tauri::State;
+use tauri::{AppHandle, Manager};
 const MAX_BYTES: usize = 256 * 1024;
 const MAX_LINES: usize = 500;
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -186,11 +186,23 @@ fn read_recent(root: &Path, max_bytes: usize, max_lines: usize) -> Result<LogSna
         truncated,
     })
 }
+async fn resolve_diagnostics(app: &AppHandle) -> Result<(PathBuf, SharedLogWriter), String> {
+    if let Some(diagnostics) = app.try_state::<DiagnosticsState>() {
+        return Ok((diagnostics.log_dir.clone(), diagnostics.writer.clone()));
+    }
+    if let Some(bootstrap) = app.try_state::<crate::defaults_bootstrap::BootstrapState>() {
+        bootstrap
+            .wait_for_setup(std::time::Duration::from_secs(10))
+            .await?;
+    }
+    app.try_state::<DiagnosticsState>()
+        .map(|diagnostics| (diagnostics.log_dir.clone(), diagnostics.writer.clone()))
+        .ok_or_else(|| "运行日志状态尚未初始化，请稍后重试".to_string())
+}
+
 #[tauri::command]
-pub async fn get_runtime_logs(
-    diagnostics: State<'_, DiagnosticsState>,
-) -> Result<LogSnapshot, String> {
-    let root = diagnostics.log_dir.clone();
+pub async fn get_runtime_logs(app: AppHandle) -> Result<LogSnapshot, String> {
+    let (root, _) = resolve_diagnostics(&app).await?;
     tokio::task::spawn_blocking(move || read_recent(&root, MAX_BYTES, MAX_LINES))
         .await
         .map_err(|error| format!("日志读取任务失败：{error}"))?
@@ -241,20 +253,16 @@ fn clear_stored_logs(root: &Path) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn get_runtime_log_text(
-    diagnostics: State<'_, DiagnosticsState>,
-) -> Result<String, String> {
-    let root = diagnostics.log_dir.clone();
-    let writer = diagnostics.writer.clone();
+pub async fn get_runtime_log_text(app: AppHandle) -> Result<String, String> {
+    let (root, writer) = resolve_diagnostics(&app).await?;
     tokio::task::spawn_blocking(move || writer.exclusive(|| all_log_text(&root)))
         .await
         .map_err(|error| format!("日志复制读取任务失败：{error}"))?
 }
 
 #[tauri::command]
-pub async fn clear_runtime_logs(diagnostics: State<'_, DiagnosticsState>) -> Result<(), String> {
-    let root = diagnostics.log_dir.clone();
-    let writer = diagnostics.writer.clone();
+pub async fn clear_runtime_logs(app: AppHandle) -> Result<(), String> {
+    let (root, writer) = resolve_diagnostics(&app).await?;
     tokio::task::spawn_blocking(move || writer.exclusive(|| clear_stored_logs(&root)))
         .await
         .map_err(|error| format!("日志删除任务失败：{error}"))?
@@ -291,13 +299,13 @@ fn frontend_line(level: LogLevel, source: LogSource, message: &str) -> Result<St
 }
 #[tauri::command]
 pub async fn append_runtime_log(
-    diagnostics: State<'_, DiagnosticsState>,
+    app: AppHandle,
     level: LogLevel,
     source: LogSource,
     message: String,
 ) -> Result<(), String> {
     let line = frontend_line(level, source, &message)?;
-    let writer = diagnostics.writer.clone();
+    let (_, writer) = resolve_diagnostics(&app).await?;
     tokio::task::spawn_blocking(move || writer.write_line(&line))
         .await
         .map_err(|error| format!("日志写入任务失败：{error}"))?

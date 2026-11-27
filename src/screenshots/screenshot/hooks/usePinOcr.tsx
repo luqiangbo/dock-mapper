@@ -4,6 +4,15 @@ import { Button, Spin } from "antd";
 import { invokeCommand } from "../../../api/ipc";
 import type { OcrResult } from "../../../api/screenshotTypes";
 
+const OCR_SELECTION_FONT = '"Microsoft YaHei", "Segoe UI", Arial, sans-serif';
+let sharedOcrMeasureContext: CanvasRenderingContext2D | null = null;
+function getOcrMeasureContext(): CanvasRenderingContext2D | null {
+  if (!sharedOcrMeasureContext && typeof document !== "undefined") {
+    sharedOcrMeasureContext = document.createElement("canvas").getContext("2d");
+  }
+  return sharedOcrMeasureContext;
+}
+
 export function ocrBlockPosition(
   block: OcrResult["blocks"][number],
   width: number,
@@ -21,30 +30,34 @@ export function PinOcrText({
   block,
   width,
   height,
-  lineBreak = false,
+  suffix = "",
 }: {
   block: OcrResult["blocks"][number];
   width: number;
   height: number;
-  lineBreak?: boolean;
+  suffix?: string;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
+  const innerRef = useRef<HTMLSpanElement>(null);
   useLayoutEffect(() => {
     const span = ref.current;
-    if (!span) return;
-    const context = document.createElement("canvas").getContext("2d");
+    const inner = innerRef.current;
+    if (!span || !inner) return;
+    const context = getOcrMeasureContext();
     if (!context) return;
     const fit = () => {
+      const targetWidth = span.clientWidth;
+      const targetHeight = span.clientHeight;
+      if (targetWidth <= 0 || targetHeight <= 0) return;
       const lines = block.text.split("\n");
-      const lineHeight = span.clientHeight / Math.max(1, lines.length);
-      context.font = "100px Arial";
+      const lineHeight = targetHeight / Math.max(1, lines.length);
+      const fontSize = Math.max(1, lineHeight * 0.86);
+      context.font = `${fontSize}px ${OCR_SELECTION_FONT}`;
       const measured = Math.max(1, ...lines.map((line) => context.measureText(line).width));
-      const fontSize = Math.max(
-        0.1,
-        Math.min(lineHeight * 0.9, (span.clientWidth * 100) / measured),
-      );
-      span.style.fontSize = fontSize + "px";
-      span.style.lineHeight = lineHeight + "px";
+      const scaleX = Math.max(0.35, Math.min(2.2, targetWidth / measured));
+      span.style.fontSize = `${fontSize}px`;
+      span.style.lineHeight = `${lineHeight}px`;
+      inner.style.transform = `scaleX(${scaleX})`;
     };
     fit();
     const observer = new ResizeObserver(fit);
@@ -58,10 +71,10 @@ export function PinOcrText({
       style={{
         position: "absolute",
         ...ocrBlockPosition(block, width, height),
-        fontFamily: "Arial",
+        fontFamily: OCR_SELECTION_FONT,
         color: "transparent",
         whiteSpace: "pre",
-        overflow: "hidden",
+        overflow: "visible",
         cursor: "text",
         userSelect: "text",
       }}
@@ -72,8 +85,16 @@ export function PinOcrText({
         if (!event.altKey) event.stopPropagation();
       }}
     >
-      {block.text}
-      {lineBreak ? "\n" : ""}
+      <span
+        ref={innerRef}
+        style={{
+          display: "inline-block",
+          transformOrigin: "0 0",
+        }}
+      >
+        {block.text}
+        {suffix}
+      </span>
     </span>
   );
 }

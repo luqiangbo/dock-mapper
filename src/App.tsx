@@ -1,10 +1,12 @@
 import { loadView } from "./utils/loadView";
 import {
   lazy,
+  memo,
   Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -15,7 +17,6 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   App as AntApp,
   Button,
-  Grid,
   Layout,
   Menu,
   Splitter,
@@ -34,10 +35,8 @@ import {
   MoonOutlined,
   SettingOutlined,
   SunOutlined,
-  MinusOutlined,
-  BorderOutlined,
-  CloseOutlined,
 } from "@ant-design/icons";
+import { Maximize2, Minimize2, Minus, X } from "lucide-react";
 import { useTheme } from "./ThemeContext";
 import appIcon from "./assets/app-icon.png";
 import styles from "./App.module.scss";
@@ -102,6 +101,132 @@ const menuItem = ({ key, label, icon }: PageItem) => ({
   icon,
 });
 
+const WindowControls = memo(function WindowControls() {
+  const { notification } = AntApp.useApp();
+  const [windowMaximized, setWindowMaximized] = useState(false);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    let timer: number | undefined;
+    let checking = false;
+    let queued = false;
+    const checkMaximized = () => {
+      if (disposed) return;
+      if (checking) {
+        queued = true;
+        return;
+      }
+      checking = true;
+      void getCurrentWindow()
+        .isMaximized()
+        .then((maximized) => {
+          if (!disposed) setWindowMaximized(maximized);
+        })
+        .catch((error) => console.warn("同步窗口最大化状态失败", error))
+        .finally(() => {
+          checking = false;
+          if (queued && !disposed) {
+            queued = false;
+            checkMaximized();
+          }
+        });
+    };
+    const scheduleSync = () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        checkMaximized();
+      }, 60);
+    };
+    checkMaximized();
+    void getCurrentWindow()
+      .onResized(scheduleSync)
+      .then((off) => {
+        if (disposed) off();
+        else unlisten = off;
+      })
+      .catch((error) => console.warn("监听窗口缩放状态失败", error));
+    return () => {
+      disposed = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+      unlisten?.();
+    };
+  }, []);
+
+  return (
+    <div className={styles.windowControls}>
+      <Button
+        type="text"
+        icon={<Minus size={15} strokeWidth={2} aria-hidden="true" />}
+        aria-label="最小化窗口"
+        title="最小化"
+        onClick={() =>
+          void getCurrentWindow()
+            .minimize()
+            .catch((error) =>
+              notification.error({ message: "最小化失败", description: String(error) }),
+            )
+        }
+      />
+      <Button
+        type="text"
+        icon={
+          windowMaximized ? (
+            <Minimize2 size={15} strokeWidth={2} aria-hidden="true" />
+          ) : (
+            <Maximize2 size={15} strokeWidth={2} aria-hidden="true" />
+          )
+        }
+        aria-label={windowMaximized ? "还原窗口" : "最大化窗口"}
+        title={windowMaximized ? "还原窗口" : "最大化窗口"}
+        onClick={() =>
+          void toggleMainWindowMaximize()
+            .then(() => getCurrentWindow().isMaximized())
+            .then((maximized) => setWindowMaximized(maximized))
+            .catch((error) =>
+              notification.error({
+                message: "调整窗口失败",
+                description: String(error),
+              }),
+            )
+        }
+      />
+      <Button
+        type="text"
+        danger
+        icon={<X size={15} strokeWidth={2} aria-hidden="true" />}
+        aria-label="关闭窗口"
+        title="关闭"
+        onClick={() =>
+          void getCurrentWindow()
+            .close()
+            .catch((error) =>
+              notification.error({
+                message: "关闭窗口失败",
+                description: String(error),
+              }),
+            )
+        }
+      />
+    </div>
+  );
+});
+
+const PAGE_FALLBACK = (
+  <Spin tip="正在加载页面…">
+    <div style={{ minHeight: 160 }} />
+  </Spin>
+);
+
+const STATIC_PAGES: Record<Exclude<PageKey, "screenshot">, ReactNode> = {
+  dashboard: <ConnectedDashboard />,
+  keymapper: <KeyMapper />,
+  keyvisualizer: <KeyVisualizerSettings />,
+  widget: <WidgetSettings />,
+  settings: <GeneralSettings />,
+};
+
 export default function App() {
   const { notification } = AntApp.useApp();
   useEffect(() => {
@@ -151,7 +276,6 @@ export default function App() {
       off?.();
     };
   }, [notification]);
-  const screens = Grid.useBreakpoint();
   const compactNavigation = useCompactNavigation();
   const [initialNavigation] = useState(loadNavigationPreferences);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -260,24 +384,29 @@ export default function App() {
   }, [activePage]);
 
   const currentPage = PAGES.find((page) => page.key === activePage) ?? PAGES[0];
-  const renderPage = (key: PageKey) => {
-    switch (key) {
-      case "keymapper":
-        return <KeyMapper />;
-      case "screenshot":
-        return (
-          <ScreenshotSettings activeTab={screenshotTab} onActiveTabChange={setScreenshotTab} />
-        );
-      case "widget":
-        return <WidgetSettings />;
-      case "keyvisualizer":
-        return <KeyVisualizerSettings />;
-      case "settings":
-        return <GeneralSettings />;
-      default:
-        return <ConnectedDashboard />;
-    }
-  };
+  const screenshotPage = useMemo(
+    () => (
+      <ScreenshotSettings activeTab={screenshotTab} onActiveTabChange={setScreenshotTab} />
+    ),
+    [screenshotTab],
+  );
+  const tabItems = useMemo(
+    () =>
+      PAGES.map(({ key, label }) => ({
+        key,
+        label,
+        children: (
+          <PageScope active={activePage === key}>
+            <PageBoundary pageKey={key}>
+              <Suspense fallback={PAGE_FALLBACK}>
+                {key === "screenshot" ? screenshotPage : STATIC_PAGES[key]}
+              </Suspense>
+            </PageBoundary>
+          </PageScope>
+        ),
+      })),
+    [activePage, screenshotPage],
+  );
 
   return (
     <>
@@ -289,7 +418,10 @@ export default function App() {
         className={styles.shell}
         orientation="horizontal"
         onResize={(sizes) => {
-          if (!compactNavigation && typeof sizes[0] === "number") setSiderWidth(sizes[0]);
+          if (!compactNavigation && typeof sizes[0] === "number") {
+            const next = Math.round(sizes[0]);
+            setSiderWidth((previous) => (previous === next ? previous : next));
+          }
         }}
       >
         <Splitter.Panel
@@ -335,16 +467,15 @@ export default function App() {
               </div>
               <div className={styles.dragRegion} data-tauri-drag-region />
               <div className={styles.headerActions}>
-                {screens.md && (
-                  <Tooltip title="打开 GitHub">
-                    <Button
-                      aria-label="打开 GitHub"
-                      icon={<GithubOutlined />}
-                      type="text"
-                      onClick={() => void openUrl(REPOSITORY_URL)}
-                    />
-                  </Tooltip>
-                )}
+                <Tooltip title="打开 GitHub">
+                  <Button
+                    className={styles.githubAction}
+                    aria-label="打开 GitHub"
+                    icon={<GithubOutlined />}
+                    type="text"
+                    onClick={() => void openUrl(REPOSITORY_URL)}
+                  />
+                </Tooltip>
                 <Tooltip title={resolved === "dark" ? "切换浅色" : "切换深色"}>
                   <Button
                     aria-label="切换主题"
@@ -353,52 +484,7 @@ export default function App() {
                     onClick={() => setMode(resolved === "dark" ? "light" : "dark")}
                   />
                 </Tooltip>
-                <div className={styles.windowControls}>
-                  <Button
-                    type="text"
-                    icon={<MinusOutlined />}
-                    aria-label="最小化窗口"
-                    title="最小化"
-                    onClick={() =>
-                      void getCurrentWindow()
-                        .minimize()
-                        .catch((error) =>
-                          notification.error({ message: "最小化失败", description: String(error) }),
-                        )
-                    }
-                  />
-                  <Button
-                    type="text"
-                    icon={<BorderOutlined />}
-                    aria-label="最大化或还原窗口"
-                    title="最大化或还原"
-                    onClick={() =>
-                      void toggleMainWindowMaximize().catch((error) =>
-                        notification.error({
-                          message: "调整窗口失败",
-                          description: String(error),
-                        }),
-                      )
-                    }
-                  />
-                  <Button
-                    type="text"
-                    danger
-                    icon={<CloseOutlined />}
-                    aria-label="关闭窗口"
-                    title="关闭"
-                    onClick={() =>
-                      void getCurrentWindow()
-                        .close()
-                        .catch((error) =>
-                          notification.error({
-                            message: "关闭窗口失败",
-                            description: String(error),
-                          }),
-                        )
-                    }
-                  />
-                </div>
+                <WindowControls />
               </div>
             </Header>
             <Content
@@ -416,25 +502,7 @@ export default function App() {
                   destroyOnHidden={false}
                   renderTabBar={() => <></>}
                   animated={false}
-                  items={PAGES.map(({ key, label }) => ({
-                    key,
-                    label,
-                    children: (
-                      <PageScope active={activePage === key}>
-                        <PageBoundary pageKey={key}>
-                          <Suspense
-                            fallback={
-                              <Spin tip="正在加载页面…">
-                                <div style={{ minHeight: 160 }} />
-                              </Spin>
-                            }
-                          >
-                            {renderPage(key)}
-                          </Suspense>
-                        </PageBoundary>
-                      </PageScope>
-                    ),
-                  }))}
+                  items={tabItems}
                 />
               </div>
             </Content>

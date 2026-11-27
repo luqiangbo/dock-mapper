@@ -4,10 +4,10 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   X,
-  Maximize,
-  Minimize,
-  Plus,
-  Minus,
+  Maximize2,
+  Minimize2,
+  ZoomIn,
+  ZoomOut,
   Scan,
   Square,
   ChevronLeft,
@@ -255,7 +255,7 @@ export default function HistoryPreview() {
               disabled={!image}
               onClick={() => zoom(1 / 1.2)}
             >
-              <Minus />
+              <ZoomOut />
             </Button>
             <output aria-label="缩放比例">
               {image ? `${(view.scale * 100).toFixed(view.scale < 0.1 ? 1 : 0)}%` : "—"}
@@ -267,7 +267,7 @@ export default function HistoryPreview() {
               disabled={!image}
               onClick={() => zoom(1.2)}
             >
-              <Plus />
+              <ZoomIn />
             </Button>
             <Button
               type="text"
@@ -296,7 +296,7 @@ export default function HistoryPreview() {
               disabled={windowBusy}
               onClick={() => void windowAction("fullscreen")}
             >
-              {fullscreen ? <Minimize /> : <Maximize />}
+              {fullscreen ? <Minimize2 /> : <Maximize2 />}
             </Button>
           </div>
           <Button

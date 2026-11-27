@@ -364,25 +364,25 @@ pub struct ScreenshotToolbarTool {
 
 pub fn default_screenshot_toolbar_tools() -> Vec<ScreenshotToolbarTool> {
     [
-        "select",
         "rect",
         "arrow",
-        "pen",
         "text",
         "mosaic",
-        "ellipse",
-        "diamond",
+        "pen",
         "highlight",
         "translate",
-        "picker",
         "number",
+        "ellipse",
+        "diamond",
+        "picker",
         "eraser",
+        "select",
     ]
     .into_iter()
     .enumerate()
     .map(|(index, id)| ScreenshotToolbarTool {
         id: id.into(),
-        visible: index < 6 || id == "translate",
+        visible: index < 7,
     })
     .collect()
 }
@@ -430,7 +430,7 @@ mod screenshot_toolbar_tests {
             .toolbar_tools
             .iter()
             .all(|t| t.id != "spotlight" && t.id != "magnifier" && t.id != "line"));
-        assert_eq!(config.toolbar_tools[0].id, "select");
+        assert_eq!(config.toolbar_tools[0].id, "rect");
     }
     #[test]
     fn wheel_width_seven_survives_normalization_and_reopening() {
@@ -479,12 +479,12 @@ mod screenshot_toolbar_tests {
                 .map(|tool| tool.id.as_str())
                 .collect::<Vec<_>>(),
             vec![
-                "select",
                 "rect",
                 "arrow",
-                "pen",
                 "text",
                 "mosaic",
+                "pen",
+                "highlight",
                 "translate"
             ]
         );
@@ -492,7 +492,12 @@ mod screenshot_toolbar_tests {
     #[test]
     fn tool_order_and_visibility_survive_save_and_read() {
         let mut config = ScreenshotConfig::default();
-        config.toolbar_tools.swap(0, 6);
+        let ellipse_index = config
+            .toolbar_tools
+            .iter()
+            .position(|tool| tool.id == "ellipse")
+            .unwrap();
+        config.toolbar_tools.swap(0, ellipse_index);
         config.toolbar_tools[0].visible = true;
         config.toolbar_tools[1].visible = false;
         normalize_screenshot_config(&mut config);

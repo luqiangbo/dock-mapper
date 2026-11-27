@@ -8,15 +8,23 @@ import {
 } from "./screenshotTools";
 
 describe("常用截图工具", () => {
-  it("旧配置默认显示原有六个常用工具", () => {
+  it("默认按高频优先顺序显示七个常用工具，其余折叠到更多", () => {
     expect(screenshotToolbarGroups().main).toEqual([
-      "select",
       "rect",
       "arrow",
-      "pen",
       "text",
       "mosaic",
+      "pen",
+      "highlight",
       "translate",
+    ]);
+    expect(screenshotToolbarGroups().more).toEqual([
+      "number",
+      "ellipse",
+      "diamond",
+      "picker",
+      "eraser",
+      "select",
     ]);
     expect(normalizeScreenshotTools()).toHaveLength(defaultScreenshotTools().length);
   });
@@ -32,12 +40,12 @@ describe("常用截图工具", () => {
     expect(screenshotToolbarGroups(next).main[0]).toBe("ellipse");
     expect(screenshotToolbarGroups(next).main).not.toContain("rect");
     expect(screenshotToolbarGroups(next).more).toContain("rect");
-    expect(tools[0].id).toBe("select");
+    expect(tools[0].id).toBe("rect");
   });
   it("相同位置不写新顺序，非法与重复工具被剔除，缺少项补齐", () => {
     const tools = defaultScreenshotTools();
-    expect(moveScreenshotTool(tools, "select", 0)).toBe(tools);
-    expect(moveScreenshotTool(tools, "select", -1)).toBe(tools);
+    expect(moveScreenshotTool(tools, "rect", 0)).toBe(tools);
+    expect(moveScreenshotTool(tools, "rect", -1)).toBe(tools);
     const next = normalizeScreenshotTools([
       { id: "pen", visible: false },
       { id: "pen", visible: true },
@@ -46,7 +54,7 @@ describe("常用截图工具", () => {
     expect(next).toHaveLength(defaultScreenshotTools().length);
     expect(next[0]).toEqual({ id: "pen", visible: false });
   });
-  it("全部隐藏时更多仍包含所有编辑工具，恢复默认重新显示六项", () => {
+  it("全部隐藏时更多仍包含所有编辑工具，恢复默认重新显示七项", () => {
     const hidden = defaultScreenshotTools().map((tool) => ({ ...tool, visible: false }));
     expect(screenshotToolbarGroups(hidden).main).toHaveLength(0);
     expect(screenshotToolbarGroups(hidden).more).toHaveLength(defaultScreenshotTools().length);

@@ -1,5 +1,5 @@
 import TranslationSettings from "./TranslationSettings";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { captureStartup } from "./captureStartupRuntime";
 import { captureStarting } from "./captureStartup";
 import { listen } from "@tauri-apps/api/event";
@@ -10,7 +10,6 @@ import {
   Card,
   Col,
   Form,
-  Grid,
   Input,
   Row,
   Select,
@@ -20,6 +19,7 @@ import {
   Tag,
   Typography,
 } from "antd";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import type { ScreenshotConfig, ShortcutRuntimeStatus } from "../types";
 import styles from "./components.module.scss";
 import ScreenshotHistory from "./ScreenshotHistory";
@@ -62,7 +62,7 @@ const shortcutFields: Array<
 ];
 const shortcutNames = SCREENSHOT_SHORTCUT_FIELDS;
 
-export default function ScreenshotSettings({
+function ScreenshotSettings({
   activeTab,
   onActiveTabChange,
 }: ScreenshotSettingsProps) {
@@ -75,7 +75,7 @@ export default function ScreenshotSettings({
   const statusReads = usePageReadGuard();
   const loaded = useRef(false);
   const { notification } = AntApp.useApp();
-  const screens = Grid.useBreakpoint();
+  const isLg = useMediaQuery("(min-width: 992px)");
   const [form] = Form.useForm<ScreenshotConfig>();
   const [saved, setSaved] = useState<ScreenshotConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -373,7 +373,7 @@ export default function ScreenshotSettings({
               }
             />
           </Form.Item>
-          <Row gutter={screens.lg ? 16 : 12}>
+          <Row gutter={isLg ? 16 : 12}>
             <Col xs={24} lg={12}>
               <Form.Item name="color_copy_format" label="取色复制格式">
                 <Select
@@ -495,3 +495,5 @@ export default function ScreenshotSettings({
     </div>
   );
 }
+
+export default memo(ScreenshotSettings);

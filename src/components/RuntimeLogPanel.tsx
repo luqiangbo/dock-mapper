@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   Alert,
   App as AntApp,
@@ -12,6 +12,7 @@ import {
   Typography,
 } from "antd";
 import { invokeCommand } from "../api/ipc";
+import type { RuntimeLogSnapshot } from "../api/runtimeLogs";
 import { errorMessage } from "../api/commands";
 import { createLogPoller, type LogReadState } from "./runtimeLogPolling";
 import { runtimeLogWriter } from "./runtimeLogging";
@@ -19,7 +20,45 @@ import styles from "./components.module.scss";
 import { usePageActive } from "./PageActivity";
 
 const LEVELS = { info: "信息", warn: "警告", error: "错误" };
-export default function RuntimeLogPanel() {
+const LOG_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
+
+function formatLogTimestamp(timestamp: string) {
+  if (!timestamp) return "";
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? timestamp : LOG_TIME_FORMATTER.format(date);
+}
+
+function sameLogSnapshot(
+  previous: RuntimeLogSnapshot | null,
+  next: RuntimeLogSnapshot | null,
+): boolean {
+  if (previous === next) return true;
+  if (!previous || !next) return false;
+  if (previous.truncated !== next.truncated || previous.lines.length !== next.lines.length) {
+    return false;
+  }
+  const count = previous.lines.length;
+  if (count === 0) return true;
+  const firstPrev = previous.lines[0];
+  const firstNext = next.lines[0];
+  const lastPrev = previous.lines[count - 1];
+  const lastNext = next.lines[count - 1];
+  return (
+    firstPrev.id === firstNext.id &&
+    lastPrev.id === lastNext.id &&
+    lastPrev.message === lastNext.message
+  );
+}
+
+function RuntimeLogPanel() {
   const active = usePageActive();
   const activeRef = useRef(active);
   activeRef.current = active;
@@ -43,17 +82,28 @@ export default function RuntimeLogPanel() {
     const controller = createLogPoller(
       () => invokeCommand("get_runtime_logs"),
       (next) => {
-        const node = host.current;
-        if (node && !followRef.current) {
-          const top = node.getBoundingClientRect().top;
-          const first = [...node.querySelectorAll<HTMLElement>("[data-log-id]")].find(
-            (row) => row.getBoundingClientRect().bottom > top,
-          );
-          anchor.current = first
-            ? { id: first.dataset.logId!, top: first.getBoundingClientRect().top - top }
-            : null;
-        }
-        setState(next);
+        setState((previous) => {
+          const snapshotUnchanged = sameLogSnapshot(previous.snapshot, next.snapshot);
+          const snapshot = snapshotUnchanged ? previous.snapshot : next.snapshot;
+          if (!snapshotUnchanged && host.current && !followRef.current) {
+            const node = host.current;
+            const top = node.getBoundingClientRect().top;
+            const first = [...node.querySelectorAll<HTMLElement>("[data-log-id]")].find(
+              (row) => row.getBoundingClientRect().bottom > top,
+            );
+            anchor.current = first
+              ? { id: first.dataset.logId!, top: first.getBoundingClientRect().top - top }
+              : null;
+          }
+          if (
+            snapshot === previous.snapshot &&
+            previous.loading === next.loading &&
+            previous.error === next.error
+          ) {
+            return previous;
+          }
+          return { snapshot, loading: next.loading, error: next.error };
+        });
       },
     );
     poller.current = controller;
@@ -212,7 +262,7 @@ export default function RuntimeLogPanel() {
         ) : lines.length ? (
           lines.map((line) => (
             <div key={line.id} data-log-id={line.id} className={styles.logLine}>
-              <time>{line.timestamp ? new Date(line.timestamp).toLocaleString("zh-CN") : ""}</time>
+              <time>{formatLogTimestamp(line.timestamp)}</time>
               <span
                 className={
                   line.level === "error"
@@ -240,3 +290,5 @@ export default function RuntimeLogPanel() {
     </Card>
   );
 }
+
+export default memo(RuntimeLogPanel);

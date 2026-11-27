@@ -117,7 +117,7 @@ export default function WorkspaceScrollRuler({
       hidden={!visible}
       data-active={visible && activity.active}
       data-expanded={visible && activity.expanded}
-      data-motion={visible && motionVisible && !resizing}
+      data-motion={visible && motionVisible && !resizing && activity.active}
       aria-label="页面滚动位置"
       onPointerEnter={() => interaction.set("hovered", true)}
       onPointerLeave={() => interaction.set("hovered", false)}

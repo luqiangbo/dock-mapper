@@ -30,7 +30,7 @@ export function createWindowResizeActivity(settleMs = 200) {
   };
 }
 
-export const windowResizeActivity = createWindowResizeActivity();
+export const windowResizeActivity = createWindowResizeActivity(80);
 
 /** Coalesce data and geometry changes; read the latest inputs when flushing. */
 export function createSettledRenderQueue(

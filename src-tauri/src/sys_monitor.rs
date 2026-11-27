@@ -80,6 +80,7 @@ pub fn start_sys_monitor(app: AppHandle) -> Result<(), String> {
         let mut memory_usage = 0.0;
         let mut cpu_usage = None;
         let mut battery = None;
+        let mut last_visible_main_emit: Option<Instant> = None;
         let mut last_hidden_main_emit: Option<Instant> = None;
         let mut last_network_error = None;
         let mut previously_visible = false;
@@ -118,10 +119,18 @@ pub fn start_sys_monitor(app: AppHandle) -> Result<(), String> {
             }
             let payload = SysStatusPayload { upload_speed, download_speed, network_available, memory_usage, cpu_usage, battery: battery.clone() };
             let widget_visible = emit_if_visible(&app, "taskbar_widget", payload.clone());
-            let main_visible = emit_to_main(&app, payload, now, &mut last_hidden_main_emit);
+            let main_visible = emit_to_main(
+                &app,
+                payload,
+                now,
+                &mut last_visible_main_emit,
+                &mut last_hidden_main_emit,
+            );
             metrics.record(sample_started.elapsed());
-            let interval = if widget_visible || main_visible {
+            let interval = if widget_visible {
                 Duration::from_millis(500)
+            } else if main_visible {
+                Duration::from_secs(1)
             } else {
                 Duration::from_secs(10)
             };
@@ -170,17 +179,20 @@ fn emit_to_main(
     app: &AppHandle,
     payload: SysStatusPayload,
     now: Instant,
+    last_visible_emit: &mut Option<Instant>,
     last_hidden_emit: &mut Option<Instant>,
 ) -> bool {
     let Some(window) = app.get_webview_window("main") else {
         return false;
     };
     let visible = window.is_visible().unwrap_or(false);
-    if should_emit_main_telemetry(visible, *last_hidden_emit, now) {
+    if should_emit_main_telemetry(visible, *last_visible_emit, *last_hidden_emit, now) {
         if let Err(error) = window.emit("sys-status-update", payload) {
             tracing::warn!(target: "dock_mapper::monitor", %error, "main window telemetry delivery failed");
         }
-        if !visible {
+        if visible {
+            *last_visible_emit = Some(now);
+        } else {
             *last_hidden_emit = Some(now);
         }
     }
@@ -189,11 +201,15 @@ fn emit_to_main(
 
 fn should_emit_main_telemetry(
     visible: bool,
+    last_visible_emit: Option<Instant>,
     last_hidden_emit: Option<Instant>,
     now: Instant,
 ) -> bool {
-    visible
-        || last_hidden_emit.is_none_or(|last| now.duration_since(last) >= Duration::from_secs(10))
+    if visible {
+        last_visible_emit.is_none_or(|last| now.duration_since(last) >= Duration::from_secs(1))
+    } else {
+        last_hidden_emit.is_none_or(|last| now.duration_since(last) >= Duration::from_secs(10))
+    }
 }
 
 #[cfg(test)]
@@ -223,18 +239,32 @@ mod tests {
     #[test]
     fn hidden_main_keeps_collecting_samples_at_low_frequency() {
         let now = Instant::now();
-        assert!(should_emit_main_telemetry(false, None, now));
+        assert!(should_emit_main_telemetry(false, None, None, now));
         assert!(!should_emit_main_telemetry(
             false,
+            None,
             Some(now),
             now + Duration::from_secs(9)
         ));
         assert!(should_emit_main_telemetry(
             false,
+            None,
             Some(now),
             now + Duration::from_secs(10)
         ));
-        assert!(should_emit_main_telemetry(true, Some(now), now));
+        assert!(should_emit_main_telemetry(true, None, Some(now), now));
+        assert!(!should_emit_main_telemetry(
+            true,
+            Some(now),
+            Some(now),
+            now + Duration::from_millis(500)
+        ));
+        assert!(should_emit_main_telemetry(
+            true,
+            Some(now),
+            Some(now),
+            now + Duration::from_secs(1)
+        ));
     }
 
     #[test]
